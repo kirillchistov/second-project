@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "dev",
+      "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "5188", "--strictPort"],
+      "runtimeArgs": ["run", "dev", "-w", "@rr/web", "--", "--port", "5188", "--strictPort"],
       "port": 5188
     }
   ]

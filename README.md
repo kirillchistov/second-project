@@ -17,7 +17,7 @@
 
 ## Запуск
 
-Нужен Node.js 20.19+ или 22.12+.
+Нужен Node.js 22.18+ (скрипты пакетов запускают `.ts` напрямую).
 
 ```bash
 npm install
@@ -26,36 +26,44 @@ npm run dev
 
 | Команда | Что делает |
 |---|---|
-| `npm run dev` | dev-сервер Vite |
-| `npm run build` | проверка типов и production-сборка в `dist/` |
-| `npm run preview` | локальный просмотр сборки |
-| `npm test` | тесты Vitest (контент, рендер Markdown, подбор вопросов) |
+| `npm run dev` | dev-сервер веб-версии (Vite) |
+| `npm run build` | проверка типов всего монорепо и production-сборка веба в `apps/web/dist/` |
+| `npm test` | тесты Vitest во всех пакетах |
 | `npm run check` | типы + oxlint + тесты |
+| `npm run bundle:content` | JSON-бандл контента для мобильного приложения → `packages/content/dist/content.json` |
 
 ## Как устроен проект
 
+Монорепо на npm workspaces. Контент и логика общие для веба и будущего мобильного приложения.
+
 ```text
-src/
-  content/            вопросы в Markdown: junior-1.md … senior-4.md
-  data/
-    parse.ts          разбор Markdown-файлов в объекты Question
-    questions.ts      загрузка через import.meta.glob, фильтры и поиск
-    topics.ts         уровни и темы
-    legacy.ts         соответствие старым 50 вопросам
-  lib/                тема, таймер, подбор вопросов для собеседования
-  components/         Layout, поиск, Markdown-рендерер, подсветка кода
-  pages/              главная, каталог, вопрос, тренировка, собеседование, о проекте
+apps/
+  web/                  веб-версия: Vite SPA, страницы, компоненты, загрузка вопросов через import.meta.glob
+packages/
+  content/              @rr/content — всё, что можно выучить
+    questions/          вопросы в Markdown: junior-1.md … senior-4.md
+    exercises/          упражнения в YAML, по темам
+    src/
+      parse.ts          разбор Markdown в объекты Question
+      build.ts          сборка и нумерация вопросов (не зависит от бандлера)
+      exercises.ts      Zod-схема упражнений (точка входа @rr/content/exercises)
+      node.ts           загрузка вопросов и упражнений с диска (@rr/content/node)
+      topics.ts, types.ts, legacy.ts
+    scripts/bundle.ts   сборка JSON-бандла с версией-хешем
+  core/                 @rr/core — логика без UI: подбор вопросов, форматирование, режимы таймера
 ```
 
 ### Как добавить или изменить вопрос
 
-Вопросы лежат в `src/content/<level>-<n>.md`. Порядок файлов и вопросов в них задаёт нумерацию.
+Вопросы лежат в `packages/content/questions/<level>-<n>.md`. Порядок файлов и вопросов в них задаёт нумерацию.
 
 ````markdown
 # Текст вопроса?
 @slug kebab-case-id
 @topic hooks
 @legacy 36
+@verified react@19.2
+@updated 2026-10
 
 > Краткий ответ — 2–4 предложения, которые стоит сказать в первые 30 секунд.
 
@@ -71,19 +79,22 @@ src/
 - [Название](https://react.dev/...)
 ````
 
-`@topic` — один из id в `src/data/topics.ts`, `@legacy` — необязательный номер вопроса из старого PDF.
+`@topic` — один из id в `packages/content/src/topics.ts`, `@legacy` — необязательный номер вопроса из старого PDF,
+`@verified` и `@updated` — необязательные: для каких версий и когда материал сверялся с документацией.
 После правок запустите `npm test`: тесты проверят количество вопросов по уровням, уникальность slug,
 обязательные поля, закрытые блоки кода и то, что рендер не оставляет «сырой» Markdown.
 
+### Как добавить упражнение
+
+Упражнения лежат в `packages/content/exercises/<тема>.yaml` — список объектов. Типы: `predict-output`, `find-bug`,
+`parsons`, `fill-tokens`, `order` (`timeline` или `recipe`), `choose-tool`. Поля и проверки описаны в
+`packages/content/src/exercises.ts`. Схема ловит частые ошибки: ответ вне списка вариантов, строка бага за пределами
+кода, число пропусков `___` не совпадает с числом токенов. Примеры каждого типа — в `exercises/hooks.yaml`.
+
 ## Деплой на Vercel
 
-Проект готов к деплою как статическое SPA: Vercel сам определит Vite (`npm run build`, каталог `dist`),
-а `vercel.json` перенаправляет все пути на `index.html`, чтобы прямые ссылки вида `/questions/fiber` открывались.
-
-1. Создать репозиторий и запушить код.
-2. На vercel.com → **Add New → Project** → импортировать репозиторий, настройки оставить по умолчанию.
-
-Или из терминала: `npx vercel` (превью) и `npx vercel --prod`.
+Веб-версия — статическое SPA в `apps/web`. В настройках проекта на Vercel укажите **Root Directory** `apps/web`:
+Vercel сам определит Vite и npm workspaces, а `apps/web/vercel.json` перенаправит все пути на `index.html`.
 
 ## Источники
 

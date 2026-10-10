@@ -1,0 +1,95 @@
+# Упражнения по хукам. Формат и правила проверки — packages/content/src/exercises.ts
+
+- id: effect-cleanup-order
+  type: predict-output
+  skill: effect-lifecycle
+  question: use-effect-basics
+  difficulty: 2
+  prompt: Компонент смонтировали (без StrictMode), затем один раз нажали кнопку. Что будет в консоли?
+  code: |
+    function Counter() {
+      const [n, setN] = useState(0);
+      console.log('render', n);
+
+      useEffect(() => {
+        console.log('effect', n);
+        return () => console.log('cleanup', n);
+      }, [n]);
+
+      return <button onClick={() => setN(n + 1)}>+</button>;
+    }
+  options:
+    - render 0 → effect 0 → render 1 → cleanup 0 → effect 1
+    - render 0 → effect 0 → render 1 → cleanup 1 → effect 1
+    - render 0 → effect 0 → cleanup 0 → render 1 → effect 1
+    - render 0 → effect 0 → render 1 → effect 1
+  answer: 0
+  explanation: >-
+    Сначала новый рендер, затем перед новым эффектом React вызывает cleanup предыдущего.
+    Cleanup — замыкание прошлого рендера, поэтому видит n = 0, а не 1.
+
+- id: hook-after-early-return
+  type: find-bug
+  skill: rules-of-hooks
+  question: rules-of-hooks
+  prompt: Найдите строку, из-за которой компонент сломается, когда user появится после первого рендера.
+  code: |
+    function Profile({ user }: { user?: User }) {
+      if (!user) return null;
+      const [tab, setTab] = useState('info');
+      return <Tabs value={tab} onChange={setTab} />;
+    }
+  bugLines: [2, 3]
+  causes:
+    - Хук вызывается после раннего return — число и порядок хуков меняются между рендерами
+    - useState нельзя инициализировать строкой
+    - setTab нельзя передавать дочернему компоненту
+    - Компонент не может возвращать null
+  answer: 0
+  explanation: >-
+    React сопоставляет состояние хуков по порядку вызова. На первом рендере useState не вызывается,
+    на следующем — вызывается, и React падает с ошибкой «Rendered more hooks than during the previous render».
+    Решение — все хуки до любых условий.
+
+- id: abort-stale-request
+  type: fill-tokens
+  skill: effect-race-conditions
+  question: effect-race-conditions
+  difficulty: 2
+  prompt: Допишите эффект так, чтобы ответ устаревшего запроса не перезаписал данные нового userId.
+  code: |
+    useEffect(() => {
+      const controller = new ___();
+      fetch(`/api/users/${userId}`, { signal: controller.___ })
+        .then((r) => r.json())
+        .then(setUser)
+        .catch((e) => { if (e.name !== 'AbortError') setError(e); });
+      return () => controller.___();
+    }, [___]);
+  tokens: [AbortController, signal, abort, userId]
+  decoys: [AbortSignal, cancel, user, controller]
+  explanation: >-
+    При смене userId React вызывает cleanup прошлого эффекта: abort() отменяет старый запрос,
+    его промис отклоняется с AbortError, и setUser с устаревшими данными не случится.
+
+- id: build-use-debounced-value
+  type: parsons
+  skill: custom-hooks-timers
+  question: custom-hooks
+  difficulty: 2
+  prompt: Соберите хук, который возвращает значение только после паузы в delay мс.
+  lines:
+    - 'function useDebouncedValue<T>(value: T, delay: number): T {'
+    - '  const [debounced, setDebounced] = useState(value);'
+    - '  useEffect(() => {'
+    - '    const id = setTimeout(() => setDebounced(value), delay);'
+    - '    return () => clearTimeout(id);'
+    - '  }, [value, delay]);'
+    - '  return debounced;'
+    - '}'
+  distractors:
+    - '  }, []);'
+    - '    clearTimeout(id);'
+  explanation: >-
+    Каждое изменение value перезапускает эффект, а cleanup отменяет прошлый таймер — значение обновится,
+    только когда ввод стихнет. С пустым массивом зависимостей хук навсегда запомнил бы первое value.

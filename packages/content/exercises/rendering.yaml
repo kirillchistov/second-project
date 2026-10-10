@@ -1,0 +1,17 @@
+- id: render-commit-timeline
+  type: order
+  kind: timeline
+  skill: render-commit-phases
+  question: render-vs-commit
+  difficulty: 2
+  prompt: Расставьте по порядку, что происходит после setState в обработчике клика.
+  steps:
+    - React вызывает функции компонентов (render)
+    - Сравнивает новое дерево с предыдущим (reconciliation)
+    - Применяет изменения к DOM (commit)
+    - Выполняет useLayoutEffect
+    - Браузер отрисовывает кадр (paint)
+    - Выполняет useEffect
+  explanation: >-
+    Render чистый и может быть прерван, commit — синхронный. useLayoutEffect блокирует отрисовку,
+    поэтому подходит для измерений DOM; useEffect обычно выполняется уже после paint.
