@@ -1,0 +1,99 @@
+# Черновик упражнений: «Что такое однонаправленный поток данных и почему Flux вытеснил MVC?» (flux-unidirectional)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only flux-unidirectional
+
+- id: flux-vs-mvc-core-idea
+  skill: unidirectional-data-flow
+  question: flux-unidirectional
+  difficulty: 2
+  prompt: Какую главную проблему клиентского MVC с двусторонним связыванием решил Flux?
+  explanation: "Flux ценен не скоростью, а **отслеживаемостью**: состояние меняется только в ответ на явные действия и в одном направлении. Поэтому изменения можно залогировать, воспроизвести и отладить. Та же идея есть в самом React: state → UI, props вниз, события вверх."
+  type: quiz
+  options:
+    - label: Изменения шли каскадом в обе стороны, и было трудно понять, кто и почему поменял данные. Flux меняет состояние только через действия
+      why: Верно. Цикл Action → Dispatcher → Store → View делает каждое изменение явным, поэтому его можно отследить, залогировать и воспроизвести.
+    - label: "Однонаправленный поток быстрее: он сокращает число операций с DOM"
+      why: Производительность не была целью Flux. Число операций с DOM сокращает reconciliation в React, а архитектура данных на это не влияет.
+    - label: В MVC не было общего состояния, а Flux ввёл единый глобальный стор
+      why: Модели в MVC и были общим состоянием. Единый стор появился в Redux, а в оригинальном Flux сторов несколько.
+    - label: Однонаправленный поток требует глобального стора вроде Redux, без него React-приложение двунаправленное
+      why: "Типичное заблуждение. React однонаправлен и без Redux: props идут вниз, события — вверх, а useState меняется только через setState."
+  answer: 0
+
+- id: flux-mutating-props-bug
+  skill: props-down-events-up
+  question: flux-unidirectional
+  difficulty: 2
+  prompt: Галочка не переключается, хотя onChange срабатывает. Найдите строку, которая нарушает однонаправленный поток данных.
+  explanation: Props принадлежат родителю и доступны только для чтения. Мутация объекта не вызывает рендер, поэтому React возвращает checkbox к последнему отрендеренному значению. Правильно поднять событие вверх, например через `onToggle(todo.id)`. Тогда владелец сам изменит своё состояние, и новые props придут вниз.
+  type: find-bug
+  language: tsx
+  code: |-
+    function TodoItem({ todo }: { todo: Todo }) {
+      return (
+        <label>
+          <input
+            type="checkbox"
+            checked={todo.done}
+            onChange={() => {
+              todo.done = !todo.done;
+            }}
+          />
+          {todo.title}
+        </label>
+      );
+    }
+  bugLines:
+    - 8
+  causes:
+    - "Компонент мутирует props: рендер не запускается, а данные должен менять владелец через колбэк вроде onToggle"
+    - Для checkbox нужно использовать onClick, а не onChange
+    - Вместо checked нужно использовать defaultChecked, тогда изменение сохранится
+    - Без htmlFor у label клик по checkbox не доходит до обработчика
+  answer: 0
+
+- id: flux-controlled-input-lifted
+  skill: props-down-events-up
+  question: flux-unidirectional
+  difficulty: 1
+  prompt: Состояние поиска хранит родитель. Допишите контролируемый инпут так, чтобы данные шли вниз, а изменения — вверх.
+  explanation: "В React нет двустороннего связывания: пара `value` + `onChange` лишь имитирует его. Значение приходит вниз через props, а ввод пользователя уходит вверх событием. Владелец состояния решает, принять ли изменение, поэтому поток остаётся однонаправленным."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    type Props = {
+      query: string;
+      onQueryChange: (q: string) => void;
+    };
+
+    function SearchBox({ query, onQueryChange }: Props) {
+      return (
+        <input
+          value={___}
+          onChange={(e) => ___(e.target.___)}
+        />
+      );
+    }
+  tokens:
+    - query
+    - onQueryChange
+    - value
+  decoys:
+    - setQuery
+    - defaultValue
+    - checked
+
+- id: flux-redux-dispatch-cycle
+  skill: flux-action-cycle
+  question: flux-unidirectional
+  difficulty: 2
+  prompt: Расставьте по порядку, что происходит в приложении на Redux после клика «Добавить задачу».
+  explanation: "Это цикл Flux в упрощении Redux: действие → чистый редьюсер → новое состояние → подписчики → UI → новое событие. Состояние меняется только в одном месте и только в ответ на действие. Поэтому работают лог действий и time-travel в DevTools."
+  type: order
+  kind: timeline
+  steps:
+    - "Обработчик клика вызывает dispatch({ type: 'todos/added', payload })"
+    - Стор передаёт текущее состояние и действие в редьюсер
+    - Редьюсер возвращает новый объект состояния, не мутируя старый
+    - Стор уведомляет подписчиков, useSelector сравнивает выбранные значения
+    - Компоненты, чьи данные изменились, перерисовываются и ждут следующего события

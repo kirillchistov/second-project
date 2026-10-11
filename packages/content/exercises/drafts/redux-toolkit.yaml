@@ -1,0 +1,98 @@
+# Черновик упражнений: «Как сейчас пишут на Redux: Redux Toolkit, store, slice, селекторы?» (redux-toolkit)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only redux-toolkit
+
+- id: redux-toolkit-create-slice-immer
+  skill: redux-toolkit-slices
+  question: redux-toolkit
+  difficulty: 2
+  prompt: Что делает `createSlice` и почему в его редьюсерах можно писать `state.items.push(...)`?
+  explanation: "Современный Redux пишут на RTK. `createSlice` по объекту `reducers` генерирует action creators и reducer, а Immer превращает мутации черновика в новое иммутабельное состояние. Правило: внутри slice-редьюсера либо мутируй draft, либо верни новое значение. Делать то и другое сразу нельзя."
+  type: quiz
+  options:
+    - label: Генерирует action creators и reducer; внутри Immer, и «мутации» черновика превращаются в новое иммутабельное состояние
+      why: Верно. state в редьюсере — это Proxy-черновик Immer. По записанным изменениям Immer строит новый объект и копирует только изменённые ветки (structural sharing).
+    - label: "RTK снимает требование иммутабельности: стор хранит изменяемый объект и уведомляет подписчиков через Proxy"
+      why: "Неверно. Состояние в сторе по-прежнему иммутабельно: после dispatch получается новый объект, иначе useSelector не заметил бы изменений по ===."
+    - label: Перед каждым редьюсером createSlice делает глубокую копию state, поэтому мутировать её безопасно
+      why: Неверно. Глубокое копирование было бы дорогим. Immer копирует только изменённые пути, а неизменённые ветки сохраняют прежние ссылки.
+    - label: Мутировать можно только массивы через push, а объекты всё равно нужно обновлять через spread
+      why: "Неверно. Через draft можно менять любые поля: state.user.name = 'x' тоже корректно. Spread внутри createSlice не нужен."
+  answer: 0
+
+- id: redux-toolkit-slice-and-store
+  skill: redux-toolkit-slices
+  question: redux-toolkit
+  difficulty: 1
+  prompt: Допишите слайс корзины и создание стора в современном стиле Redux Toolkit.
+  explanation: "`createSlice` возвращает `actions` (action creators) и `reducer`, а `PayloadAction<T>` типизирует payload. `configureStore` сразу подключает DevTools, thunk и dev-проверки иммутабельности. `createStore` — legacy API, а `createReducer` не генерирует action creators."
+  type: fill-tokens
+  language: ts
+  code: |-
+    const cartSlice = ___({
+      name: 'cart',
+      initialState: { items: [] as CartItem[] },
+      reducers: {
+        added(state, action: ___<CartItem>) {
+          state.items.push(action.payload);
+        },
+      },
+    });
+    export const { added } = cartSlice.___;
+
+    export const store = ___({
+      reducer: { cart: cartSlice.reducer },
+    });
+  tokens:
+    - createSlice
+    - PayloadAction
+    - actions
+    - configureStore
+  decoys:
+    - createReducer
+    - createStore
+    - AnyAction
+    - reducer
+
+- id: redux-toolkit-unstable-selector
+  skill: redux-selectors
+  question: redux-toolkit
+  difficulty: 2
+  prompt: Компонент перерисовывается при любом dispatch, даже когда меняется несвязанный слайс. Найдите причину.
+  explanation: "`useSelector` после каждого dispatch вызывает селектор и сравнивает результат с прошлым по `===`. `filter` каждый раз создаёт новый массив, поэтому компонент перерисовывается всегда. Варианты исправления: выбирать примитив (`.length`) или мемоизировать селектор через `createSelector`. В dev-режиме React-Redux предупреждает о таких нестабильных селекторах."
+  type: find-bug
+  language: tsx
+  code: |-
+    function DoneCount() {
+      const done = useAppSelector((s) =>
+        s.todos.items.filter((t) => t.done)
+      );
+      return <span>Готово: {done.length}</span>;
+    }
+  bugLines:
+    - 2
+    - 3
+  causes:
+    - Селектор каждый раз возвращает новый массив, и useSelector по === считает результат изменившимся после любого dispatch
+    - Внутри селектора нельзя вызывать методы массивов — можно только читать поля стора
+    - useAppSelector нельзя использовать без useDispatch в том же компоненте
+    - filter мутирует массив в сторе, и Redux перерисовывает всех подписчиков
+  answer: 0
+
+- id: redux-toolkit-server-data-choice
+  skill: server-state-choice
+  question: redux-toolkit
+  difficulty: 2
+  prompt: Проект уже на Redux Toolkit. Нужно загрузить список заказов, кешировать его между экранами, показывать статус загрузки и перезапрашивать после создания заказа. Что выбрать?
+  explanation: "Серверные данные — это кеш, а не обычное клиентское состояние. В проекте на RTK для них есть RTK Query: кеш, статусы, дедупликация запросов и инвалидация по тегам. Обычные слайсы оставь для клиентского состояния."
+  type: choose-tool
+  options:
+    - label: "RTK Query: createApi с query и mutation, invalidatesTags"
+      why: "Лучший выбор: RTK Query уже входит в RTK и живёт в том же сторе. Кеш, isLoading, дедупликация и refetch после мутации через теги есть из коробки."
+    - label: createAsyncThunk и слайс со status и items
+      why: "Рабочий, но ручной путь: кеш, устаревание, дедупликацию и перезапрос после мутации придётся писать самому. Подходит для разовой асинхронной логики, а не для кеша."
+    - label: useEffect с fetch и dispatch(setOrders(data))
+      why: "Худший вариант: гонки запросов, отсутствие кеша и дублирование логики в каждом компоненте. Это классическая ошибка «серверные данные вручную в Redux»."
+    - label: Добавить TanStack Query рядом с Redux
+      why: Отличный инструмент для серверного состояния. Его стоит брать, если Redux в проекте нет. Здесь же RTK уже подключён, и вторая библиотека кеша дублирует RTK Query.
+  answer: 0

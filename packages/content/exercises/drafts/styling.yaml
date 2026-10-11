@@ -1,0 +1,101 @@
+# Черновик упражнений: «Какие есть способы стилизации React-компонентов?» (styling)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only styling
+
+- id: styling-runtime-css-in-js-rsc
+  skill: styling-runtime-css-in-js
+  question: styling
+  difficulty: 2
+  prompt: Почему в проектах с Server Components всё чаще отказываются от runtime CSS-in-JS (styled-components, Emotion)?
+  explanation: "Runtime CSS-in-JS считает и вставляет стили во время рендера через контекст. Server Components такое не поддерживают, поэтому компоненты уходят в клиентские, а работа повторяется на каждом рендере. Для RSC выбирают решения, где CSS статичен на этапе сборки: CSS Modules, Tailwind, zero-runtime CSS-in-JS."
+  type: quiz
+  options:
+    - label: Стили генерируются в рантайме через контекст и хуки — это работает только в клиентских компонентах и стоит времени на каждом рендере
+      why: Верно. Server Components не поддерживают контекст и хуки. Поэтому стилизованные компоненты требуют 'use client', а генерация стилей нагружает рендер.
+    - label: Server Components не поддерживают атрибут className, поэтому стили там можно задавать только inline
+      why: Неверно. className в RSC работает как обычно. CSS Modules и Tailwind отлично подходят серверным компонентам.
+    - label: "Runtime CSS-in-JS в принципе несовместим с SSR: стили появляются только после гидрации"
+      why: Неверно. SSR поддерживается через сбор стилей при рендере на сервере, хотя со стримингом нужна дополнительная настройка. Главная проблема — хуки и контекст в RSC.
+    - label: CSS, созданный из JS, браузер применяет медленнее, чем CSS из файла
+      why: Неверно. В итоге в документе оказывается обычный CSS. Дорого стоит не применение стилей, а их вычисление и вставка во время рендера.
+  answer: 0
+
+- id: styling-choice-next-rsc-typesafe
+  skill: styling-approach-choice
+  question: styling
+  difficulty: 2
+  prompt: Новый проект на Next.js App Router, большинство компонентов серверные. Команда хочет писать стили в TS с автодополнением токенов дизайн-системы и без затрат в рантайме. Что выбрать?
+  explanation: "Правило выбора: при RSC и требовании нулевого рантайма нужен CSS, который собирается заранее. Если нужна ещё и типобезопасность в TS — zero-runtime CSS-in-JS. Если важнее скорость вёрстки — Tailwind. Если нужен минимум настройки — CSS Modules."
+  type: choose-tool
+  options:
+    - label: vanilla-extract (zero-runtime CSS-in-JS)
+      why: Стили пишутся в .css.ts с типами и токенами, а на сборке превращаются в статический CSS. Подходит серверным компонентам, цена — настройка плагина сборки.
+    - label: styled-components
+      why: "Даёт стили рядом с логикой и динамику через props. Но это рантайм: каждый стилизованный компонент должен стать клиентским. Уместен в SPA без RSC."
+    - label: Tailwind CSS
+      why: Тоже без рантайма и хорошо работает с RSC. Но стили задаются классами в разметке, а не TS-объектами. Лучший выбор, если команде важнее скорость вёрстки.
+    - label: Inline-стили через style
+      why: Нет псевдоклассов, медиазапросов и общей системы токенов. Подходят только для по-настоящему динамических значений.
+  answer: 0
+
+- id: styling-css-variable-progress
+  skill: styling-css-variables
+  question: styling
+  difficulty: 2
+  prompt: Допишите прогресс-бар на CSS Modules так, чтобы динамическая ширина передавалась через CSS-переменную.
+  explanation: Динамику передают CSS-переменной в style, а правило с var() живёт в модуле. Тогда CSS остаётся статическим, а псевдоклассы и медиазапросы доступны. Кастомного свойства нет в типе CSSProperties, поэтому нужен каст. Имя пишется с `--`.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    import type { CSSProperties } from 'react';
+    import styles from './Progress.module.css';
+    // .bar { width: var(--progress); }
+
+    export function Progress({ value }: Props) {
+      const style = { '___': `${value}%` } as ___;
+      return (
+        <div className={styles.track}>
+          <div className={styles.___} style={style} />
+        </div>
+      );
+    }
+  tokens:
+    - --progress
+    - CSSProperties
+    - bar
+  decoys:
+    - progress
+    - var(--progress)
+    - CSSStyleDeclaration
+    - width
+
+- id: styling-inline-hover-bug
+  skill: styling-inline-limits
+  question: styling
+  difficulty: 1
+  prompt: При наведении фон карточки не меняется. Найдите строку с ошибкой.
+  explanation: "Объект style задаёт свойства одного элемента: псевдоклассов и медиазапросов в нём нет, поэтому ключ ':hover' игнорируется. Оформление и состояния переносят в классы, например `.card:hover` и `styles.highlighted`. Учтите: inline-фон перебил бы и CSS-правило `:hover`, поэтому фон тоже стоит перенести в класс."
+  type: find-bug
+  language: jsx
+  code: |-
+    function Card({ highlighted, children }) {
+      return (
+        <div
+          className={styles.card}
+          style={{
+            background: highlighted ? '#fffbe6' : '#fff',
+            ':hover': { background: '#f5f5f5' },
+          }}
+        >
+          {children}
+        </div>
+      );
+    }
+  bugLines:
+    - 7
+  causes:
+    - Inline-стили не поддерживают псевдоклассы — ':hover' нужно описать в CSS-классе
+    - "Ключ нужно писать в camelCase: onHover вместо ':hover'"
+    - Нельзя одновременно передавать className и style — style отключает классы
+    - Свойство background в inline-стилях не работает, нужен backgroundColor
+  answer: 0

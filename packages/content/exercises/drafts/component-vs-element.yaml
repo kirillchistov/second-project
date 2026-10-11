@@ -1,0 +1,106 @@
+# Черновик упражнений: «Компонент, элемент и экземпляр — в чём разница?» (component-vs-element)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only component-vs-element
+
+- id: component-element-instance-quiz
+  skill: component-element-instance
+  question: component-vs-element
+  difficulty: 1
+  prompt: Чем различаются компонент, элемент и экземпляр в React?
+  explanation: Компонент — шаблон, элемент — дешёвое описание «что отрендерить», экземпляр — конкретное место в дереве со своим состоянием. Поэтому одна функция даёт много независимых экземпляров, а состояние живёт в Fiber-узле, а не в функции.
+  type: quiz
+  options:
+    - label: Компонент — функция-шаблон, элемент — неизменяемый объект { type, props, key }, экземпляр — место в дереве со своим состоянием (Fiber)
+      why: Верно. JSX создаёт элемент-описание, React по нему находит или создаёт экземпляр и хранит там состояние хуков.
+    - label: Элемент — это DOM-узел, который React создаёт из компонента при рендере
+      why: Элемент — обычный JS-объект, а не DOM. DOM-узлы React создаёт позже, на этапе commit, и только для host-элементов вроде <img>.
+    - label: "Элемент — результат вызова функции компонента: JSX сразу вызывает Avatar и хранит её JSX"
+      why: "JSX не вызывает компонент, он лишь записывает type: Avatar и props. Функцию вызовет React, когда элемент попадёт в дерево."
+    - label: Состояние хранится в самой функции компонента, поэтому компонент и экземпляр — одно и то же
+      why: Тогда два <Counter /> делили бы одно состояние. Состояние привязано к позиции в дереве, у каждого экземпляра оно своё.
+  answer: 0
+
+- id: component-element-lazy-call
+  skill: jsx-element-creation
+  question: component-vs-element
+  difficulty: 2
+  prompt: App отрендерили один раз (без StrictMode). Что будет в консоли?
+  explanation: "`<Avatar />` лишь создаёт объект-описание, поэтому сначала выполняется весь App. Затем React видит в дереве две позиции с type Avatar и вызывает функцию для каждой: один элемент, вставленный дважды, — два экземпляра."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Avatar() {
+      console.log('Avatar');
+      return <img alt="" />;
+    }
+
+    function App() {
+      const el = <Avatar />;
+      console.log('App');
+      return <>{el}{el}</>;
+    }
+  options:
+    - App → Avatar → Avatar
+    - Avatar → App → Avatar
+    - Avatar → App
+    - App → Avatar
+  answer: 0
+
+- id: component-element-state-by-position
+  skill: state-by-tree-position
+  question: component-vs-element
+  difficulty: 2
+  prompt: Counter хранит число кликов в useState, показывает его и красит текст в color. По счётчику кликнули 3 раза, затем нажали toggle. Что на экране?
+  explanation: Состояние привязано к позиции и типу, а не к конкретному JSX. В обеих ветках на одном месте стоит Counter — React видит тот же экземпляр с новыми props, поэтому счёт сохраняется. Сбросить можно разным key или разными позициями.
+  type: predict-output
+  language: tsx
+  code: |-
+    function App() {
+      const [red, setRed] = useState(false);
+      return (
+        <div>
+          {red
+            ? <Counter color="red" />
+            : <Counter color="blue" />}
+          <button onClick={() => setRed(!red)}>
+            toggle
+          </button>
+        </div>
+      );
+    }
+  options:
+    - 3, красным цветом
+    - 0, красным цветом
+    - 3, синим цветом
+    - 0, синим цветом
+  answer: 0
+
+- id: component-element-nested-definition
+  skill: nested-component-definition
+  question: component-vs-element
+  difficulty: 2
+  prompt: После каждого введённого символа поле теряет фокус. Найдите строку с причиной.
+  explanation: "SearchInput объявлен внутри SearchPage: каждый рендер создаёт новую функцию, то есть новый type. React видит другой тип на той же позиции, размонтирует старый input и монтирует новый — фокус и состояние теряются. Компоненты объявляют на верхнем уровне модуля и передают данные через props."
+  type: find-bug
+  language: tsx
+  code: |-
+    function SearchPage() {
+      const [query, setQuery] = useState('');
+      function SearchInput() {
+        return (
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        );
+      }
+      return <SearchInput />;
+    }
+  bugLines:
+    - 3
+  causes:
+    - "Компонент объявлен внутри другого: на каждом рендере новый тип, и React пересоздаёт input"
+    - Контролируемый input нельзя связывать с состоянием родителя через замыкание
+    - setQuery нужно вызывать с функцией-апдейтером, иначе ввод сбрасывается
+    - Не хватает key у <SearchInput />, поэтому React путает экземпляры
+  answer: 0

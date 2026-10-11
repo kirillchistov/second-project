@@ -1,0 +1,95 @@
+# Черновик упражнений: «Как мигрировать legacy React-приложение (классы, старые версии)?» (legacy-migration)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only legacy-migration
+
+# исправлено ревьюером:
+# Правильный вариант длиннее 140 символов и заметно длиннее остальных, это подсказка. Формулировка сокращена.
+# Фраза про Error Boundaries в explanation не относится к вопросу о стратегии. Заменена на пояснение роли 18.3.
+- id: legacy-migration-strategy-quiz
+  skill: legacy-migration-strategy
+  question: legacy-migration
+  difficulty: 2
+  prompt: Команда мигрирует большое приложение с React 16 на React 19. Какая стратегия надёжнее всего?
+  explanation: Миграцию ведут маленькими шагами с измерениями. Сначала ставят последнюю минорную версию ветки и добиваются нуля предупреждений, затем переходят на следующую мажорную версию с codemods. Версия 18.3 заранее предупреждает о том, что удалено в 19. Классы React 19 поддерживает, поэтому переписывают постепенно только то, что активно меняется.
+  type: quiz
+  options:
+    - label: Идти по мажорным версиям (16 → 17 → 18.3 → 19), убирая предупреждения и запуская codemods; классы переписывать при касании
+      why: Верно. Каждый шаг маленький и проверяемый, предупреждения 18.3 заранее показывают, что сломается в 19. Фичи при этом не замораживаются.
+    - label: Сначала переписать все классы на хуки, потому что React 19 перестал поддерживать классовые компоненты
+      why: Классы в React 19 работают. Удалены только legacy-API вроде строковых refs, legacy context и findDOMNode. Массовое переписывание — тот же «большой взрыв».
+    - label: "Сразу поставить React 19 и прогнать codemod migration-recipe: он исправит всё, что нужно"
+      why: Codemods покрывают только типовые замены. Без промежуточной 18.3 вы не увидите предупреждений об устаревших API и получите много поломок разом.
+    - label: Заморозить фичи и в отдельной ветке переписать приложение на актуальный стек, а потом переключиться
+      why: "Это классический «большой взрыв»: долгая ветка расходится с main, бизнес месяцами ждёт фичи, а риск выкатить всё одним релизом огромен."
+  answer: 0
+
+- id: legacy-migration-plan-recipe
+  skill: legacy-migration-plan
+  question: legacy-migration
+  difficulty: 2
+  prompt: Расставьте шаги миграции legacy-приложения с React 16 до React 19 по порядку.
+  explanation: Сначала нужно понять масштаб и подготовить страховку, и только потом менять версии. Версия 18.3 — это 18 с предупреждениями о том, что удалено в 19. Поэтому её «зелёное» состояние — пропуск к шагу на 19. Без e2e-тестов и мониторинга регрессии найдут пользователи.
+  type: order
+  kind: recipe
+  steps:
+    - "Аудит: версии, устаревшие API (строковые refs, legacy context, findDOMNode), покрытие тестами"
+    - "Страховка: e2e на ключевые сценарии, мониторинг ошибок, feature flags"
+    - "React 18: createRoot вместо ReactDOM.render, проверить батчинг и StrictMode"
+    - Обновиться до 18.3 и исправить все предупреждения об устаревших API
+    - "React 19: запустить codemod migration-recipe и types-react-codemod preset-19"
+
+- id: class-to-hooks-stale-interval
+  skill: class-to-hooks-migration
+  question: legacy-migration
+  difficulty: 2
+  prompt: "Класс переписали на хуки. В классе было this.setState(s => ({ count: s.count + this.props.step })). После миграции счётчик застревает на значении step. Найдите ошибку."
+  explanation: Эффект с [] создаётся один раз, и его замыкание навсегда видит count = 0. В классе this.setState с функцией брал актуальное состояние. При переносе нужен функциональный апдейтер setCount(c => c + step), а step нужно добавить в зависимости.
+  type: find-bug
+  language: tsx
+  code: |-
+    function Ticker({ step }: { step: number }) {
+      const [count, setCount] = useState(0);
+      useEffect(() => {
+        const id = setInterval(() => {
+          setCount(count + step);
+        }, 1000);
+        return () => clearInterval(id);
+      }, []);
+      return <span>{count}</span>;
+    }
+  bugLines:
+    - 5
+  causes:
+    - Колбэк интервала замкнул count первого рендера (0), поэтому каждый тик ставит 0 + step
+    - "Нет cleanup: старые интервалы накапливаются и перезаписывают друг друга"
+    - Интервал нужно запускать в useLayoutEffect, иначе он стартует после paint и теряет тики
+    - "useState(0) нужно инициализировать лениво: useState(() => 0)"
+  answer: 0
+
+- id: react18-create-root-migration
+  skill: react18-create-root
+  question: legacy-migration
+  difficulty: 1
+  prompt: Замените ReactDOM.render и unmountComponentAtNode на API React 18+.
+  explanation: "В React 18 ReactDOM.render заменили на createRoot из react-dom/client: только с новым корнем включаются конкурентные возможности и автоматический батчинг. В React 19 старые render и unmountComponentAtNode удалены. Для SSR-разметки вместо createRoot используют hydrateRoot."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    import { ___ } from 'react-dom/client';
+
+    const container = document.getElementById('root')!;
+    const root = ___(container);
+    root.___(<App />);
+
+    // при размонтировании (микрофронтенд)
+    root.___();
+  tokens:
+    - createRoot
+    - createRoot
+    - render
+    - unmount
+  decoys:
+    - hydrateRoot
+    - unmountComponentAtNode
+    - hydrate
+    - destroy

@@ -1,0 +1,101 @@
+# Черновик упражнений: «Что такое хук use и чем он отличается от остальных хуков?» (use-hook)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only use-hook
+
+- id: use-hook-vs-other-hooks
+  skill: use-hook-semantics
+  question: use-hook
+  difficulty: 3
+  prompt: Чем хук `use` из React 19 принципиально отличается от остальных хуков?
+  explanation: "`use(resource)` читает промис или контекст прямо в рендере. Пока промис не разрешён, компонент приостанавливается до ближайшего Suspense, а отклонение уходит в Error Boundary. Состояния в списке хуков у `use` нет, поэтому его можно вызывать в условиях и циклах. Промис при этом должен быть стабильным и приходить извне."
+  type: quiz
+  options:
+    - label: Он читает промис или контекст во время рендера, приостанавливает компонент через Suspense и его можно вызывать в условиях и циклах
+      why: Верно. `use` не хранит состояние в списке хуков Fiber, поэтому порядок вызова не важен. Ожидание промиса реализовано через Suspense, а ошибки уходят в Error Boundary.
+    - label: "Это аналог useEffect для загрузки данных: запускает запрос после рендера и кладёт результат в состояние"
+      why: Нет. `use` ничего не запускает и работает во время рендера, а не после него. Запрос должен быть создан заранее, например в Server Component или библиотеке.
+    - label: Он сам кэширует промисы, поэтому в него можно передавать `fetch(url)` прямо из рендера
+      why: Кэша у `use` нет. Новый промис на каждом рендере, в том числе после приостановки, даёт бесконечную загрузку и предупреждение «uncached promise».
+    - label: Это обычная функция, а не хук, поэтому её можно вызывать где угодно, даже вне компонентов
+      why: "`use` можно вызывать условно, но только в рендере компонента или внутри другого хука. Вне React-рендера он не работает."
+  answer: 0
+
+- id: use-hook-uncached-promise
+  skill: use-hook-stable-promise
+  question: use-hook
+  difficulty: 2
+  prompt: Клиентский компонент обёрнут в Suspense, но вечно показывает fallback. Найдите ошибку.
+  explanation: "При каждом рендере вызывается новый `fetch`, и `use` получает новый промис. После приостановки React рендерит компонент заново, создаётся ещё один промис, и так по кругу. Промис должен быть стабильным: прийти из Server Component, из кэша или из библиотеки данных (TanStack Query, фреймворк)."
+  type: find-bug
+  language: tsx
+  code: |-
+    'use client';
+    function UserCard({ id }: { id: string }) {
+      const user = use(
+        fetch(`/api/users/${id}`).then((r) => r.json())
+      );
+      return <p>{user.name}</p>;
+    }
+  bugLines:
+    - 3
+    - 4
+  causes:
+    - "Промис создаётся в рендере: после каждой приостановки появляется новый, и загрузка никогда не заканчивается"
+    - Хук `use` нельзя вызывать в Client Component — только в Server Component
+    - Перед `fetch` не хватает `await`, поэтому `use` получает не данные, а промис
+    - Вызов `use` нужно обернуть в try/catch, иначе Suspense не сработает
+  answer: 0
+
+- id: use-hook-stream-promise-to-client
+  skill: use-hook-server-promise-streaming
+  question: use-hook
+  difficulty: 2
+  prompt: "Допишите код: страница не ждёт комментарии, а клиентский компонент читает их, когда они придут."
+  explanation: Server Component запускает запрос и передаёт промис без `await`. Промисы сериализуются при передаче в Client Component. Клиент читает промис через `use`, а пока данные не пришли, Suspense показывает `fallback`. Остальная страница стримится сразу.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    // Server Component
+    async function Page({ id }: { id: string }) {
+      const commentsPromise = getComments(id);
+      return (
+        <Suspense ___={<Skeleton />}>
+          <Comments commentsPromise={___} />
+        </Suspense>
+      );
+    }
+    // Client Component
+    function Comments({ commentsPromise }: Props) {
+      const comments = ___(commentsPromise);
+      return comments.map((c) => <p key={c.id}>{c.text}</p>);
+    }
+  tokens:
+    - fallback
+    - commentsPromise
+    - use
+  decoys:
+    - loading
+    - comments
+    - useEffect
+    - await
+
+# исправлено ревьюером:
+# Опечатка в explanation: «дострамятся» вместо «достримятся»; заменено на нейтральную формулировку
+# Формулировка «с первым же ответом сервера» неточна: комментарии приходят позже, но в том же потоковом ответе
+- id: use-hook-slow-comments-choice
+  skill: use-hook-server-promise-streaming
+  question: use-hook
+  difficulty: 3
+  prompt: "Next.js App Router: пост грузится быстро, комментарии — 2 секунды. Нужно показать пост сразу, а комментарии получить в том же ответе сервера, без отдельного запроса с клиента. Как сделать?"
+  explanation: Медленную часть не нужно ждать на сервере. Создайте промис в Server Component, передайте его в Client Component и прочитайте через `use` внутри Suspense. Запрос стартует сразу, пост отрисуется без ожидания, а комментарии дойдут позже в том же потоковом ответе.
+  type: choose-tool
+  options:
+    - label: Создать промис в Server Component без await, передать пропсом и прочитать через `use` под Suspense
+      why: Лучший вариант. Запрос стартует на сервере сразу, пост рендерится без ожидания, комментарии придут в том же стриме, а fallback закроет паузу.
+    - label: "`await Promise.all([getPost(id), getComments(id)])` в Server Component"
+      why: Запросы пойдут параллельно, но страница будет ждать самый медленный. Подходит, если без комментариев страница бессмысленна.
+    - label: useEffect + fetch в Client Component после гидрации
+      why: Запрос начнётся только после загрузки JS и гидрации, это водопад. Кэш и гонки придётся писать вручную. Оправдано разве что в чистом SPA без сервера.
+    - label: "`use(fetch(url))` прямо в Client Component"
+      why: Каждый рендер создаёт новый промис, поэтому загрузка бесконечная. На клиенте промис должен приходить из кэша или библиотеки, например useSuspenseQuery.
+  answer: 0

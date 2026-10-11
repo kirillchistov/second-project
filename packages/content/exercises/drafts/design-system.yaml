@@ -1,0 +1,104 @@
+# Черновик упражнений: «Как построить дизайн-систему и библиотеку компонентов на React?» (design-system)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only design-system
+
+- id: design-system-architecture-quiz
+  skill: design-system-architecture
+  question: design-system
+  difficulty: 3
+  prompt: Команда начинает собственную библиотеку компонентов на React. Какая архитектура считается надёжной основой?
+  explanation: Разделяйте ответственность по слоям. Токены задают визуальный язык и темы. Headless-библиотека отвечает за поведение и доступность. Ваши стили отвечают за внешний вид. Композиционный API (compound components, `asChild`, нативные props) позволяет комбинировать готовые части и не плодить флаги.
+  type: quiz
+  options:
+    - label: Токены как CSS-переменные для тем, поведение и a11y из headless-библиотеки, свои стили и композиционный API
+      why: "Верно. Каждый слой решает свою задачу: токены — визуальный язык, Radix или React Aria — фокус, клавиатуру и ARIA, стили и API остаются за командой."
+    - label: Взять стилизованную библиотеку вроде MUI и переопределять её стили через тему
+      why: Так быстро стартовать, но придётся бороться с чужими стилями и runtime CSS-in-JS, который плохо сочетается с RSC. Своего визуального языка по сути не будет.
+    - label: Написать все компоненты с нуля, включая фокус-ловушки и навигацию с клавиатуры, чтобы не зависеть от чужого кода
+      why: Доступные модалки, меню и комбобоксы — это месяцы работы над краевыми случаями. Чаще всего в итоге ломаются клавиатура и скринридеры.
+    - label: Сделать по одному универсальному компоненту на сущность с набором boolean-props вроде isLarge, isRounded, withIcon
+      why: Флаги дают комбинаторный взрыв и противоречивые сочетания. Лучше использовать явные варианты (variant, size) и композицию.
+  answer: 0
+
+# исправлено ревьюером:
+# В Radix Primitives нет примитива Combobox, поэтому пример в верном варианте фактически неточен. Заменён на Headless UI и Downshift, у которых комбобокс есть.
+- id: design-system-accessible-combobox
+  skill: headless-components-choice
+  question: design-system
+  difficulty: 2
+  prompt: "В дизайн-систему нужен комбобокс с автодополнением: навигация стрелками, ARIA для скринридеров, позиционирование списка у края экрана. Стили — строго по макетам и токенам. Что выбрать?"
+  explanation: Сложное интерактивное поведение берите из headless-библиотеки, а внешний вид делайте сами. Так доступность и позиционирование достаются проверенными, а визуальный язык остаётся вашим.
+  type: choose-tool
+  options:
+    - label: Headless-комбобокс (React Aria, Ariakit, Headless UI) + свои стили на токенах
+      why: "Лучший вариант: фокус, клавиатура, ARIA и позиционирование уже решены, разметка и стили полностью ваши."
+    - label: Свой компонент на div и useState с обработкой onKeyDown
+      why: Подходит разве что для учебной задачи. Роли, aria-activedescendant, скринридеры и краевые случаи придётся проходить заново.
+    - label: Готовый Autocomplete из стилизованной библиотеки (MUI)
+      why: Хорош, если команда принимает чужой визуальный язык. Подгонять его под свои макеты дорого, а runtime-стили мешают RSC.
+    - label: Нативный input с datalist
+      why: Годится для простой подсказки без стилизации. Внешний вид списка почти не настраивается и отличается между браузерами.
+  answer: 0
+
+- id: design-system-aschild-slot
+  skill: aschild-slot
+  question: design-system
+  difficulty: 3
+  prompt: "Допишите упрощённый Slot и Button с `asChild`: при asChild кнопка отдаёт свои props дочернему элементу вместо рендера button."
+  explanation: Slot не рендерит свой DOM-узел. Он клонирует единственного ребёнка и подмешивает ему props. Настоящий Slot из Radix ещё сливает className, style, обработчики и ref, а не просто перезаписывает их. Это даёт поведение и стили кнопки с разметкой ссылки роутера.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    type SlotProps = React.HTMLAttributes<HTMLElement> & {
+      children?: React.ReactNode;
+    };
+
+    function Slot({ children, ...props }: SlotProps) {
+      if (!React.___(children)) return null;
+      return React.___(children, props);
+    }
+
+    function Button({ asChild, ...props }: ButtonProps) {
+      const Comp = asChild ? ___ : 'button';
+      return <Comp className="btn" {...props} />;
+    }
+  tokens:
+    - isValidElement
+    - cloneElement
+    - Slot
+  decoys:
+    - createElement
+    - forwardRef
+    - Fragment
+    - "'a'"
+
+- id: design-system-button-classname
+  skill: component-props-forwarding
+  question: design-system
+  difficulty: 2
+  prompt: Потребители пишут `<Button className="mt-4">`, но отступ не применяется. Найдите ошибку (React 19).
+  explanation: "Компонент дизайн-системы должен расширять нативные props: className потребителя сливается с базовыми классами через cn или clsx, остальное прокидывается через spread. В React 19 ref — обычный prop, ComponentProps<'button'> его уже включает, и forwardRef не нужен."
+  type: find-bug
+  language: tsx
+  code: |-
+    type ButtonProps = React.ComponentProps<'button'> & {
+      variant?: 'primary' | 'ghost';
+    };
+    export function Button({
+      variant = 'primary', className, ...props
+    }: ButtonProps) {
+      return (
+        <button
+          {...props}
+          className={`btn btn-${variant}`}
+        />
+      );
+    }
+  bugLines:
+    - 10
+  causes:
+    - "className потребителя деструктурирован и выброшен — его нужно слить с базовыми классами: cn('btn', `btn-${variant}`, className)"
+    - Без forwardRef компонент теряет ref, и стили не применяются
+    - "{...props} должен стоять после className, чтобы потребитель мог переопределить классы"
+    - variant нужно заменить на boolean-props isPrimary и isGhost
+  answer: 0

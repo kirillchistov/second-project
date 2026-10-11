@@ -1,0 +1,102 @@
+# Черновик упражнений: «Как управлять загрузкой ресурсов и метаданными в React 19?» (resource-loading)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only resource-loading
+
+- id: resource-loading-why-in-component
+  skill: resource-loading-model
+  question: resource-loading
+  difficulty: 2
+  prompt: Зачем в React 19 описывать `<title>`, стили и скрипты прямо в компоненте, а не в index.html или через react-helmet?
+  explanation: "Главная идея: компонент сам объявляет свои ресурсы и метаданные, а React решает, когда и куда их вставить, в том числе при стриминге SSR. Он поднимает теги в head, убирает дубли и задаёт порядок стилей через precedence. SEO-выгоду это даёт прежде всего при SSR."
+  type: quiz
+  options:
+    - label: Компонент объявляет свои зависимости, а React поднимает их в head, убирает дубли и задаёт порядок, в том числе при стриминге SSR
+      why: Верно. Зависимости лежат рядом с кодом, который их использует. React дедуплицирует повторы и вставляет теги в нужное место и в нужный момент.
+    - label: Стили и скрипты попадают в бандл компонента, поэтому отдельных сетевых запросов не будет
+      why: "React ничего не инлайнит: ресурсы по-прежнему загружаются по href. Меняется только то, кто управляет вставкой тегов и их порядком."
+    - label: "`<title>` в компоненте даёт SPA без SSR ту же SEO-выгоду, что и серверный рендеринг"
+      why: Без SSR заголовок появится только после выполнения JS. Краулер, который не исполняет JS, его не увидит. Это типичный подводный камень.
+    - label: React оставляет теги там, где их отрендерили, а браузер сам переносит их в head
+      why: 'Браузер так не делает: поднимает теги сам React. Причём `<link rel="stylesheet">` он поднимает и упорядочивает, только если задан precedence.'
+  answer: 0
+
+- id: resource-loading-title-children
+  skill: document-metadata
+  question: resource-loading
+  difficulty: 2
+  prompt: Заголовок вкладки на странице товара отображается не так, как ожидалось, а в консоли появляется предупреждение. Найдите строку с ошибкой.
+  explanation: "В JSX `{product.name} — Магазин` даёт два дочерних узла, то есть массив. React 19 ожидает, что у `<title>` будет ровно одна строка: иначе он выдаёт предупреждение и заголовок не будет корректным. Исправление — шаблонная строка: <title>{`${product.name} — Магазин`}</title>."
+  type: find-bug
+  language: tsx
+  code: |-
+    function ProductPage({ product }: Props) {
+      return (
+        <>
+          <title>{product.name} — Магазин</title>
+          <meta name="description"
+            content={product.summary} />
+          <ProductGallery images={product.images} />
+        </>
+      );
+    }
+  bugLines:
+    - 4
+  causes:
+    - У `<title>` несколько дочерних узлов (выражение и текст), а React ожидает одну строку
+    - "`<title>` можно рендерить только внутри `<head>`, а не в теле компонента"
+    - "`<meta>` нужно выставлять в useEffect, иначе он не попадёт в head"
+    - Метаданные нельзя возвращать внутри Fragment — нужен обёрточный элемент
+  answer: 0
+
+# исправлено ревьюером:
+# Код занимает 16 строк при лимите 14. Убрана пустая строка, вызов preload записан в одну строку.
+- id: resource-loading-hero-hints
+  skill: resource-hints-api
+  question: resource-loading
+  difficulty: 2
+  prompt: "Допишите компонент: заранее установить соединение с CDN, приоритетно загрузить LCP-картинку и подключить стили так, чтобы React поднял их в head и упорядочил."
+  explanation: "preconnect открывает соединение (DNS, TCP, TLS) заранее. preload с as: 'image' и высоким fetchPriority ускоряет загрузку LCP-картинки. Атрибут precedence передаёт стиль под управление React: тот поднимает его в head, дедуплицирует и до загрузки CSS не показывает контент за Suspense."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    import { preload, preconnect } from 'react-dom';
+    function Hero({ src }: { src: string }) {
+      ___('https://cdn.example.com');
+      preload(src, { as: ___, fetchPriority: 'high' });
+      return (
+        <>
+          <link rel="stylesheet" href="/hero.css"
+            ___="default" />
+          <img src={src} alt="" />
+        </>
+      );
+    }
+  tokens:
+    - preconnect
+    - "'image'"
+    - precedence
+  decoys:
+    - preinit
+    - "'img'"
+    - priority
+    - "'fetch'"
+
+# исправлено ревьюером:
+# Формулировка «сразу при появлении нужен уже загруженный и выполненный SDK» неточна. preinit не блокирует рендер и не гарантирует, что скрипт выполнится до появления виджета: он лишь запускает загрузку и выполнение как можно раньше. Формулировка уточнена.
+- id: resource-loading-map-sdk
+  skill: resource-hints-choice
+  question: resource-loading
+  difficulty: 3
+  prompt: Виджету карты нужен SDK с maps.example.com, который надо загрузить и выполнить как можно раньше. На странице виджет может встретиться дважды, страница стримится с сервера. Что выбрать?
+  explanation: "Правило: preinit — загрузить и выполнить (скрипт) или подключить (стиль), preload — только скачать заранее, preconnect/prefetchDNS — только подготовить соединение. React дедуплицирует вызовы и учитывает их при SSR-стриминге. Альтернатива для этого случая — `<script async src>` в JSX: React его тоже дедуплицирует."
+  type: choose-tool
+  options:
+    - label: "preinit(url, { as: 'script' }) в компоненте"
+      why: "Подходит лучше всего: скрипт загрузится и выполнится, повторный вызов React дедуплицирует, а при SSR подсказка попадёт в поток HTML."
+    - label: "preload(url, { as: 'script' }) в компоненте"
+      why: Только скачивает скрипт, но не выполняет его. Хорошо, когда скрипт понадобится позже и его подключат отдельно.
+    - label: preconnect('https://maps.example.com')
+      why: Лишь заранее открывает соединение с доменом. Полезно, если конкретный ресурс ещё неизвестен или потребуется позже.
+    - label: useEffect, который создаёт `<script>` через document.createElement
+      why: Срабатывает только после paint на клиенте. Дедупликацию придётся писать вручную, и на сервере такой скрипт не подключится. Это старый подход.
+  answer: 0

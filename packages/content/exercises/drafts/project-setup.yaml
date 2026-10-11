@@ -1,0 +1,83 @@
+# Черновик упражнений: «Как создать React-проект сегодня и почему Create React App устарел?» (project-setup)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only project-setup
+
+- id: project-setup-cra-deprecated
+  skill: cra-deprecation
+  question: project-setup
+  difficulty: 1
+  prompt: Почему Create React App признан устаревшим и с чего команда React советует начинать новый проект?
+  explanation: "В феврале 2025 CRA официально признан устаревшим: он медленный, не развивался и не решал роутинг, загрузку данных и code splitting. Сегодня начинают с фреймворка (Next.js, React Router, Expo) или с Vite для SPA. Правило: без фреймворка эти задачи придётся решать самому."
+  type: quiz
+  options:
+    - label: CRA медленный, не развивался и не решал роутинг, загрузку данных и code splitting — берут фреймворк или Vite для SPA
+      why: Верно. Поэтому команда React рекомендует фреймворк для full-stack задач и Vite, если нужен просто сборщик для SPA.
+    - label: CRA не поддерживал TypeScript, поэтому для типизированных проектов пришлось искать замену
+      why: Неверно. У CRA был шаблон --template typescript. Отказались от CRA из-за медленной работы и отсутствия развития, а не из-за TS.
+    - label: React теперь требует серверный рендеринг, а клиентские SPA больше не поддерживаются
+      why: "Неверно. SPA по-прежнему поддерживаются: Vite — стандарт для SPA, а фреймворки тоже умеют работать в режиме SPA."
+    - label: "Главная проблема — eject: после него конфигурацию webpack нельзя было обновлять"
+      why: "eject был неудобен, но причина отказа не в нём. Сейчас вопрос об eject просто неактуален: новые проекты на CRA не создают."
+  answer: 0
+
+- id: project-setup-internal-admin
+  skill: spa-vs-framework-choice
+  question: project-setup
+  difficulty: 1
+  prompt: Новая внутренняя админка за логином. SEO не нужно, бэкенд — отдельный REST API другой команды. Нужны быстрый dev-сервер и простой деплой статикой. С чего начать?
+  explanation: "Если страницы за логином и не индексируются, SSR ничего не даёт: нужны только сервер и инфраструктура. Для такой SPA достаточно Vite. Фреймворк нужен, когда есть SEO, серверная загрузка данных, Server Components или API-роуты."
+  type: choose-tool
+  options:
+    - label: Vite с шаблоном react-ts
+      why: "Лучший выбор: мгновенный dev-сервер на ES-модулях, Fast Refresh, сборка со code splitting. Результат деплоится как статика."
+    - label: Next.js с SSR
+      why: Подошёл бы для публичных страниц с SEO или серверной загрузкой данных. За логином это лишний Node-сервер и лишняя сложность.
+    - label: Create React App
+      why: "Официально устарел с февраля 2025: медленный и не развивается. Для новых проектов его не берут."
+    - label: Собственный конфиг webpack + Babel
+      why: Оправдан только при очень специфичных требованиях к сборке. Иначе это время на настройку и поддержку того, что Vite даёт из коробки.
+  answer: 0
+
+- id: project-setup-seo-catalog
+  skill: spa-vs-framework-choice
+  question: project-setup
+  difficulty: 2
+  prompt: "Публичный каталог интернет-магазина: важны SEO и быстрый первый показ, данные берутся из БД на сервере, форме заявки нужен свой API-эндпоинт. Что выбрать?"
+  explanation: SSR/SSG для SEO, загрузка данных на сервере и API-роуты — это задачи фреймворка. В SPA на Vite всё это пришлось бы собирать вручную. React Router в режиме фреймворка тоже подошёл бы. Главное — не голый сборщик.
+  type: choose-tool
+  options:
+    - label: Next.js
+      why: "Лучший выбор: SSR/SSG, Server Components, серверная загрузка данных, файловый роутинг и API-роуты есть из коробки."
+    - label: SPA на Vite
+      why: Хорош для приложений за логином. Здесь пришлось бы вручную настраивать SSR, серверные данные и отдельный бэкенд для формы.
+    - label: Create React App + react-helmet
+      why: "CRA устарел, а мета-теги из react-helmet не заменят серверный рендеринг: контент всё равно приходит в браузер только после загрузки JS."
+    - label: Expo
+      why: Expo — фреймворк для мобильных приложений на React Native. Его выбирают, когда нужен iOS/Android-клиент, а не SEO-сайт.
+  answer: 0
+
+- id: project-setup-vite-config
+  skill: vite-config-basics
+  question: project-setup
+  difficulty: 1
+  prompt: Допишите минимальный vite.config.ts для React-проекта.
+  explanation: "defineConfig из vite даёт типизацию конфига. Плагин @vitejs/plugin-react подключает трансформацию JSX и React Fast Refresh, то есть HMR с сохранением состояния. Остальное Vite настраивает сам: dev-сервер на ES-модулях и production-сборку со code splitting."
+  type: fill-tokens
+  language: ts
+  code: |-
+    import { defineConfig } from '___';
+    import react from '@vitejs/plugin-react';
+
+    export default ___({
+      ___: [___()],
+    });
+  tokens:
+    - vite
+    - defineConfig
+    - plugins
+    - react
+  decoys:
+    - webpack
+    - createConfig
+    - presets
+    - reactRefresh

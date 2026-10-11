@@ -1,0 +1,106 @@
+# Черновик упражнений: «Что такое компонент Activity?» (activity)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only activity
+
+- id: activity-hidden-semantics-quiz
+  skill: activity-hidden-semantics
+  question: activity
+  difficulty: 2
+  prompt: Что происходит с поддеревом внутри `<Activity mode="hidden">`?
+  explanation: "Activity — середина между `{cond && <X />}` и CSS `display: none`. State и DOM сохраняются, эффекты отключаются, а обновления идут с самым низким приоритетом. Поэтому скрытый экран можно заранее отрендерить, и при показе он появится мгновенно."
+  type: quiz
+  options:
+    - label: State и DOM сохраняются, эффекты размонтируются, а обновления рендерятся с самым низким приоритетом
+      why: "Верно. Содержимое скрыто через display: none. При возврате в visible state на месте, а эффекты запускаются снова."
+    - label: "Всё как с CSS `display: none`: state, DOM и эффекты продолжают работать, просто элемент не виден"
+      why: "Именно это Activity и исправляет: у display: none подписки и таймеры работают зря. Activity вызывает cleanup эффектов скрытого дерева."
+    - label: "Как условный рендеринг: DOM удаляется, но React запоминает state и восстанавливает его при показе"
+      why: "DOM не удаляется, он остаётся в документе со стилем display: none. За счёт этого сохраняется, например, значение неконтролируемых полей."
+    - label: React вообще не рендерит скрытое дерево, пока mode не станет visible
+      why: "Наоборот: hidden-дерево рендерится в фоне с низким приоритетом. Поэтому Activity подходит для предзагрузки данных и кода следующего экрана."
+  answer: 0
+
+- id: activity-toggle-effects-state
+  skill: activity-hidden-semantics
+  question: activity
+  difficulty: 2
+  prompt: StrictMode нет. Сначала open = true, пользователь вводит «hi». Затем open становится false, потом снова true. Что будет в консоли и в поле?
+  explanation: "При переходе в hidden React вызывает cleanup эффектов, но state не трогает. При возврате в visible эффекты запускаются снова, а text по-прежнему равен «hi». Правило: Activity сохраняет state, но не сохраняет работающие эффекты."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Draft() {
+      const [text, setText] = useState('');
+      useEffect(() => {
+        console.log('subscribe');
+        return () => console.log('unsubscribe');
+      }, []);
+      return <input value={text}
+        onChange={(e) => setText(e.target.value)} />;
+    }
+
+    <Activity mode={open ? 'visible' : 'hidden'}>
+      <Draft />
+    </Activity>
+  options:
+    - subscribe → unsubscribe → subscribe; в поле «hi»
+    - subscribe → unsubscribe → subscribe; поле пустое
+    - subscribe; в поле «hi»
+    - subscribe → subscribe; в поле «hi»
+  answer: 0
+
+# исправлено ревьюером:
+# Неоднозначность bugLines: pause() вызывается в cleanup на строке 6. Без него скрытый через display: none <audio> продолжил бы играть, так что строка 6 тоже законный ответ. Добавил её в bugLines.
+- id: activity-background-player
+  skill: activity-effects-in-background
+  question: activity
+  difficulty: 3
+  prompt: Музыка должна продолжать играть, когда пользователь уходит с вкладки плеера. Но она останавливается. Где ошибка?
+  explanation: В hidden-режиме Activity размонтирует эффекты, и cleanup вызывает `audio.pause()`. Логику, которая должна работать в фоне (плеер, загрузка, сокет), выносят выше Activity, а в скрываемой части оставляют только UI управления.
+  type: find-bug
+  language: tsx
+  code: |-
+    function Player({ src }: { src: string }) {
+      const ref = useRef<HTMLAudioElement>(null);
+      useEffect(() => {
+        const audio = ref.current!;
+        audio.play();
+        return () => audio.pause();
+      }, [src]);
+      return <audio ref={ref} src={src} />;
+    }
+
+    <Activity mode={tab === 'player' ? 'visible' : 'hidden'}>
+      <Player src={track} />
+    </Activity>
+  bugLines:
+    - 6
+    - 11
+    - 12
+  causes:
+    - "Плеер лежит внутри Activity: при hidden React вызывает cleanup эффектов и `pause()` срабатывает. Плеер нужно вынести выше"
+    - Activity в режиме hidden удаляет `<audio>` из DOM, и воспроизведение прерывается
+    - Эффект перезапускается, потому что src указан в зависимостях
+    - В режиме hidden React навсегда перестаёт рендерить компонент, поэтому `play()` больше не вызывается
+  answer: 0
+
+# исправлено ревьюером:
+# Вариант «стор + условный рендеринг» тоже удовлетворяет всем условиям из промпта: черновик и данные сохраняются, подписка останавливается. Добавил в условие ограничение: state локальный и переписывать компоненты не хочется.
+# В explanation неудачная формулировка про «три вопроса».
+- id: activity-tabs-hiding-choice
+  skill: ui-hiding-strategy-choice
+  question: activity
+  difficulty: 2
+  prompt: Вкладки «Лента» и «Сообщения». Черновик сообщения и загруженные данные лежат в локальном state компонентов вкладок, переписывать их не хочется. При переключении всё это нужно сохранять. Скрытая вкладка не должна держать WebSocket-подписку. Что выбрать?
+  explanation: "Выбор способа скрытия сводится к трём вопросам: нужно ли сохранить state, нужно ли сохранить DOM и должны ли работать эффекты. «Сохранить всё, но остановить эффекты» — это `<Activity>`. «Ничего сохранять не нужно» — условный рендеринг. «Эффекты обязаны работать в фоне» — логику выносят выше дерева."
+  type: choose-tool
+  options:
+    - label: '`<Activity mode="visible" | "hidden">`'
+      why: Лучший вариант. State и DOM сохраняются, эффекты (и подписка) отключаются при скрытии и снова запускаются при показе.
+    - label: Условный рендеринг `{tab === 'inbox' && <Inbox />}`
+      why: Подписку остановит, но черновик и данные пропадут. Подходит для лёгких экранов без ценного локального state.
+    - label: "CSS `display: none` через className"
+      why: State и DOM сохранит, но эффекты продолжат работать, и WebSocket будет висеть зря. Годится для простых статичных блоков без подписок.
+    - label: Поднять черновик и данные в глобальный стор (Zustand)
+      why: Сработает, но придётся переписать компоненты, а DOM и прочий локальный state всё равно пересоздадутся. Оправдано, если данные нужны другим экранам.
+  answer: 0

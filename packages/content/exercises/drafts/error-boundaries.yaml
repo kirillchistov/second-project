@@ -1,0 +1,105 @@
+# Черновик упражнений: «Что такое Error Boundaries и какие ошибки они не ловят?» (error-boundaries)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only error-boundaries
+
+# исправлено ревьюером:
+# Правильный вариант длиннее 140 символов (141) и заметно длиннее остальных, что выдаёт ответ. Сократил.
+- id: error-boundaries-what-is-caught
+  skill: error-boundary-scope
+  question: error-boundaries
+  difficulty: 2
+  prompt: Какие ошибки перехватывает Error Boundary, а какие пролетают мимо него?
+  explanation: "Boundary работает внутри цикла рендера React: если ошибка случилась при рендере или коммите, React знает, какое поддерево заменить на fallback. Обработчики событий и промисы выполняются позже, вне этого цикла. Для них нужен try/catch и state или showBoundary(error). Отклонённый промис, прочитанный через use(), попадает в boundary."
+  type: quiz
+  options:
+    - label: Ловит ошибки рендера, жизненного цикла и эффектов потомков. Не ловит — в обработчиках, async-коде, SSR и в самом себе
+      why: Верно. Ловятся только ошибки, возникшие, пока React рендерит или коммитит дерево. Код, вызванный позже (клик, setTimeout, then), выполняется вне этого процесса.
+    - label: Ловит любые ошибки внутри своего поддерева, включая обработчики событий и отклонённые промисы
+      why: Частое заблуждение. Обработчик и промис выполняются вне рендера, и React не может связать такую ошибку с поддеревом, поэтому fallback не появится.
+    - label: Ловит ошибки только у дочерних компонентов-классов, функциональные компоненты нужно оборачивать отдельно
+      why: Неверно. Сам boundary должен быть классом, но ловит он ошибки любых потомков, в том числе функциональных компонентов.
+    - label: Ловит ошибки в обработчиках событий, но не в useEffect, потому что эффекты асинхронны
+      why: Всё наоборот. Ошибку в эффекте React выполняет в рамках коммита и передаёт в boundary, а ошибку в обработчике — нет.
+  answer: 0
+
+- id: error-boundaries-async-handler-throw
+  skill: error-boundary-scope
+  question: error-boundaries
+  difficulty: 2
+  prompt: Автор ожидает, что при неудачном сохранении появится fallback. Но fallback не появляется. Найдите строку с проблемой.
+  explanation: "throw внутри async-обработчика превращается в отклонённый промис вне рендера, и boundary его не видит. Ошибку нужно поймать самому: показать сообщение через state или передать её в boundary через showBoundary(error) из useErrorBoundary()."
+  type: find-bug
+  language: tsx
+  code: |-
+    function SaveButton({ data }: { data: Draft }) {
+      const handleClick = async () => {
+        const res = await fetch('/api/save', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error('Save failed');
+      };
+      return <button onClick={handleClick}>Save</button>;
+    }
+
+    <ErrorBoundary fallback={<p>Ошибка</p>}>
+      <SaveButton data={draft} />
+    </ErrorBoundary>;
+  bugLines:
+    - 7
+  causes:
+    - Ошибка выброшена в асинхронном обработчике события, вне рендера, — boundary такие ошибки не перехватывает
+    - У ErrorBoundary нет пропа fallback, нужно передавать FallbackComponent
+    - Перед проверкой res.ok нужно вызвать res.json(), иначе ошибка не сформируется
+    - SaveButton не считается потомком boundary, потому что передан через children
+  answer: 0
+
+- id: error-boundaries-class-implementation
+  skill: error-boundary-class-api
+  question: error-boundaries
+  difficulty: 2
+  prompt: "Допишите классовый Error Boundary: переключение на fallback, логирование и обычный рендер потомков."
+  explanation: Статический getDerivedStateFromError вызывается во время рендера и возвращает новый state для показа fallback. componentDidCatch вызывается в коммите и подходит для побочных эффектов вроде логирования. Хуков-аналогов этих методов нет, поэтому boundary пишут классом или берут react-error-boundary.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    class Boundary extends Component<Props, State> {
+      state: State = { hasError: false };
+      static ___(error: Error) {
+        return { hasError: true };
+      }
+      ___(error: Error, info: ErrorInfo) {
+        logToSentry(error, info.componentStack);
+      }
+      render() {
+        if (this.state.hasError) return this.props.fallback;
+        return this.props.___;
+      }
+    }
+  tokens:
+    - getDerivedStateFromError
+    - componentDidCatch
+    - children
+  decoys:
+    - getDerivedStateFromProps
+    - componentDidUpdate
+    - onError
+    - render
+
+- id: error-boundaries-async-to-fallback
+  skill: error-boundary-async-errors
+  question: error-boundaries
+  difficulty: 2
+  prompt: Виджет внутри ErrorBoundary (react-error-boundary) загружает данные по кнопке «Обновить». При сетевой ошибке нужно показать тот же fallback с кнопкой «Повторить», что и при ошибках рендера. Что выбрать?
+  explanation: "Boundary не видит асинхронные ошибки, но их можно передать в него вручную: поймать в catch и вызвать showBoundary(error). Тогда fallback, resetErrorBoundary и onError работают одинаково для ошибок рендера и сети. Глобальные обработчики подходят для логирования, а не для UI конкретного виджета."
+  type: choose-tool
+  options:
+    - label: useErrorBoundary().showBoundary(error) в catch
+      why: "Лучший вариант. Ошибка передаётся в ближайший boundary: показывается общий fallback, срабатывает onError, а кнопка «Повторить» сбрасывает состояние через resetErrorBoundary."
+    - label: try/catch и локальный state error с инлайн-сообщением
+      why: Подходит, если нужно мягкое сообщение рядом с кнопкой без замены всего виджета. Но тогда это отдельный UI, а не общий fallback.
+    - label: window.addEventListener('unhandledrejection')
+      why: Годится для глобального логирования необработанных промисов. Отрисовать fallback конкретного виджета через него нельзя.
+    - label: Опция onUncaughtError в createRoot
+      why: Нужна для централизованного логирования в React 19. Ошибки из обработчиков сюда не попадают, и запасной UI в нужном месте эта опция не показывает.
+  answer: 0

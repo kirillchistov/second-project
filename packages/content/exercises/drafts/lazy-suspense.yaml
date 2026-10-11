@@ -1,0 +1,97 @@
+# Черновик упражнений: «Как работают React.lazy и Suspense для разделения кода?» (lazy-suspense)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only lazy-suspense
+
+- id: lazy-suspense-core-idea
+  skill: code-splitting-lazy-suspense
+  question: lazy-suspense
+  difficulty: 2
+  prompt: Как `React.lazy` и `Suspense` вместе разделяют код приложения?
+  explanation: "`lazy` превращает динамический `import()` в компонент. Сборщик выносит этот модуль в отдельный чанк, и React запрашивает его при первом рендере. Пока чанк грузится, ближайшая граница `Suspense` выше по дереву показывает fallback. Поэтому тяжёлые страницы не попадают в начальный бандл."
+  type: quiz
+  options:
+    - label: При первом рендере lazy-компонент запрашивает свой чанк, а ближайший Suspense выше по дереву показывает fallback до загрузки
+      why: Верно. `import()` вызывается при первом рендере, пока промис не разрешён. Fallback показывает граница Suspense, которая стоит над lazy-компонентом.
+    - label: lazy загружает все чанки в фоне при старте приложения, а Suspense лишь скрывает компонент до монтирования
+      why: Неверно. Загрузка начинается только при первом рендере. Раньше её можно запустить лишь вручную, вызвав `import()`, например при наведении.
+    - label: Suspense нужно разместить внутри lazy-компонента, вокруг его собственной разметки
+      why: Неверно. Пока чанк не загружен, кода компонента ещё нет. Граница должна стоять выше по дереву, иначе показывать fallback некому.
+    - label: Код компонента всё равно остаётся в основном бандле, lazy лишь откладывает его монтирование
+      why: Неверно. Сборщик видит динамический `import()` и выносит модуль в отдельный чанк. В этом и состоит смысл code splitting.
+  answer: 0
+
+- id: lazy-suspense-inside-component
+  skill: lazy-module-level
+  question: lazy-suspense
+  difficulty: 2
+  prompt: После каждого ввода в фильтр график мигает скелетоном и теряет зум. Найдите строку с ошибкой.
+  explanation: "`lazy` внутри компонента на каждом рендере создаёт новый тип компонента. React видит другой тип, размонтирует старый `Chart` вместе с его состоянием и снова приостанавливается. Правило: `lazy` объявляют на уровне модуля, рядом с импортами."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Dashboard({ filter }: Props) {
+      const Chart = lazy(() => import('./Chart'));
+      return (
+        <Suspense fallback={<ChartSkeleton />}>
+          <Chart filter={filter} />
+        </Suspense>
+      );
+    }
+  bugLines:
+    - 2
+  causes:
+    - "lazy вызывается при каждом рендере: создаётся новый тип компонента, Chart перемонтируется и теряет состояние"
+    - Suspense должен быть внутри Chart, а не снаружи
+    - lazy работает только с именованными экспортами, а здесь импортируется default
+    - Нельзя передавать props в lazy-компонент до загрузки чанка
+  answer: 0
+
+- id: lazy-suspense-named-export
+  skill: lazy-named-export
+  question: lazy-suspense
+  difficulty: 2
+  prompt: Модуль `./charts` экспортирует `Chart` именованно. Допишите ленивую загрузку с запасным UI.
+  explanation: "`lazy` ожидает промис модуля с default-экспортом. Именованный экспорт заворачивают в `{ default: m.Chart }`. Запасной UI задаётся пропом `fallback` у ближайшего `Suspense`."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const Chart = ___(() =>
+      import('./charts').then((m) => ({
+        ___: m.Chart,
+      }))
+    );
+
+    function Report() {
+      return (
+        <Suspense ___={<ChartSkeleton />}>
+          <Chart />
+        </Suspense>
+      );
+    }
+  tokens:
+    - lazy
+    - default
+    - fallback
+  decoys:
+    - memo
+    - component
+    - loading
+    - placeholder
+
+- id: lazy-suspense-tab-switch-fallback
+  skill: suspense-transitions
+  question: lazy-suspense
+  difficulty: 3
+  prompt: Вкладки отчёта загружаются через lazy. При переключении весь экран на полсекунды заменяется скелетоном. Нужно оставить старую вкладку на экране, пока грузится новая. Что выбрать?
+  explanation: Если обновление, которое приостанавливает уже показанный контент, помечено как переход, React не прячет его за fallback. Он продолжает показывать старый экран, пока новый не готов. Предзагрузка и вложенные границы хорошо это дополняют.
+  type: choose-tool
+  options:
+    - label: Переключать вкладку через startTransition (или useTransition с индикатором isPending)
+      why: Лучший вариант. Переход позволяет React держать старый UI вместо fallback до загрузки чанка, а isPending даёт ненавязчивый индикатор загрузки.
+    - label: Предзагружать чанк вкладки вызовом import() по onMouseEnter
+      why: "Полезное дополнение: часто чанк успевает загрузиться. Но на медленной сети или при клике без наведения fallback всё равно появится."
+    - label: Убрать lazy и импортировать вкладки статически
+      why: Подходит, если вкладки лёгкие. Тяжёлые вкладки раздуют начальный бандл и замедлят первую загрузку.
+    - label: Поднять Suspense выше, до корня приложения
+      why: "Станет хуже: fallback заменит ещё больше интерфейса. Границы, наоборот, стоит дробить и ставить ближе к месту загрузки."
+  answer: 0

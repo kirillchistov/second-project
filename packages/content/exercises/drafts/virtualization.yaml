@@ -1,0 +1,110 @@
+# Черновик упражнений: «Как отрендерить список из 10 000 элементов?» (virtualization)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only virtualization
+
+- id: virtualization-core-idea
+  skill: list-virtualization
+  question: virtualization
+  difficulty: 2
+  prompt: Список из 10 000 строк тормозит при открытии и прокрутке. В чём суть виртуализации (windowing) как решения?
+  explanation: "Тормозят не вычисления, а объём: 10 000 компонентов и DOM-узлов. Виртуализация держит в DOM только окно видимых строк с запасом (overscan), а высоту остального имитирует отступом. Цена — Ctrl+F и скринридеры не видят скрытые строки. Для списка в 50 элементов это лишняя сложность."
+  type: quiz
+  options:
+    - label: В DOM живут только видимые строки плюс небольшой запас, остальное заменено отступом нужной высоты
+      why: Верно. Число узлов и компонентов почти не зависит от длины списка, поэтому монтирование и прокрутка остаются быстрыми. Платим поиском по странице и доступностью.
+    - label: "Обернуть строки в memo: тогда React не будет их рендерить, и 10 000 элементов перестанут тормозить"
+      why: memo пропускает только повторные рендеры. Первый рендер и 10 000 узлов в DOM никуда не деваются, а layout и память остаются тяжёлыми.
+    - label: "Рендерить все строки, но невидимые скрывать через display: none, чтобы браузер их не рисовал"
+      why: Компоненты всё равно монтируются, и узлы остаются в DOM. Экономится только отрисовка, а основная стоимость в рендере и создании узлов.
+    - label: В React 19 конкурентный рендеринг сам разбивает длинный список на части, поэтому виртуализация больше не нужна
+      why: Конкурентность может прерывать рендер, но не уменьшает число узлов. Все 10 000 строк всё равно окажутся в DOM.
+  answer: 0
+
+# исправлено ревьюером:
+# Код занимает 15 строк при лимите 14. getVirtualItems() перенесён прямо в map, порядок токенов обновлён.
+- id: virtualization-tanstack-virtualizer
+  skill: list-virtualization
+  question: virtualization
+  difficulty: 2
+  prompt: Допишите виртуализированный список на TanStack Virtual. RowView позиционируется абсолютно через translateY(y).
+  explanation: getScrollElement сообщает, какой элемент прокручивается. getTotalSize задаёт высоту распорки, чтобы скроллбар соответствовал всему списку. getVirtualItems возвращает только видимые строки, а item.start даёт смещение строки сверху.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const v = useVirtualizer({
+      count: rows.length,
+      ___: () => ref.current,
+      estimateSize: () => 40,
+    });
+    return (
+      <div ref={ref} style={{ height: 600, overflow: 'auto' }}>
+        <div style={{ height: v.___(), position: 'relative' }}>
+          {v.___().map((it) => (
+            <RowView key={it.key} row={rows[it.index]} y={it.___} />
+          ))}
+        </div>
+      </div>
+    );
+  tokens:
+    - getScrollElement
+    - getTotalSize
+    - getVirtualItems
+    - start
+  decoys:
+    - scrollElement
+    - getItems
+    - size
+    - index
+
+# исправлено ревьюером:
+# Код занимает 15 строк при лимите 14. После сжатия ошибка переместилась на строку 8.
+# Симптом «прокрутить дальше нельзя» неточен. Абсолютные и transform-элементы входят в scrollable overflow, поэтому прокрутка ползёт рывками, а скроллбар не отражает длину списка. Формулировка симптома и explanation исправлены.
+- id: virtualization-missing-total-size
+  skill: list-virtualization
+  question: virtualization
+  difficulty: 2
+  prompt: "RowView позиционируется через position: absolute и translateY(y). Ползунок скроллбара показывает, будто список почти кончился, и прыгает при прокрутке, а до конца из 10 000 строк не добраться. Где ошибка?"
+  explanation: "Абсолютно позиционированные строки не задают высоту родителя. Без height: v.getTotalSize() у распорки прокручиваемая область равна лишь отрисованному окну. Поэтому скроллбар не отражает длину списка и растёт рывками по мере появления строк. Правило: внутренний контейнер всегда получает полную виртуальную высоту."
+  type: find-bug
+  language: tsx
+  code: |-
+    function BigList({ rows }: { rows: Row[] }) {
+      const ref = useRef<HTMLDivElement>(null);
+      const v = useVirtualizer({
+        count: rows.length, estimateSize: () => 40,
+        getScrollElement: () => ref.current,
+      });
+      return <div ref={ref} style={{ height: 600, overflow: 'auto' }}>
+        <div style={{ position: 'relative' }}>
+          {v.getVirtualItems().map((it) => (
+            <RowView key={it.key} row={rows[it.index]} y={it.start} />
+          ))}
+        </div>
+      </div>;
+    }
+  bugLines:
+    - 8
+  causes:
+    - "У внутреннего контейнера нет height: v.getTotalSize(), и абсолютные строки не создают полную высоту для прокрутки"
+    - Не указан overscan, поэтому строки за пределами экрана не рендерятся
+    - estimateSize должен точно совпадать с реальной высотой, иначе прокрутка ломается
+    - key={it.key} нестабилен, нужно использовать key={it.index}
+  answer: 0
+
+- id: virtualization-faq-content-visibility
+  skill: list-rendering-strategy-choice
+  question: virtualization
+  difficulty: 3
+  prompt: "Страница справки: 2 000 блоков FAQ с простой разметкой. Первая отрисовка медленная. При этом Ctrl+F по всему тексту, SEO и скринридеры должны работать. Что выбрать?"
+  explanation: "Виртуализация и пагинация убирают элементы из DOM и поэтому ломают поиск по странице и доступность. Если весь контент обязан оставаться в DOM, а разметка простая, content-visibility: auto экономит layout и paint без смены архитектуры. Правило: сначала требования к поиску и доступности, потом техника."
+  type: choose-tool
+  options:
+    - label: "CSS content-visibility: auto + contain-intrinsic-size"
+      why: Узлы остаются в DOM, поэтому Ctrl+F, SEO и доступность работают. Браузер пропускает layout и paint блоков за экраном. Для простой разметки этого достаточно.
+    - label: Виртуализация через TanStack Virtual
+      why: Лучший выбор для десятков тысяч строк или тяжёлых строк. Здесь скрытых блоков нет в DOM, поэтому Ctrl+F и скринридеры их не найдут.
+    - label: Пагинация по 50 вопросов
+      why: Подходит каталогам, где пользователь листает страницы. Поиск по всей справке через Ctrl+F перестанет работать.
+    - label: useDeferredValue для рендера списка
+      why: Помогает сохранить отзывчивость ввода при фильтрации большого массива. Число узлов при этом не уменьшается, и первая отрисовка быстрее не станет.
+  answer: 0

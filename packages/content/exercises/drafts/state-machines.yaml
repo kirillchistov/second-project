@@ -1,0 +1,98 @@
+# Черновик упражнений: «Когда использовать конечные автоматы (state machines) в UI?» (state-machines)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only state-machines
+
+- id: state-machines-when-to-use
+  skill: state-machine-when
+  question: state-machines
+  difficulty: 3
+  prompt: В каком случае стоит описывать логику UI как конечный автомат?
+  explanation: Главный сигнал — флаги начинают противоречить друг другу, а переходы зависят от текущего состояния. Автомат перечисляет состояния, события и допустимые переходы, поэтому невозможное состояние нельзя даже записать. Для простого случая хватит `useReducer` с discriminated union, для сложного подойдёт XState.
+  type: quiz
+  options:
+    - label: Много состояний и переходов, а булевы флаги допускают невозможные комбинации вроде isLoading && isError
+      why: Верно. Автомат делает такие комбинации непредставимыми, а переходы задаёт явно. Логику можно визуализировать и тестировать отдельно от UI.
+    - label: Компонент часто перерисовывается, а автомат сокращает число рендеров
+      why: Автомат — это про корректность логики, а не про производительность. Число рендеров зависит от того, как меняется state, а не от того, как он смоделирован.
+    - label: Как только в компоненте больше двух useState, их лучше заменить машиной XState
+      why: Это типичный перегиб. Для простых независимых флагов XState — лишняя церемония. Критерий — связанные состояния и переходы, а не количество хуков.
+    - label: Состояние нужно разделить между многими компонентами, и автомат заменяет глобальный стор
+      why: Шаринг состояния решают Context, Zustand или Redux. Автомат описывает допустимые переходы, а где он хранится — отдельный вопрос.
+  answer: 0
+
+- id: state-machines-switch-on-event
+  skill: state-dependent-transitions
+  question: state-machines
+  difficulty: 2
+  prompt: После успешной загрузки запоздалое событие PROGRESS возвращает UI в состояние uploading. Где корень проблемы?
+  explanation: Редьюсер ветвится только по событию, поэтому любое событие срабатывает в любом состоянии. В автомате переход определяется парой «текущее состояние + событие». Нужно делать switch по `state.status` и внутри разрешать только допустимые события, а остальные игнорировать, возвращая `state`.
+  type: find-bug
+  language: tsx
+  code: |-
+    function reducer(state: State, e: Event): State {
+      switch (e.type) {
+        case 'START':
+          return { status: 'uploading', progress: 0 };
+        case 'PROGRESS':
+          return { status: 'uploading', progress: e.value };
+        case 'SUCCESS':
+          return { status: 'done', url: e.url };
+        case 'FAIL':
+          return { status: 'error', message: e.message };
+        default:
+          return state;
+      }
+    }
+  bugLines:
+    - 2
+  causes:
+    - Переход выбирается только по событию без учёта текущего состояния, поэтому PROGRESS срабатывает и в done
+    - В ветке PROGRESS нужно спредить ...state, иначе теряются остальные поля
+    - В default нужно бросать ошибку, а не возвращать state
+    - Редьюсер должен мутировать state, чтобы React не создавал лишний объект
+  answer: 0
+
+# вычитка: переходы автомата перенесены в условие — упражнение идёт до карточки вопроса, код reducer ещё не виден
+- id: state-machines-ignored-events
+  skill: state-dependent-transitions
+  question: state-machines
+  difficulty: 2
+  prompt: "`reducer` — автомат загрузки. idle: START → uploading (progress 0). uploading: PROGRESS меняет progress, FAIL → error, SUCCESS → done. error: RETRY → uploading (progress 0). Любое другое событие в текущем состоянии игнорируется. Что выведет console.log?"
+  explanation: Разбор по шагам. В idle событие SUCCESS игнорируется. START переводит в uploading. FAIL переводит в error. PROGRESS в состоянии error игнорируется. RETRY снова даёт uploading с progress 0, затем PROGRESS выставляет 70. Лишние и запоздалые события не ломают состояние — это гарантируется самим построением автомата.
+  type: predict-output
+  language: ts
+  code: |-
+    const events: Event[] = [
+      { type: 'SUCCESS', url: '/a.png' },
+      { type: 'START' },
+      { type: 'FAIL', message: 'timeout' },
+      { type: 'PROGRESS', value: 40 },
+      { type: 'RETRY' },
+      { type: 'PROGRESS', value: 70 },
+    ];
+    const init: State = { status: 'idle' };
+    console.log(events.reduce(reducer, init));
+  options:
+    - "{ status: 'uploading', progress: 70 }"
+    - "{ status: 'done', url: '/a.png' }"
+    - "{ status: 'error', message: 'timeout' }"
+    - "{ status: 'uploading', progress: 40 }"
+  answer: 0
+
+- id: state-machines-video-call-tool
+  skill: state-machine-tool-choice
+  question: state-machines
+  difficulty: 3
+  prompt: "Видеозвонок: connecting → connected → reconnecting с повторами по таймеру, параллельно независимые состояния микрофона и камеры. Продукту нужна схема переходов, QA — тестовые сценарии. Что выбрать?"
+  explanation: Критерий выбора — сложность графа. Для плоского набора состояний хватит `useReducer` с discriminated union. Когда нужны вложенные или параллельные состояния, отложенные переходы, вызов промисов и визуализация, выигрывает XState. Набор булевых флагов годится только для независимых простых переключателей.
+  type: choose-tool
+  options:
+    - label: XState
+      why: "Лучший выбор: параллельные состояния, отложенные переходы (after), вызов акторов и промисов, визуализация в Stately и генерация тестовых путей из модели."
+    - label: useReducer с discriminated union
+      why: Отлично подходит для плоского автомата на 3–5 состояний, как загрузка файла. Здесь таймеры, параллельные регионы и схему пришлось бы делать вручную.
+    - label: "Несколько useState: isConnected, isReconnecting, isMuted"
+      why: Подходит для независимых простых флагов. Здесь флаги допускают невозможные комбинации, например isConnected && isReconnecting.
+    - label: Zustand-стор
+      why: Решает задачу шаринга состояния между компонентами, но переходы всё равно придётся описывать самому. Можно использовать вместе с автоматом, но не вместо него.
+  answer: 0

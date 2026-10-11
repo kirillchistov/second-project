@@ -1,0 +1,104 @@
+# Черновик упражнений: «Как избежать водопадов запросов и кэшировать данные?» (data-waterfalls)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only data-waterfalls
+
+- id: data-waterfalls-cause-quiz
+  skill: data-waterfalls-cause
+  question: data-waterfalls
+  difficulty: 2
+  prompt: Почему загрузка данных внутри компонентов (`useQuery` в родителе и в ребёнке) часто даёт водопад и что помогает в первую очередь?
+  explanation: "Водопад создаёт зависимость старта запроса от рендера, а не скорость сети. Лечится это так: начинать загрузку до рендера (loader, prefetch, Server Components), запускать независимые запросы параллельно и поднимать их выше. Кэш ускоряет только повторные визиты."
+  type: quiz
+  options:
+    - label: Ребёнок монтируется и стартует запрос, только когда родитель загрузился и отрендерился. Помогает ранний старт и параллельные запросы
+      why: Верно. Цепочку создаёт связь «запрос ← рендер». Если запросы стартуют при навигации или вместе через useQueries/Promise.all, ожидания не складываются.
+    - label: Водопад возникает из-за медленной сети, и лучшее решение — закешировать все ответы
+      why: Кэш помогает при повторном визите и дедуплицирует запросы. Первая загрузка всё равно идёт цепочкой, если запросы стартуют по очереди.
+    - label: Достаточно обернуть каждый компонент в свою Suspense-границу, и запросы пойдут параллельно
+      why: Suspense только показывает fallback. Если каждая вложенная граница грузит своё после родителя, получится водопад «по слоям».
+    - label: Эффекты выполняются после paint. Если перенести загрузку в useLayoutEffect, запросы стартуют одновременно
+      why: useLayoutEffect срабатывает чуть раньше, но всё так же после рендера своего компонента. Ребёнок по-прежнему ждёт данных родителя.
+  answer: 0
+
+- id: data-waterfalls-sequential-await
+  skill: parallel-server-fetch
+  question: data-waterfalls
+  difficulty: 2
+  prompt: Server Component грузится вдвое дольше, чем мог бы. Посты не зависят от данных пользователя. Найдите проблему.
+  explanation: "Каждый `await` останавливает функцию, поэтому getPosts стартует только после ответа getUser. Независимые запросы нужно запустить сразу, без await, а ждать их вместе: `await Promise.all([userP, postsP])`. Тогда время загрузки равно самому долгому запросу, а не их сумме."
+  type: find-bug
+  language: tsx
+  code: |-
+    async function ProfilePage({ id }: Props) {
+      const user = await getUser(id);
+      const posts = await getPosts(id);
+      return (
+        <Layout user={user}>
+          <Posts items={posts} />
+        </Layout>
+      );
+    }
+  bugLines:
+    - 2
+    - 3
+  causes:
+    - "Последовательные await у независимых запросов: getPosts ждёт завершения getUser"
+    - Server Component не может быть async, данные нужно грузить в useEffect
+    - getUser нужно обернуть в cache() — тогда запросы пойдут параллельно
+    - Posts должен сам загружать свои данные, чтобы не блокировать Layout
+  answer: 0
+
+# исправлено ревьюером:
+# Фраза в explanation «staleTime не даёт сразу перезапросить свежие данные» неточна. staleTime в prefetchQuery означает другое: prefetch не выполняется повторно, если данные в кэше моложе staleTime. Для useQuery на странице действует его собственный staleTime.
+- id: data-waterfalls-prefetch-hover
+  skill: prefetch-on-intent
+  question: data-waterfalls
+  difficulty: 2
+  prompt: Допишите ссылку так, чтобы данные пользователя начинали грузиться уже при наведении курсора, до перехода на страницу.
+  explanation: "`prefetchQuery` кладёт данные в кэш TanStack Query под тем же queryKey, что использует страница. Между наведением и кликом проходят сотни миллисекунд, поэтому к моменту рендера запрос уже летит или завершён. staleTime: 60_000 нужен, чтобы повторные наведения не перезапрашивали данные, которым меньше минуты."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function UserLink({ id }: { id: string }) {
+      const queryClient = ___();
+      const prefetch = () =>
+        queryClient.___({
+          queryKey: ['user', id],
+          queryFn: () => getUser(id),
+          staleTime: 60_000,
+        });
+      return (
+        <Link to={`/users/${id}`} ___={prefetch}>
+          {id}
+        </Link>
+      );
+    }
+  tokens:
+    - useQueryClient
+    - prefetchQuery
+    - onMouseEnter
+  decoys:
+    - useQuery
+    - invalidateQueries
+    - onClick
+    - refetchQueries
+
+# исправлено ревьюером:
+# Обоснование варианта useMemo неточно. useMemo не является хуком состояния и доступен в Server Components. Неверен он по другой причине: мемоизирует только внутри одного компонента.
+- id: data-waterfalls-dedupe-server
+  skill: request-dedupe-cache
+  question: data-waterfalls
+  difficulty: 3
+  prompt: В Next.js App Router getUser(id) вызывается в layout, в шапке и на странице — это разные Server Components одного рендера. В БД уходит 3 запроса. Нужен один на HTTP-запрос, без пробрасывания props. Что выбрать?
+  explanation: "`cache()` из React мемоизирует функцию в рамках одного серверного рендера: все компоненты дерева получат один результат, а между HTTP-запросами кэш не живёт. Для кэша между запросами берут механизмы фреймворка, для клиентского серверного состояния — TanStack Query."
+  type: choose-tool
+  options:
+    - label: Обернуть getUser в cache() из react
+      why: "Лучший выбор: вызовы с теми же аргументами дедуплицируются в пределах одного серверного рендера, и данные не утекают между пользователями."
+    - label: TanStack Query с queryClient на сервере
+      why: Подходит для клиентского кэша, гидрации и фонового обновления. Ради дедупликации внутри одного RSC-рендера это лишняя инфраструктура.
+    - label: Глобальный Map на уровне модуля
+      why: "Map переживёт HTTP-запрос: данные одного пользователя могут попасть к другому, кэш устареет и будет расти. Годится только для общих данных с явной инвалидацией."
+    - label: useMemo в каждом компоненте
+      why: useMemo кэширует только внутри одного компонента и не делится результатом с layout, шапкой и страницей — запросов останется три.
+  answer: 0

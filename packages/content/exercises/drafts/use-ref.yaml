@@ -1,0 +1,98 @@
+# Черновик упражнений: «Что такое ref и useRef?» (use-ref)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only use-ref
+
+- id: use-ref-core-idea
+  skill: use-ref-semantics
+  question: use-ref
+  difficulty: 1
+  prompt: Что такое `useRef` и чем ref отличается от состояния?
+  explanation: "Ref — «карман» компонента вне рендера. Он нужен для DOM-узлов и значений, которые не показываются на экране: id таймера, предыдущее значение, экземпляр библиотеки. Если значение влияет на UI, нужен state."
+  type: quiz
+  options:
+    - label: Изменяемый объект `{ current }`, живущий всё время жизни компонента; запись в `current` не вызывает рендер
+      why: Верно. React возвращает один и тот же объект на каждом рендере и не следит за изменениями `current`.
+    - label: "Это useState без сеттера: присваивание `ref.current` планирует новый рендер"
+      why: Неверно. React не отслеживает запись в `current`, поэтому рендера не будет и UI не обновится.
+    - label: Новый объект на каждом рендере, поэтому значение между рендерами не сохраняется
+      why: Так ведёт себя `createRef` в функциональном компоненте. `useRef` возвращает один и тот же объект, пока компонент смонтирован.
+    - label: Ref нужен только для DOM-узлов, а прочие значения между рендерами хранят в обычных переменных
+      why: Локальные переменные пересоздаются на каждом рендере. Хранить в ref id таймера или предыдущее значение — штатное применение.
+  answer: 0
+
+# исправлено ревьюером:
+# Строка 8 тоже относится к ошибке: она читает ref во время рендера, и explanation прямо называет это проблемой. При исправлении на state меняются строки 2, 4 и 8. Ученик, выбравший строку 8, не должен получать «неверно».
+- id: use-ref-displayed-value-bug
+  skill: ref-vs-state
+  question: use-ref
+  difficulty: 1
+  prompt: Счётчик на кнопке не меняется при кликах. Найдите ошибку.
+  explanation: "Изменение `ref.current` не запускает рендер, поэтому JSX показывает устаревшее значение. Вдобавок чтение ref во время рендера ненадёжно. Правило: если данные видны на экране, это state (`useState`/`useReducer`), а ref — для значений вне рендера. Исправление: `const [likes, setLikes] = useState(0)`, `setLikes(l => l + 1)` и `{likes}` в JSX."
+  type: find-bug
+  language: tsx
+  code: |-
+    function LikeButton() {
+      const likes = useRef(0);
+      function handleClick() {
+        likes.current += 1;
+      }
+      return (
+        <button onClick={handleClick}>
+          ♥ {likes.current}
+        </button>
+      );
+    }
+  bugLines:
+    - 2
+    - 4
+    - 8
+  causes:
+    - "Отображаемое значение хранится в ref: запись в `current` не вызывает рендер"
+    - Обработчик нужно обернуть в useCallback, иначе клик теряется
+    - "`useRef` нельзя инициализировать числом, только null"
+    - Вместо `+= 1` нужно использовать `likes.current++`
+  answer: 0
+
+- id: use-ref-focus-input
+  skill: dom-ref-access
+  question: use-ref
+  difficulty: 1
+  prompt: Допишите код, чтобы поле email получало фокус сразу после монтирования.
+  explanation: "`useRef<HTMLInputElement>(null)` создаёт ref, а атрибут `ref` связывает его с узлом. После commit React записывает DOM-элемент в `current`, поэтому в эффекте узел уже доступен. Опциональная цепочка `?.` страхует от null."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function LoginForm() {
+      const emailRef = ___<HTMLInputElement>(null);
+      useEffect(() => {
+        emailRef.___?.focus();
+      }, []);
+      return <input ___={emailRef} type="email" />;
+    }
+  tokens:
+    - useRef
+    - current
+    - ref
+  decoys:
+    - createRef
+    - value
+    - forwardRef
+    - key
+
+- id: use-ref-debounce-timer-id
+  skill: ref-for-mutable-values
+  question: use-ref
+  difficulty: 2
+  prompt: "Поле поиска: в onChange нужно сбрасывать и заново запускать таймер debounce. Id таймера нужен только в обработчике и в cleanup при размонтировании, на экране он не показывается. Где его хранить?"
+  explanation: Значение, которое должно пережить рендеры, но не влияет на UI, — классический случай для ref. State дал бы лишние рендеры. Локальная переменная и `createRef` теряют значение между рендерами.
+  type: choose-tool
+  options:
+    - label: "`useRef<number | null>(null)`"
+      why: "Лучший вариант: объект живёт всё время жизни компонента, запись id не вызывает рендер, cleanup видит актуальный таймер."
+    - label: "`useState<number | null>(null)`"
+      why: Значение сохранится, но каждая запись id вызовет лишний рендер. State нужен, когда значение отображается на экране.
+    - label: "`let timerId` в теле компонента"
+      why: Переменная пересоздаётся на каждом рендере, и id прошлого таймера потеряется. Подошла бы только переменная модуля, но она общая для всех экземпляров.
+    - label: "`createRef()` в теле компонента"
+      why: Возвращает новый объект на каждом рендере. Это инструмент классовых компонентов, где ref создают один раз в конструкторе.
+  answer: 0

@@ -1,0 +1,102 @@
+# Черновик упражнений: «Когда компонент перерендеривается?» (when-rerender)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only when-rerender
+
+- id: when-rerender-child-without-props
+  skill: rerender-triggers
+  question: when-rerender
+  difficulty: 2
+  prompt: Родитель обновил свой state. Почему его ребёнок рендерится, хотя его props не изменились?
+  explanation: "Рендер запускают три вещи: свой state, прочитанный контекст и рендер родителя. Изменение props — лишь следствие рендера родителя, а не самостоятельная причина. Чтобы ребёнок пропускал рендер при тех же props, нужен `memo` или React Compiler. Рендер ≠ обновление DOM: если результат не изменился, DOM не трогается."
+  type: quiz
+  options:
+    - label: По умолчанию React рендерит всех потомков компонента, чей state изменился, и не сравнивает их props, если нет memo
+      why: "Верно. Без memo React вообще не сравнивает props: рендер родителя каскадом запускает рендер всего поддерева."
+    - label: React поверхностно сравнивает props, но объекты и функции в props всегда считаются новыми
+      why: "Без memo никакого сравнения props нет. Нестабильные объекты мешают только мемоизированным компонентам: memo видит новую ссылку и рендерит."
+    - label: "Так не бывает: ребёнок рендерится только при изменении props, а лишние рендеры даёт StrictMode в dev"
+      why: Это популярный миф. StrictMode удваивает рендеры в dev, но ребёнок рендерится вслед за родителем и без него, и в production.
+    - label: React перерисовывает DOM ребёнка на всякий случай, потому что не знает, зависит ли он от state родителя
+      why: Рендер не равен обновлению DOM. Функция компонента вызывается, но если результат совпал с прошлым, DOM не меняется.
+  answer: 0
+
+- id: when-rerender-plain-vs-memo
+  skill: rerender-triggers
+  question: when-rerender
+  difficulty: 2
+  prompt: Компонент смонтировали, затем один раз нажали кнопку. StrictMode и React Compiler не используются. Что будет в консоли?
+  explanation: "Рендер App каскадом рендерит Plain, хотя у него нет props. Memo тоже получает новый JSX-элемент, но memo сравнивает props через Object.is. Props пустые и совпадают, поэтому рендер пропускается. С React Compiler пропустился бы и Plain: компилятор закешировал бы его элемент."
+  type: predict-output
+  language: tsx
+  code: |-
+    const Memo = memo(() => {
+      console.log('Memo');
+      return null;
+    });
+    function Plain() {
+      console.log('Plain');
+      return null;
+    }
+    function App() {
+      const [n, setN] = useState(0);
+      console.log('App', n);
+      const inc = () => setN(n + 1);
+      return <button onClick={inc}><Plain /><Memo /></button>;
+    }
+  options:
+    - App 0 → Plain → Memo → App 1 → Plain
+    - App 0 → Plain → Memo → App 1
+    - App 0 → Plain → Memo → App 1 → Plain → Memo
+    - App 0 → Plain → Memo → App 1 → Memo
+  answer: 0
+
+- id: when-rerender-memo-unstable-prop
+  skill: memo-stable-props
+  question: when-rerender
+  difficulty: 2
+  prompt: Chart обёрнут в memo, но Profiler показывает, что он рендерится на каждый символ в поле ввода. Найдите строку с причиной.
+  explanation: "memo сравнивает каждый prop через Object.is. Литерал `{ theme: 'dark' }` создаёт новый объект на каждом рендере, поэтому сравнение всегда проваливается. Исправление: вынести константу за пределы компонента или обернуть в useMemo. Ещё лучше опустить state поиска в отдельный компонент. React Compiler стабилизировал бы объект автоматически."
+  type: find-bug
+  language: tsx
+  code: |-
+    const Chart = memo(HeavyChart);
+
+    function Dashboard({ data }: { data: Point[] }) {
+      const [query, setQuery] = useState('');
+      return (
+        <>
+          <input value={query}
+            onChange={(e) => setQuery(e.target.value)} />
+          <Chart data={data}
+            options={{ theme: 'dark' }} />
+        </>
+      );
+    }
+  bugLines:
+    - 10
+  causes:
+    - Объект options создаётся заново на каждом рендере — memo видит новую ссылку и рендерит Chart
+    - data приходит через props родителя, поэтому memo всегда считает его изменённым
+    - memo не работает, если родитель хранит состояние в useState
+    - memo нельзя применять к компоненту, объявленному в другом модуле
+  answer: 0
+
+# исправлено ревьюером:
+# В explanation неточность: «без всякого сравнения» неверно. React сравнивает ссылку на элемент (props), он лишь не делает поверхностного сравнения каждого prop, как memo.
+- id: when-rerender-scroll-wrapper-children
+  skill: rerender-composition
+  question: when-rerender
+  difficulty: 3
+  prompt: Обёртка ScrollShadow хранит scrollTop в state и по нему рисует тень у своего div. Внутри div лежит тяжёлая лента FeedList без props, и она рендерится на каждый скролл. State нужен самой обёртке. React Compiler в проекте нет. Что сделать в первую очередь?
+  explanation: "Порядок предпочтения: сначала структура, потом мемоизация. Если state можно опустить, опускаем. Если state оборачивает тяжёлую часть, передаём её как children. Элемент создан в компоненте выше, и его ссылка при скролле не меняется. React видит тот же элемент и пропускает поддерево без поверхностного сравнения props. memo — следующий шаг."
+  type: choose-tool
+  options:
+    - label: Передать FeedList в ScrollShadow как children из компонента выше
+      why: Лучший вариант. Элемент <FeedList /> создаётся выше и при скролле остаётся той же ссылкой. React пропускает его рендер без memo и без требований к стабильности props.
+    - label: Обернуть FeedList в memo
+      why: Сработает, но это добавочная мемоизация со сравнением props, которая сломается, как только появятся нестабильные props. Уместна, если структуру поменять нельзя.
+    - label: Опустить scrollTop в отдельный компонент рядом с лентой
+      why: Лучший первый шаг, когда state нужен только соседу. Здесь state управляет обёрткой, внутри которой лежит лента, поэтому вынести его без перестройки дерева нельзя.
+    - label: Хранить scrollTop в React Context
+      why: "Не уменьшает рендеры, а добавляет зависимость: все потребители контекста будут рендериться на каждый скролл."
+  answer: 0

@@ -1,0 +1,106 @@
+# Черновик упражнений: «Как работает useState и почему новое значение «не видно» сразу?» (use-state)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only use-state
+
+- id: use-state-snapshot-quiz
+  skill: state-snapshot
+  question: use-state
+  difficulty: 1
+  prompt: Почему `console.log(count)` сразу после `setCount(count + 1)` выводит старое значение?
+  explanation: "Каждый рендер — снимок: `count` в нём константа. `setCount` ставит обновление в очередь и планирует новый рендер, где `useState` вернёт новое значение. Чтобы считать от актуального состояния, передают апдейтер `setCount(c => c + 1)`. Чтобы использовать новое значение сразу, сохраняют его в локальную переменную."
+  type: quiz
+  options:
+    - label: "`setCount` не меняет переменную текущего рендера: он ставит обновление в очередь, а новое значение увидит следующий рендер"
+      why: Верно. `count` — константа в замыкании этого рендера. Новое значение React отдаст при следующем вызове компонента.
+    - label: "setState работает как промис: если написать `await setCount(...)`, следующая строка увидит новое значение"
+      why: "`setCount` возвращает undefined, ждать нечего. Даже после await переменная `count` в замыкании остаётся прежней константой."
+    - label: "Виноват батчинг: если обернуть вызов во `flushSync`, `count` обновится прямо в обработчике"
+      why: "`flushSync` синхронно применит рендер и DOM, но локальная `count` в текущем замыкании всё равно останется старой: это значение прошлого снимка."
+    - label: Деструктуризация копирует значение; если читать `state[0]` из массива, значение будет свежим
+      why: Массив, который вернул `useState`, — тоже снимок текущего рендера. Ни одно чтение не даст значение из будущего рендера.
+  answer: 0
+
+- id: use-state-mixed-updates-output
+  skill: state-snapshot
+  question: use-state
+  difficulty: 2
+  prompt: Кнопку нажали один раз. Что будет в консоли и что отобразится на кнопке?
+  explanation: Очередь обновлений обрабатывается по порядку. Значение `n + 5` = 5 заменяет состояние, затем апдейтер получает 5 и возвращает 6. Лог показывает снимок текущего рендера, то есть 0. Апдейтер работает с результатом предыдущих обновлений в очереди, а значение — с замыканием.
+  type: predict-output
+  language: tsx
+  code: |-
+    function Counter() {
+      const [n, setN] = useState(0);
+
+      function handleClick() {
+        setN(n + 5);
+        setN((c) => c + 1);
+        console.log('click', n);
+      }
+
+      return <button onClick={handleClick}>{n}</button>;
+    }
+  options:
+    - click 0, на кнопке 6
+    - click 6, на кнопке 6
+    - click 0, на кнопке 1
+    - click 0, на кнопке 5
+  answer: 0
+
+- id: use-state-mutation-no-rerender
+  skill: state-immutable-updates
+  question: use-state
+  difficulty: 1
+  prompt: После вызова addTodo список на экране не обновляется. Найдите ошибку.
+  explanation: "`push` мутирует тот же массив, и в `setTodos` уходит та же ссылка. `Object.is(old, new)` возвращает true, поэтому React пропускает рендер. Правило: состояние не мутируют, а создают новый объект или массив: `setTodos(prev => [...prev, todo])`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function TodoList() {
+      const [todos, setTodos] = useState<Todo[]>([]);
+
+      function addTodo(text: string) {
+        todos.push({ id: crypto.randomUUID(), text });
+        setTodos(todos);
+      }
+
+      return <List items={todos} onAdd={addTodo} />;
+    }
+  bugLines:
+    - 5
+    - 6
+  causes:
+    - Массив мутируется и передаётся та же ссылка — `Object.is` считает состояние неизменным, и рендера нет
+    - "`setTodos` асинхронный, и без `await` обновление теряется"
+    - "Массив в `useState` нужно инициализировать лениво: `useState(() => [])`"
+    - "`crypto.randomUUID()` нельзя вызывать внутри обработчика событий"
+  answer: 0
+
+# исправлено ревьюером:
+# Тип `e: InputEvent` неверен: это DOM-тип, у него `e.target` имеет тип `EventTarget | null`, и деструктуризация `name`/`value` не скомпилируется в TypeScript. Нужен `React.ChangeEvent<HTMLInputElement>`.
+- id: use-state-lazy-init-merge
+  skill: state-object-updates
+  question: use-state
+  difficulty: 2
+  prompt: Черновик формы должен читаться из localStorage только при первом рендере. Каждое поле должно обновляться, не теряя остальные. Заполните пропуски.
+  explanation: Если передать `loadDraft` без вызова, React вызовет функцию только при первом рендере. Вариант `loadDraft()` выполнялся бы на каждом рендере. Сеттер хука заменяет объект целиком, поэтому остальные поля копируют через `...prev`, а изменяемое поле задают вычисляемым ключом `[name]`.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function DraftForm() {
+      const [form, setForm] = useState(___);
+
+      function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+        const { name, value } = e.target;
+        setForm((prev) => ({ ___prev, [___]: value }));
+      }
+      // ...
+    }
+  tokens:
+    - loadDraft
+    - ...
+    - name
+  decoys:
+    - loadDraft()
+    - "'name'"
+    - form

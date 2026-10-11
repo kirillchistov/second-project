@@ -1,0 +1,100 @@
+# Черновик упражнений: «HOC, render props и хуки: чем отличаются и что использовать сейчас?» (hoc-render-props-hooks)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only hoc-render-props-hooks
+
+- id: hoc-render-props-hooks-quiz
+  skill: logic-reuse-patterns
+  question: hoc-render-props-hooks
+  difficulty: 2
+  prompt: Почему в современном React логику переиспользуют в основном через хуки, а не через HOC и render props?
+  explanation: "Все три паттерна решают одну задачу: как переиспользовать логику. Хуки делают это без лишних узлов в дереве и с явным источником каждого значения. HOC оставляют для сквозной обёртки целого компонента: доступ, error boundary, аналитика. Render props — там, где разметку нужно отдать пользователю."
+  type: quiz
+  options:
+    - label: "Хук не добавляет компонентов в дерево: видно, откуда взялось значение, нет коллизий props и вложенности обёрток"
+      why: Верно. Хук — это вызов функции внутри компонента. Значение явно приходит в переменную, типизируется как обычная функция и не порождает wrapper hell.
+    - label: HOC и render props вызывают лишние ре-рендеры, поэтому React объявил их устаревшими
+      why: "Паттерны не объявлены устаревшими: это обычные компоненты и функции. Хуки вытеснили их ради простоты и явности, а не из-за производительности."
+    - label: HOC и render props не работают с функциональными компонентами, только с классовыми
+      why: Оба паттерна прекрасно работают с функциональными компонентами. Например, HOC withAuth может сам вызывать хук внутри обёртки.
+    - label: Хуки заменили только render props, а получать данные по-прежнему принято через HOC вроде connect
+      why: connect тоже вытеснен хуками (useSelector, useDispatch). HOC остался нишевым инструментом для обёрток на уровне компонента.
+  answer: 0
+
+# исправлено ревьюером:
+# Неточный сценарий в условии: ввод в Form меняет состояние самой Form и перерисовывает только её, а не Page, поэтому перемонтирования не будет. Баг проявляется при ре-рендере Page, например когда родитель меняет id или собственное состояние.
+- id: hoc-render-props-hooks-hoc-in-render
+  skill: hoc-in-render
+  question: hoc-render-props-hooks
+  difficulty: 2
+  prompt: Каждый раз, когда Page перерисовывается (например, родитель передал новый id), поля Form очищаются, а лог 'mount' пишется снова. Найдите причину.
+  explanation: Вызов withLogger(Form) в теле Page на каждом рендере создаёт новую функцию-компонент. React видит новый тип, размонтирует старое поддерево и монтирует его заново. Поэтому состояние Form теряется, а эффект срабатывает повторно. HOC применяют один раз, на уровне модуля.
+  type: find-bug
+  language: tsx
+  code: |-
+    function withLogger<P extends object>(
+      C: React.ComponentType<P>
+    ) {
+      return (props: P) => {
+        useEffect(() => log('mount'), []);
+        return <C {...props} />;
+      };
+    }
+
+    function Page({ id }: { id: string }) {
+      const LoggedForm = withLogger(Form);
+      return <LoggedForm id={id} />;
+    }
+  bugLines:
+    - 11
+  causes:
+    - "HOC вызывается внутри рендера: каждый раз получается новый тип компонента, поэтому Form перемонтируется и теряет состояние"
+    - useEffect с пустым массивом внутри HOC нарушает правила хуков
+    - Анонимная стрелка вместо именованной функции ломает сравнение деревьев
+    - Обобщённый P без явного указания типа не даёт пробросить id в Form
+  answer: 0
+
+- id: hoc-render-props-hooks-typed-hoc
+  skill: hoc-typing
+  question: hoc-render-props-hooks
+  difficulty: 2
+  prompt: "Допишите типизированный HOC: он принимает любой компонент и прозрачно пробрасывает его props."
+  explanation: P extends object ограничивает props объектом. React.ComponentType<P> принимает и функциональные, и классовые компоненты с такими props. Обёртка должна передать все props дальше, иначе обёрнутый компонент их потеряет. ReactNode и ReactElement описывают результат рендера, а не сам компонент.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function withAuth<P extends ___>(
+      Component: React.___<P>
+    ) {
+      return function Protected(props: P) {
+        const user = useUser();
+        if (!user) return <Navigate to="/login" />;
+        return <Component {...___} />;
+      };
+    }
+  tokens:
+    - object
+    - ComponentType
+    - props
+  decoys:
+    - ReactNode
+    - ReactElement
+    - user
+    - children
+
+- id: hoc-render-props-hooks-choose-reuse
+  skill: logic-reuse-choice
+  question: hoc-render-props-hooks
+  difficulty: 2
+  prompt: Виджету дашборда нужны позиция мыши, размер окна и текущий пользователь. Координаты используются в useEffect и вычислениях до JSX. Как переиспользовать эту логику?
+  explanation: Если значения нужны в логике компонента, а не только в разметке, выбирайте кастомный хук. Несколько источников комбинируются простыми вызовами без вложенности. Render props полезны, когда разметку отдают пользователю (headless-библиотеки), HOC — для обёртки целого компонента.
+  type: choose-tool
+  options:
+    - label: "Кастомные хуки: useMousePosition, useWindowSize, useUser"
+      why: "Лучший выбор: значения сразу доступны в теле компонента, эффектах и вычислениях, хуки свободно комбинируются и легко типизируются."
+    - label: "Render props: <MouseTracker render={...} />"
+      why: Значения доступны только внутри колбэка в JSX. Три источника дали бы вложенные колбэки. Уместно, когда библиотека отдаёт разметку пользователю.
+    - label: "HOC: withMouse(withWindowSize(withUser(Widget)))"
+      why: Получится обёртка в обёртке, возможны коллизии props и неясно, кто какой prop добавил. Подходит для сквозных задач вроде проверки доступа.
+    - label: React Context с координатами мыши на всё приложение
+      why: Context передаёт значение вглубь, но частые обновления позиции перерисуют всех потребителей. Хорош для редко меняющихся данных вроде темы.
+  answer: 0

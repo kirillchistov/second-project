@@ -1,0 +1,98 @@
+# Черновик упражнений: «Чем useReducer отличается от useState и что такое reducer?» (use-reducer)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only use-reducer
+
+- id: use-reducer-vs-use-state-quiz
+  skill: use-reducer-basics
+  question: use-reducer
+  difficulty: 2
+  prompt: Что такое reducer и когда `useReducer` удобнее, чем `useState`?
+  explanation: "Reducer собирает все переходы состояния в одном месте и легко тестируется отдельно от компонента. Выбирайте `useReducer`, когда поля связаны и одно действие меняет несколько из них. Для независимых простых значений достаточно `useState`. Reducer должен быть чистым: без запросов, случайных значений и мутаций."
+  type: quiz
+  options:
+    - label: Чистая функция (state, action) => newState; `useReducer` удобен, когда переходы связаны и одно действие меняет несколько полей
+      why: Верно. Все переходы описаны в одном месте. Компонент только сообщает, что произошло, через dispatch, а reducer решает, каким станет новое состояние.
+    - label: "`useReducer` быстрее `useState`: он батчит обновления, а `useState` перерисовывает компонент на каждый вызов"
+      why: Неверно. Обновления батчатся одинаково, ведь `useState` построен на том же механизме, что и `useReducer`. Выбор зависит от сложности логики, а не от скорости.
+    - label: Reducer — подходящее место для запросов и подписок, чтобы вынести побочные эффекты из компонента
+      why: "Неверно. Reducer обязан быть чистым: в Strict Mode он вызывается дважды. Побочным эффектам место в обработчиках событий или в `useEffect`."
+    - label: "`useReducer` создаёт глобальное состояние, доступное любому компоненту без Context"
+      why: Неверно. Состояние `useReducer` локально, как и у `useState`. Чтобы сделать его общим, нужно передать state и dispatch через Context или взять стор.
+  answer: 0
+
+- id: use-reducer-mutation-no-rerender
+  skill: reducer-immutability
+  question: use-reducer
+  difficulty: 2
+  prompt: "После dispatch({ type: 'add', item }) список на экране не обновляется. Найдите ошибку."
+  explanation: "React сравнивает старое и новое состояние через Object.is. Если вернуть ту же ссылку, React решает, что ничего не изменилось, и пропускает рендер. Правильно вернуть новый объект: `{ ...state, items: [...state.items, action.item] }`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function reducer(state: State, action: Action) {
+      switch (action.type) {
+        case 'add':
+          state.items.push(action.item);
+          return state;
+        case 'clear':
+          return { ...state, items: [] };
+        default:
+          return state;
+      }
+    }
+  bugLines:
+    - 4
+    - 5
+  causes:
+    - state мутируется и возвращается тот же объект — Object.is видит прежнюю ссылку, и React пропускает рендер
+    - В reducer нельзя использовать switch — нужен объект с обработчиками для каждого action
+    - Ветка default должна бросать ошибку, иначе React не применит изменения
+    - Если ничего не изменилось, reducer должен возвращать undefined, а не state
+  answer: 0
+
+- id: use-reducer-dispatch-queue
+  skill: reducer-update-queue
+  question: use-reducer
+  difficulty: 2
+  prompt: Компонент без StrictMode. Кнопку нажали один раз. Что выведется в консоль и что будет на кнопке после рендера?
+  explanation: "dispatch не меняет state сразу: в обработчике state остаётся снимком текущего рендера, поэтому в консоли 0. Оба action встают в очередь. На следующем рендере reducer применяет их по цепочке, и каждый получает результат предыдущего: 0 → 1 → 2."
+  type: predict-output
+  language: tsx
+  code: |-
+    function reducer(s: { n: number }, a: { type: 'inc' }) {
+      return { n: s.n + 1 };
+    }
+
+    function Counter() {
+      const [state, dispatch] = useReducer(reducer, { n: 0 });
+      function handleClick() {
+        dispatch({ type: 'inc' });
+        dispatch({ type: 'inc' });
+        console.log(state.n);
+      }
+      return <button onClick={handleClick}>{state.n}</button>;
+    }
+  options:
+    - "Консоль: 0, на кнопке: 2"
+    - "Консоль: 2, на кнопке: 2"
+    - "Консоль: 0, на кнопке: 1"
+    - "Консоль: 1, на кнопке: 2"
+  answer: 0
+
+- id: use-reducer-checkout-wizard
+  skill: reducer-vs-state-choice
+  question: use-reducer
+  difficulty: 2
+  prompt: "Мастер оформления заказа живёт в одном компоненте: шаг, поля, ошибки валидации, статус отправки. «Назад» меняет шаг и сбрасывает ошибки, «submit» меняет статус и ошибки. Логику нужно покрыть юнит-тестами. Что выбрать?"
+  explanation: "Признаки для `useReducer`: поля связаны, одно событие меняет несколько из них, нужны тесты логики. Состояние локально, поэтому глобальный стор избыточен. Discriminated union для action и status исключает невозможные состояния."
+  type: choose-tool
+  options:
+    - label: "`useReducer` с union-типом action"
+      why: Лучший выбор. Связанные переходы собраны в чистой функции, которую легко тестировать без рендера. dispatch стабилен, его можно передавать в шаги мастера без useCallback.
+    - label: Несколько `useState` на каждое поле
+      why: Подходит для независимых простых значений. Здесь одно событие меняет 2–3 поля, и легко забыть один из сеттеров и получить рассинхрон.
+    - label: Глобальный стор Zustand
+      why: Оправдан, если состояние нужно разным частям приложения. Для формы внутри одного компонента это лишняя зависимость и глобальность.
+    - label: Один `useState` с объектом и ручным setState в обработчиках
+      why: Работает, но логика переходов размазана по обработчикам, и её не протестировать отдельно. По сути это недоделанный reducer.
+  answer: 0

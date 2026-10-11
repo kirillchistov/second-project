@@ -1,0 +1,104 @@
+# Черновик упражнений: «Как защитить React-приложение от XSS?» (xss)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only xss
+
+# исправлено ревьюером:
+# Верный вариант утверждает, что React «не защищает URL в href/src». Для React 19 это неточно: React блокирует схему `javascript:` в этих атрибутах. Правильнее сказать, что полагаться на эту блокировку нельзя и URL нужно проверять самостоятельно.
+- id: xss-react-escaping-quiz
+  skill: xss-react-escaping
+  question: xss
+  difficulty: 2
+  prompt: Какое утверждение о защите React-приложения от XSS верно?
+  explanation: "Правило: `{}` в JSX безопасен, потому что React экранирует строки. Всё, что обходит экранирование, требует ручной защиты: `dangerouslySetInnerHTML`, `innerHTML` через ref, URL в `href`/`src`, сериализация состояния при SSR, spread чужих props. HTML санитизируют (DOMPurify), у URL проверяют схему по белому списку, а CSP — вторая линия защиты."
+  type: quiz
+  options:
+    - label: React экранирует строки в `{}`, но `dangerouslySetInnerHTML`, `innerHTML` через ref и URL в `href`/`src` нужно защищать вручную
+      why: Верно. Экранирование работает только при обычной вставке значений в JSX. React 19 блокирует `javascript:` в `href`, но полагаться на это не стоит.
+    - label: React экранирует всё, включая `dangerouslySetInnerHTML`, поэтому на клиенте санитизация не нужна
+      why: Неверно. `dangerouslySetInnerHTML` специально вставляет HTML как есть — отсюда и слово dangerously в названии.
+    - label: Достаточно настроить строгую CSP — тогда санитизировать HTML уже не нужно
+      why: "CSP — вторая линия: она блокирует часть внедрённых скриптов, но не HTML-инъекции вроде фишинговых форм и не спасает при ошибках в политике. Основная защита — санитизация."
+    - label: Достаточно очистить HTML на сервере при сохранении — на клиенте проверять ничего не нужно
+      why: "Данные могут попасть в базу в обход этой очистки: старые записи, импорт, другие сервисы. URL может оказаться опасным в другом контексте. Защищать нужно там, где данные выводятся."
+  answer: 0
+
+- id: xss-unchecked-href
+  skill: xss-url-schemes
+  question: xss
+  difficulty: 2
+  prompt: В карточке комментария осталась XSS-уязвимость. Найдите строку.
+  explanation: "Экранирование в `{}` не проверяет схему URL: значение `javascript:alert(1)` в `href` — валидная строка. Современный React блокирует такие ссылки, но полагаться на это не стоит. Пропускайте URL через `safeUrl` с белым списком протоколов (`http:`, `https:`, `mailto:`)."
+  type: find-bug
+  language: tsx
+  code: |-
+    function CommentCard({ comment }: Props) {
+      return (
+        <article>
+          <h3>{comment.author}</h3>
+          <a href={comment.authorSite}>Сайт автора</a>
+          <div
+            dangerouslySetInnerHTML={{
+              __html: DOMPurify.sanitize(comment.html),
+            }}
+          />
+        </article>
+      );
+    }
+  bugLines:
+    - 5
+  causes:
+    - URL от пользователя попадает в `href` без проверки схемы — возможен `javascript:`
+    - "`{comment.author}` не экранируется, и HTML в имени автора выполнится"
+    - "`DOMPurify.sanitize` нужно вызывать в useEffect, а не во время рендера"
+    - Санитизированный HTML нужно вставлять через ref.innerHTML, а не через `dangerouslySetInnerHTML`
+  answer: 0
+
+- id: xss-safe-url-and-sanitize
+  skill: xss-sanitize-and-validate
+  question: xss
+  difficulty: 2
+  prompt: Допишите проверку схемы URL и безопасную вставку пользовательского HTML.
+  explanation: "`new URL` разбирает адрес, в том числе относительный (с базой `location.origin`). По `protocol` его сверяют с белым списком, а при ошибке парсинга возвращают `#`. HTML пропускают через `DOMPurify.sanitize` и только потом кладут в `__html`. Белый список надёжнее, чем поиск опасных шаблонов."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function safeUrl(url: string) {
+      try {
+        const { ___ } = new URL(url, location.origin);
+        return ['http:', 'https:'].includes(protocol)
+          ? url
+          : '#';
+      } catch {
+        return '#';
+      }
+    }
+
+    const clean = DOMPurify.___(comment.html);
+    <div dangerouslySetInnerHTML={{ ___: clean }} />
+  tokens:
+    - protocol
+    - sanitize
+    - __html
+  decoys:
+    - origin
+    - escape
+    - html
+    - innerHTML
+
+- id: xss-markdown-comments
+  skill: xss-user-html
+  question: xss
+  difficulty: 2
+  prompt: "Пользователи пишут комментарии в Markdown: нужны ссылки, списки и жирный текст. Вы рендерите Markdown в HTML-строку через marked и выводите её. Как защититься от XSS?"
+  explanation: Если пользовательский HTML нужно отрендерить, санитизируйте результат перед вставкой. Можно и отключить сырой HTML в рендерере, но ссылки всё равно проверяют. Самописные регулярки обходятся, CSP — только страховка. Если форматирование не нужно, выводите обычный текст через `{}`.
+  type: choose-tool
+  options:
+    - label: Пропустить HTML от marked через `DOMPurify.sanitize` и только потом передать в `dangerouslySetInnerHTML`
+      why: Лучший вариант. DOMPurify удаляет скрипты, обработчики вроде `onerror` и ссылки `javascript:`, а безопасное форматирование сохраняет.
+    - label: Удалять теги `<script>` регулярным выражением перед вставкой
+      why: Обходится через `<img onerror>`, `<a href="javascript:...">` и хитрую разметку. Регулярки годятся для валидации формата, но не для санитизации HTML.
+    - label: Настроить строгую CSP с nonce и вставлять HTML как есть
+      why: CSP стоит включить как вторую линию защиты. Но она не спасёт от внедрённых форм и ссылок, а при ошибке в политике не защитит вовсе.
+    - label: Выводить исходный Markdown через `{comment.body}` без рендеринга
+      why: Безопасно, но пользователь увидит сырые `**` и `[]()`. Подходит, когда форматирование не требуется.
+  answer: 0

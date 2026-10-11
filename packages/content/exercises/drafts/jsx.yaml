@@ -1,0 +1,104 @@
+# Черновик упражнений: «Что такое JSX и во что он компилируется?» (jsx)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only jsx
+
+- id: jsx-compiles-to-quiz
+  skill: jsx-compilation
+  question: jsx
+  difficulty: 1
+  prompt: Что на самом деле получается из JSX-разметки вроде `<button className="primary">Save</button>`?
+  explanation: JSX — синтаксический сахар. Компилятор (Babel, SWC, esbuild, tsc) превращает его в вызовы `jsx()` из `react/jsx-runtime`, до React 17 — в `React.createElement`. Результат — React-элемент, обычный объект с описанием UI. DOM из него создаёт уже React на этапе commit.
+  type: quiz
+  options:
+    - label: Компилятор превращает её в вызов `jsx('button', props)`, который возвращает обычный JS-объект — React-элемент
+      why: "Верно. Элемент — лёгкое описание «что нарисовать»: type, props, key. Реальный DOM React строит позже, при commit."
+    - label: Компилятор превращает её в HTML-строку, которую React вставляет через innerHTML
+      why: "Строк нет: JSX даёт объекты, а значения в `{}` экранируются. Вставка HTML-строки — это отдельный `dangerouslySetInnerHTML`."
+    - label: Каждый JSX-тег сразу вызывает `document.createElement` и создаёт DOM-узел
+      why: Создание элемента не трогает DOM. Поэтому JSX можно рендерить на сервере, в тестах и в React Native, где DOM нет.
+    - label: "Браузер понимает JSX сам: это часть современного стандарта ECMAScript"
+      why: JSX не входит в стандарт ECMAScript, и браузер выдаст на нём SyntaxError. Без шага компиляции JSX не работает.
+  answer: 0
+
+- id: jsx-compiled-output-fill
+  skill: jsx-compilation
+  question: jsx
+  difficulty: 2
+  prompt: Допишите, во что новый JSX transform (React 17+) превратит строку с компонентом.
+  explanation: Для компонента в `type` передаётся ссылка на функцию `Button`, для HTML-тега — строка `'button'`. Дочернее содержимое попадает в props как `children`. Функция `jsx` импортируется из `react/jsx-runtime` автоматически, поэтому писать `import React` не нужно.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    // Source
+    const el = <Button kind="primary">Save</Button>;
+
+    // After compilation
+    import { ___ } from 'react/jsx-runtime';
+    const el = jsx(___, {
+      kind: 'primary',
+      ___: 'Save',
+    });
+  tokens:
+    - jsx
+    - Button
+    - children
+  decoys:
+    - createElement
+    - "'Button'"
+    - text
+    - content
+
+- id: jsx-and-zero-render
+  skill: jsx-conditional-rendering
+  question: jsx
+  difficulty: 1
+  prompt: Что появится на экране при `<Inbox count={0} />`? Badge выводит число в кружке.
+  explanation: "`0 && x` возвращает `0`, а React не рендерит только `false`, `null`, `undefined` и `true`. Число 0 выводится как текст. Используйте `count > 0 && ...` или тернарник."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Inbox({ count }: { count: number }) {
+      return (
+        <div>
+          Inbox: {count && <Badge n={count} />}
+        </div>
+      );
+    }
+  options:
+    - "Inbox: 0"
+    - "Inbox: (только текст, без бейджа)"
+    - "Inbox: false"
+    - Бейдж с числом 0
+  answer: 0
+
+- id: jsx-lowercase-component
+  skill: jsx-component-naming
+  question: jsx
+  difficulty: 1
+  prompt: Список пользователей не показывает карточки, а в консоли предупреждение о неизвестном теге. Найдите ошибку.
+  explanation: JSX различает теги по первой букве. `<userCard />` компилируется в `jsx('userCard', ...)` со строкой, и React создаёт несуществующий HTML-тег. `<UserCard />` даёт `jsx(UserCard, ...)` со ссылкой на функцию. Компоненты всегда называйте с заглавной буквы.
+  type: find-bug
+  language: tsx
+  code: |-
+    function userCard({ name }: { name: string }) {
+      return <div className="card">{name}</div>;
+    }
+
+    export function Team({ users }: { users: User[] }) {
+      return (
+        <ul>
+          {users.map((u) => (
+            <userCard key={u.id} name={u.name} />
+          ))}
+        </ul>
+      );
+    }
+  bugLines:
+    - 1
+    - 9
+  causes:
+    - "Имя компонента с маленькой буквы: JSX передаёт `'userCard'` строкой, и React рендерит неизвестный HTML-тег вместо вызова функции"
+    - Внутри `map` нужен явный `return`, иначе стрелочная функция вернёт undefined
+    - "`key` нужно указывать на `<ul>`, а не на элементах списка"
+    - На `<div>` нельзя использовать `className`, нужен атрибут `class`
+  answer: 0

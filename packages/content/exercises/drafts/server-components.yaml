@@ -1,0 +1,102 @@
+# Черновик упражнений: «Что такое React Server Components?» (server-components)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only server-components
+
+- id: server-components-vs-ssr
+  skill: rsc-mental-model
+  question: server-components
+  difficulty: 3
+  prompt: Что принципиально отличает React Server Components от классического SSR?
+  explanation: SSR отвечает на вопрос «как быстро показать HTML», а RSC — «какой код вообще нужен на клиенте». Server Components выполняются только на сервере или при сборке, их код не уходит в бандл. Клиент получает RSC payload и при первой загрузке, и при навигации. Обычно RSC и SSR работают вместе.
+  type: quiz
+  options:
+    - label: Код Server Components не попадает в бандл и не гидрируется; клиент получает RSC payload, в том числе при навигации
+      why: Верно. SSR даёт HTML первой загрузки, а потом гидрирует всё дерево. В RSC серверная часть дерева так и остаётся на сервере.
+    - label: "Это новое название SSR в App Router: компоненты на каждый запрос рендерятся на сервере в HTML"
+      why: Нет. Результат RSC — сериализованный payload, а не HTML. Такие компоненты могут выполняться и при сборке. HTML из payload получают отдельно, через SSR.
+    - label: Server Components рендерятся на сервере, а затем гидрируются на клиенте и становятся интерактивными
+      why: У Server Components нет гидрации, state и обработчиков. Интерактивность есть только у Client Components за границей 'use client'.
+    - label: Server Components работают только на первой загрузке, а при клиентской навигации их подменяют клиентские
+      why: "Наоборот: при навигации без перезагрузки роутер запрашивает RSC payload нового маршрута. Серверные компоненты при этом снова выполняются на сервере."
+  answer: 0
+
+- id: server-components-function-prop
+  skill: rsc-serializable-props
+  question: server-components
+  difficulty: 2
+  prompt: Counter — Client Component с 'use client'. Найдите строку, из-за которой страница упадёт при рендере.
+  explanation: "Props, которые идут через границу server→client, сериализуются в RSC payload. Обычную функцию сериализовать нельзя, и React выдаст ошибку «Functions cannot be passed directly to Client Components». Есть два решения: объявить обработчик внутри клиентского компонента или передать Server Function с 'use server'."
+  type: find-bug
+  language: tsx
+  code: |-
+    // app/page.tsx — Server Component
+    import { Counter } from './Counter';
+
+    export default async function Page() {
+      const start = await getInitialCount();
+      return (
+        <Counter
+          initial={start}
+          onChange={(n) => console.log(n)}
+        />
+      );
+    }
+  bugLines:
+    - 9
+  causes:
+    - Обычная функция не сериализуется и не может пройти через границу server/client как prop
+    - Async-компонент не может рендерить Client Component — нужен dynamic import
+    - Результат await нельзя передавать в props клиентского компонента
+    - console.log запрещён в Server Components, потому что консоли на сервере нет
+  answer: 0
+
+- id: server-components-heavy-article
+  skill: rsc-client-boundary-placement
+  question: server-components
+  difficulty: 2
+  prompt: Статья блога рендерится тяжёлой библиотекой подсветки кода (~300 КБ). Контент меняется только при публикации, рядом стоит кнопка «лайк». Next.js App Router. Как организовать?
+  explanation: Границу 'use client' опускайте как можно ниже, до интерактивных листьев. Тогда тяжёлые зависимости для чистого рендера остаются на сервере, а в бандл попадают только клиентские острова.
+  type: choose-tool
+  options:
+    - label: Статья — Server Component с подсветкой на сервере, кнопка «лайк» — отдельный 'use client' остров
+      why: Лучший вариант. Библиотека подсветки не попадает в бандл, статья приходит готовой разметкой, а гидрируется только маленькая кнопка.
+    - label: "'use client' на всей странице, данные загружать через useEffect"
+      why: 300 КБ уйдут в бандл, контент появится только после загрузки JS и запроса. Так стоит делать лишь для полностью интерактивного виджета без SEO.
+    - label: Client Component страницы, отрендеренный через SSR, — HTML будет сразу
+      why: HTML действительно будет сразу, но для гидрации библиотека всё равно скачается и выполнится. Подходит, если подсветка должна быть интерактивной, например в живом редакторе.
+    - label: Подгрузить библиотеку подсветки через lazy/dynamic import на клиенте
+      why: Бандл первой загрузки станет меньше, но код всё равно скачается и выполнится в браузере. Уместно для тяжёлого интерактивного виджета, который нужен не сразу.
+  answer: 0
+
+- id: server-components-children-slot
+  skill: rsc-children-composition
+  question: server-components
+  difficulty: 3
+  prompt: Комментарии загружает async Server Component `Comments`. Допишите код так, чтобы они отображались внутри клиентской сворачиваемой обёртки и не стали клиентским кодом.
+  explanation: "Если Comments импортировать внутрь Collapsible, он стал бы клиентским. Вместо этого серверная страница рендерит Comments сама и передаёт результат как children. Для клиентской обёртки children — уже готовый JSX из RSC payload: она лишь решает, где его показать."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    // Collapsible.tsx
+    '___';
+    export function Collapsible({ children }: Props) {
+      const [open, setOpen] = useState(false);
+      const toggle = () => setOpen((o) => !o);
+      return (
+        <section>
+          <button onClick={toggle}>Toggle</button>
+          {open && ___}
+        </section>
+      );
+    }
+    // page.tsx — Server Component
+    <Collapsible><___ /></Collapsible>
+  tokens:
+    - use client
+    - children
+    - Comments
+  decoys:
+    - use server
+    - server-only
+    - Collapsible
+    - props.children

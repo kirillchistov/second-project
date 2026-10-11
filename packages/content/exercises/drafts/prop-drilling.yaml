@@ -1,0 +1,102 @@
+# Черновик упражнений: «Что такое prop drilling и как его избежать?» (prop-drilling)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only prop-drilling
+
+- id: prop-drilling-definition-quiz
+  skill: prop-drilling-solutions
+  question: prop-drilling
+  difficulty: 2
+  prompt: Что такое prop drilling и с чего обычно стоит начинать борьбу с ним?
+  explanation: "Суть drilling — транзитные компоненты, которые лишь пробрасывают чужие данные. Решения идут по возрастанию тяжести: композиция (children, слоты), затем Context, внешний стор, URL. Серверные данные берут из кэша TanStack Query. Явная передача на 2–3 уровня — норма."
+  type: quiz
+  options:
+    - label: "Это передача данных через компоненты, которым они не нужны. Сначала стоит попробовать композицию: children и слоты"
+      why: Верно. Если передать готовый элемент, промежуточный Layout перестаёт знать о user. Зависимости остаются явными, а новых механизмов не появляется.
+    - label: Это любая передача props глубже одного уровня, и её стоит сразу выносить в Context
+      why: "Передать props на 2–3 уровня нормально: это явно и просто. Ранний уход в Context прячет зависимости, а такие связи сложнее отследить и протестировать."
+    - label: "Это проблема производительности: каждый проброшенный prop вызывает лишний рендер, и лечится она через React.memo"
+      why: Главная беда drilling — связанность и шум в коде, а не скорость. React.memo не уберёт транзитные props, промежуточные компоненты всё равно будут о них знать.
+    - label: Это подъём данных от ребёнка к родителю через цепочку колбэков, и решается он глобальным стором
+      why: Подъём состояния — другая техника. Drilling — передача вниз через лишние уровни, и стор для неё скорее крайняя мера, чем первое решение.
+  answer: 0
+
+- id: prop-drilling-slot-composition
+  skill: composition-slots
+  question: prop-drilling
+  difficulty: 2
+  prompt: Допишите Layout со слотами так, чтобы он не знал о user, а UserMenu и Feed получали user напрямую.
+  explanation: "Slot-паттерн: компонент принимает готовые элементы (ReactNode) в именованных props и в children, а сам только расставляет их по местам. Данные передаются там, где элемент создаётся, поэтому промежуточный уровень от них не зависит."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function Layout(props: {
+      sidebar: ReactNode;
+      children: ReactNode;
+    }) {
+      return (
+        <div className="layout">
+          <aside>{props.___}</aside>
+          <main>{props.___}</main>
+        </div>
+      );
+    }
+    <Layout ___={<UserMenu user={user} />}>
+      <Feed user={user} />
+    </Layout>
+  tokens:
+    - sidebar
+    - children
+    - sidebar
+  decoys:
+    - user
+    - slot
+    - render
+    - Sidebar
+
+- id: prop-drilling-children-no-rerender
+  skill: composition-rerender-bailout
+  question: prop-drilling
+  difficulty: 3
+  prompt: StrictMode и React Compiler выключены. Приложение смонтировали, затем один раз кликнули по тексту feed. Что окажется в консоли?
+  explanation: "Элемент <Feed /> создаётся в рендере App и приходит в Layout через children. Когда меняется состояние Layout, App не перерендеривается, и children остаётся тем же объектом. React видит неизменный элемент и пропускает Feed. Так композиция помогает с производительностью: состояние меняется, а переданные извне части не рендерятся заново."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Feed() {
+      console.log('Feed');
+      return <p>feed</p>;
+    }
+    function Layout({ children }: PropsWithChildren) {
+      const [open, setOpen] = useState(false);
+      console.log('Layout');
+      const toggle = () => setOpen(!open);
+      return <div onClick={toggle}>{children}</div>;
+    }
+    function App() {
+      console.log('App');
+      return <Layout><Feed /></Layout>;
+    }
+  options:
+    - App → Layout → Feed → Layout
+    - App → Layout → Feed → Layout → Feed
+    - App → Layout → Feed → App → Layout → Feed
+    - App → Layout → Feed → Feed
+  answer: 0
+
+- id: prop-drilling-catalog-filters
+  skill: url-state-choice
+  question: prop-drilling
+  difficulty: 2
+  prompt: Фильтры каталога (категория, цена, сортировка) нужны панели фильтров, списку товаров и счётчику в шапке на разной глубине. Фильтры должны переживать перезагрузку, а ссылку можно отправить коллеге. Что выбрать?
+  explanation: Сначала определите, кому принадлежит состояние. Фильтры, выбор и пагинация, которыми делятся ссылкой, хранят в URL. Редко меняющиеся глобальные данные кладут в Context, часто меняющиеся — в стор с селекторами, серверные данные — в кэш TanStack Query.
+  type: choose-tool
+  options:
+    - label: Search params в URL (useSearchParams)
+      why: "Лучший выбор. URL сам по себе глобален: любой компонент читает фильтры без пробрасывания, состояние переживает перезагрузку, а ссылкой можно поделиться."
+    - label: Context с useState в корне страницы
+      why: Избавит от drilling, но после перезагрузки фильтры потеряются, а поделиться ссылкой не выйдет. Context хорош для темы, локали и текущего пользователя.
+    - label: Zustand-стор с селекторами
+      why: Подходит для часто меняющегося клиентского состояния, например редактора или корзины. Без отдельной синхронизации с URL ни перезагрузку, ни ссылку стор не переживёт.
+    - label: TanStack Query
+      why: Нужен для серверных данных. Сами товары можно грузить через useQuery с фильтрами в ключе, но хранить фильтры как источник истины в нём неуместно.
+  answer: 0

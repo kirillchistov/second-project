@@ -1,0 +1,94 @@
+# Черновик упражнений: «Чем фаза render отличается от фазы commit?» (render-vs-commit)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only render-vs-commit
+
+- id: render-vs-commit-side-effects-quiz
+  skill: render-commit-phases
+  question: render-vs-commit
+  difficulty: 2
+  prompt: Почему побочные эффекты нельзя делать в теле компонента, а в useEffect и обработчиках событий — можно?
+  explanation: "Render — это вычисление: React может его прервать, повторить или отбросить. Commit — момент, когда изменения точно применяются к DOM. Он синхронный и не прерывается. Правило: тело компонента — чистая функция от props и state, а всё внешнее делается в commit-фазе (эффекты) или в обработчиках."
+  type: quiz
+  options:
+    - label: Рендер может прерваться, повториться или быть отброшен, а commit гарантированно применяет результат — эффекты безопасны только там
+      why: "Верно. В конкурентном режиме рендер может выполниться несколько раз и не попасть на экран. Побочный эффект из такого рендера останется без пары: без отписки или с лишним запросом."
+    - label: Рендер выполняется вне главного потока, поэтому из него нет доступа к DOM и сети
+      why: Неверно. Рендер идёт в главном потоке. Его прерываемость — это кооперативная уступка браузеру между единицами работы, а не отдельный поток.
+    - label: Эффекты в рендере просто медленнее, и React Compiler всё равно вынесет их в useEffect
+      why: Неверно. Compiler мемоизирует чистые вычисления и не переносит побочные эффекты. Он, наоборот, рассчитывает на чистоту рендера.
+    - label: Commit тоже прерываем, но React откатывает его эффекты, а эффекты рендера откатить не может
+      why: "Неверно. Commit синхронный и не прерывается. Откатов эффектов в React нет: есть только cleanup перед следующим запуском или при размонтировании."
+  answer: 0
+
+- id: render-vs-commit-subscribe-in-render
+  skill: render-purity-side-effects
+  question: render-vs-commit
+  difficulty: 2
+  prompt: Компонент иногда продолжает получать сообщения из старых комнат. Найдите ошибку.
+  explanation: Подписка создаётся при каждом вызове рендера. Если рендер прерван или отброшен, его эффект не выполнится, и отписки не будет. Подписки на внешние источники делают в useEffect с cleanup или через useSyncExternalStore.
+  type: find-bug
+  language: tsx
+  code: |-
+    function Chat({ roomId }: { roomId: string }) {
+      const [msgs, setMsgs] = useState<Msg[]>([]);
+      const off = chat.subscribe(roomId, (m) => {
+        setMsgs((prev) => [...prev, m]);
+      });
+      useEffect(() => off, [off]);
+      return <MessageList items={msgs} />;
+    }
+  bugLines:
+    - 3
+  causes:
+    - "Подписка происходит в рендере: если рендер не дошёл до commit, эффект с отпиской для него не выполнится"
+    - Функциональное обновление setMsgs вызывает бесконечный цикл рендеров
+    - useEffect не может вернуть cleanup-функцию, сохранённую в переменную
+    - MessageList нужно обернуть в memo, иначе сообщения дублируются
+  answer: 0
+
+- id: render-vs-commit-parent-child-effects
+  skill: effect-execution-order
+  question: render-vs-commit
+  difficulty: 3
+  prompt: Parent монтируется впервые, StrictMode нет. Что будет в консоли?
+  explanation: "Render идёт сверху вниз: сначала родитель, потом ребёнок. Эффекты выполняются в commit снизу вверх: эффекты ребёнка срабатывают раньше эффектов родителя. Все layout-эффекты выполняются до paint, все пассивные — после. Поэтому родитель в своём эффекте может рассчитывать, что дети уже смонтированы."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Child() {
+      console.log('render Child');
+      useLayoutEffect(() => console.log('layout Child'));
+      useEffect(() => console.log('effect Child'));
+      return null;
+    }
+
+    function Parent() {
+      console.log('render Parent');
+      useLayoutEffect(() => console.log('layout Parent'));
+      useEffect(() => console.log('effect Parent'));
+      return <Child />;
+    }
+  options:
+    - render Parent → render Child → layout Child → layout Parent → effect Child → effect Parent
+    - render Parent → render Child → layout Parent → layout Child → effect Parent → effect Child
+    - render Parent → layout Parent → effect Parent → render Child → layout Child → effect Child
+    - render Parent → render Child → layout Child → effect Child → layout Parent → effect Parent
+  answer: 0
+
+- id: render-vs-commit-tooltip-measure
+  skill: layout-effect-measurement
+  question: render-vs-commit
+  difficulty: 2
+  prompt: Тултип должен измерить свою высоту и, если не помещается снизу, показаться сверху. Пользователь не должен увидеть прыжок. Где измерять?
+  explanation: "Нужен DOM после mutation, но до paint — это layout-фаза commit. useLayoutEffect видит вставленные узлы, а setState в нём применяется синхронно до отрисовки. Его стоит использовать только для измерений: он блокирует кадр."
+  type: choose-tool
+  options:
+    - label: useLayoutEffect + getBoundingClientRect
+      why: Выполняется после вставки в DOM, но до отрисовки. Перерасчёт позиции попадёт в тот же кадр, и мерцания не будет.
+    - label: useEffect + getBoundingClientRect
+      why: Подходит для измерений, которые не меняют видимое положение (аналитика, логирование). Здесь тултип сначала нарисуется снизу, потом прыгнет.
+    - label: Читать ref.current в теле компонента
+      why: "В рендере DOM ещё не обновлён: на первом рендере ref равен null, потом там старый узел. Рендер должен быть чистым — измерения ему не место."
+    - label: Посчитать позицию в useMemo по props
+      why: Годится, если размер заранее известен из данных. Реальную высоту контента без DOM не узнать, а useMemo вызывается в рендере.
+  answer: 0

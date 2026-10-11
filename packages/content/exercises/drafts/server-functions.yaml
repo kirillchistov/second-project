@@ -1,0 +1,101 @@
+# Черновик упражнений: «Что такое Server Functions и как их защищать?» (server-functions)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only server-functions
+
+- id: server-functions-public-endpoint-quiz
+  skill: server-functions-security
+  question: server-functions
+  difficulty: 3
+  prompt: Почему валидацию аргументов и проверку прав нужно делать внутри Server Function, даже если UI уже всё проверяет?
+  explanation: "Функцию с `'use server'` удобно вызывать как обычную async-функцию, но фреймворк превращает вызов в POST-запрос. Это публичный API-эндпоинт. Правило: внутри каждой функции проверяй, кто вызывает, валидируй вход схемой (Zod/Valibot), проверяй права на ресурс и возвращай клиенту только нужные поля."
+  type: quiz
+  options:
+    - label: "Это публичный POST-эндпоинт: его можно вызвать напрямую с любыми аргументами, в обход UI"
+      why: Верно. Любой может повторить запрос из DevTools или скрипта с чужим id. Защита на клиенте ничего не гарантирует, проверки должны быть на сервере.
+    - label: "Не нужно: фреймворк сверяет аргументы с TypeScript-типами параметров при десериализации"
+      why: "TypeScript-типы стираются при компиляции и в рантайме не проверяются. Чтобы реально проверить вход, нужна схема: Zod, Valibot и т. п."
+    - label: Её могут вызвать только компоненты, которые её импортируют, поэтому скрытой кнопки в UI достаточно
+      why: Импорт даёт клиенту ссылку на эндпоинт, а не ограничение доступа. Запрос виден во вкладке Network, его легко воспроизвести без кнопки.
+    - label: Фреймворк проверяет Origin и шифрует данные, поэтому дополнительная защита не нужна
+      why: Проверка Origin защищает от CSRF, а шифруются переменные замыкания. Ни то, ни другое не мешает залогиненному пользователю передать чужой id.
+  answer: 0
+
+- id: server-functions-missing-authorization
+  skill: server-functions-security
+  question: server-functions
+  difficulty: 2
+  prompt: Кнопку «Удалить» в UI видит только автор поста. Найдите строку, из-за которой любой пользователь может удалить чужой пост.
+  explanation: Аутентификация (сессия есть) — ещё не авторизация (есть ли право на этот пост). Кнопку можно скрыть в UI, но функцию всё равно можно вызвать напрямую с любым postId. Перед мутацией загрузи ресурс и проверь, что `post.authorId === session.user.id`, или вызови свою `canDelete`.
+  type: find-bug
+  language: tsx
+  code: |-
+    'use server';
+
+    // Кнопка «Удалить» видна только автору
+    export async function deletePost(raw: unknown) {
+      const postId = z.uuid().parse(raw);
+      const session = await auth();
+      if (!session) throw new Error('Unauthorized');
+      await db.post.delete(postId);
+      revalidatePath('/posts');
+    }
+  bugLines:
+    - 8
+  causes:
+    - "Пост удаляется без проверки, что текущий пользователь — его автор: проверена только сессия"
+    - revalidatePath нужно вызывать до удаления, иначе кэш не обновится
+    - Server Function не может бросать исключения — нужно возвращать объект с ошибкой
+    - Параметр нужно типизировать как string, а не unknown, иначе схема не сработает
+  answer: 0
+
+- id: server-functions-zod-validation
+  skill: server-functions-input-validation
+  question: server-functions
+  difficulty: 2
+  prompt: Допишите Server Function так, чтобы данные формы проходили рантайм-валидацию схемой без исключений.
+  explanation: "`Object.fromEntries` превращает FormData в объект, `safeParse` не бросает исключение и возвращает `{ success, data | error }`. Ошибку можно вернуть в UI. authorId берём из сессии, а не из формы: клиенту нельзя доверять ни одно поле."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    'use server';
+    const schema = z.object({
+      postId: z.uuid(),
+      text: z.string().min(1).max(2000),
+    });
+    export async function addComment(fd: FormData) {
+      const session = await auth();
+      if (!session) return { error: 'Нужно войти' };
+      const parsed = schema.___(Object.___(fd));
+      if (!parsed.___) return { error: 'Неверный ввод' };
+      const { postId, text } = parsed.___;
+      const authorId = session.user.id;
+      await db.comment.create({ postId, text, authorId });
+    }
+  tokens:
+    - safeParse
+    - fromEntries
+    - success
+    - data
+  decoys:
+    - parse
+    - entries
+    - ok
+    - value
+
+- id: server-functions-not-for-reads
+  skill: server-functions-use-cases
+  question: server-functions
+  difficulty: 2
+  prompt: "Next.js App Router: при открытии страницы поста нужно показать комментарии. Важны SEO и минимум клиентского JS, обновлять данные в реальном времени не нужно. Что выбрать?"
+  explanation: Server Functions нужны для мутаций. Это POST-запросы, фреймворк выполняет их последовательно, и они не встраиваются в серверный рендер. Начальную загрузку данных делает async Server Component. Клиентский фетчинг нужен, когда данные надо обновлять интерактивно.
+  type: choose-tool
+  options:
+    - label: async Server Component, который читает данные через слой доступа к БД
+      why: "Лучший вариант: данные приходят прямо в HTML, клиентского JS для загрузки нет, SEO работает из коробки. Проверку доступа держим в слое данных."
+    - label: Server Function, вызванная из useEffect в клиентском компоненте
+      why: "Антипаттерн: функции рассчитаны на мутации и выполняются последовательно, а данные появятся только после гидрации. Нет ни SSR, ни кэша."
+    - label: Route Handler и fetch в useEffect
+      why: Подходит, если тот же API нужен внешним клиентам, например мобильному приложению. Для этой страницы это лишний водопад запросов и клиентский JS.
+    - label: TanStack Query на клиенте поверх Route Handler
+      why: Подходит, если нужны polling, refetch при фокусе или оптимистичные обновления. Для статичного показа при открытии это избыточно.
+  answer: 0

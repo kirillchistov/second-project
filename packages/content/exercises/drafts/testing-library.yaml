@@ -1,0 +1,106 @@
+# Черновик упражнений: «Как тестировать React-компоненты: философия Testing Library и Vitest?» (testing-library)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only testing-library
+
+- id: testing-library-philosophy-quiz
+  skill: testing-user-behavior
+  question: testing-library
+  difficulty: 2
+  prompt: Почему Testing Library советует искать элементы по ролям и подписям и проверять видимый результат, а не state компонента?
+  explanation: Тест должен падать, когда ломается поведение, а не когда меняется реализация. Запросы по ролям и подписям повторяют то, как интерфейс видят пользователь и скринридер. Если элемент не найти по роли, это часто сигнал о проблеме с доступностью.
+  type: quiz
+  options:
+    - label: "Тест проверяет то же, что видит пользователь: рефакторинг внутренностей его не ломает, а падает он только при сломанном поведении"
+      why: Верно. Тест привязан к контракту «что видно и что можно сделать», а не к именам state, хуков и CSS-классов.
+    - label: getByRole работает быстрее остальных запросов, поэтому тесты проходят быстрее
+      why: "Наоборот: getByRole обходит дерево доступности и обычно самый медленный запрос. Его выбирают ради надёжности, а не ради скорости."
+    - label: В React 19 доступ к state компонента из тестов закрыт, поэтому остаётся только DOM
+      why: Дело не в ограничениях API. Enzyme умел лезть во внутренности, и именно поэтому его тесты ломались при каждом рефакторинге.
+    - label: Так тест покрывает больше строк кода, и coverage растёт
+      why: Coverage от способа запроса не зависит. Цель — уверенность, что фича работает для пользователя, а не процент покрытия.
+  answer: 0
+
+- id: testing-library-async-query-choice
+  skill: testing-library-queries
+  question: testing-library
+  difficulty: 2
+  prompt: Компонент при монтировании загружает профиль (fetch замокан), после загрузки появляется заголовок с именем. Как в тесте получить этот заголовок?
+  explanation: Выбирайте запрос по ожиданию. Элемент уже есть — getBy. Элемента быть не должно — queryBy + not.toBeInTheDocument(). Элемент появится асинхронно — await findBy, по сути это getBy внутри waitFor. Среди запросов приоритет у роли, testid — в последнюю очередь.
+  type: choose-tool
+  options:
+    - label: "await screen.findByRole('heading', { name: /ann/i })"
+      why: "Лучший вариант: findBy возвращает промис и повторяет поиск, пока элемент не появится или не выйдет таймаут. Поиск по роли проверяет и доступность."
+    - label: "screen.getByRole('heading', { name: /ann/i })"
+      why: getBy ищет синхронно, сразу после render. Данные ещё не пришли, поэтому запрос бросит ошибку. Подходит, когда элемент уже на экране.
+    - label: "screen.queryByRole('heading', { name: /ann/i })"
+      why: queryBy сразу вернёт null и ничего не ждёт. Он нужен, чтобы проверить отсутствие элемента, например что спиннер исчез.
+    - label: await waitFor(() => screen.getByTestId('title'))
+      why: Сработает, но вручную повторяет findBy, а testid ничего не говорит о доступности. testid оставьте для элементов, у которых нет роли и текста.
+  answer: 0
+
+- id: testing-library-absence-check-bug
+  skill: testing-library-queries
+  question: testing-library
+  difficulty: 2
+  prompt: Тест должен проверить, что после ввода корректного email ошибка пропадает. Почему он падает, даже когда компонент работает правильно?
+  explanation: "getBy… бросает ошибку, если элемента нет, поэтому до not.toBeInTheDocument() дело не доходит. Для проверки отсутствия используйте queryBy…: он возвращает null. Если элемент исчезает асинхронно, подойдёт waitForElementToBeRemoved."
+  type: find-bug
+  language: tsx
+  code: |-
+    test('скрывает ошибку', async () => {
+      const user = userEvent.setup();
+      render(<EmailField />);
+      const input = screen.getByLabelText(/email/i);
+      await user.type(input, 'bad');
+      await user.tab();
+      expect(screen.getByText(/неверный email/i))
+        .toBeInTheDocument();
+      await user.clear(input);
+      await user.type(input, 'ann@example.com');
+      expect(screen.getByText(/неверный email/i))
+        .not.toBeInTheDocument();
+    });
+  bugLines:
+    - 11
+    - 12
+  causes:
+    - "Для проверки отсутствия нужен queryByText: getByText бросает ошибку, когда элемента нет"
+    - После user.clear нужно заново получить input через getByLabelText
+    - user.tab() не вызывает blur, поэтому ошибка вообще не появится
+    - toBeInTheDocument нельзя использовать с отрицанием .not
+  answer: 0
+
+# исправлено ревьюером:
+# Второй пропуск неоднозначен. Ловушка queryByRole подходит не хуже getByRole: поле на экране есть, запрос вернёт элемент, и тест пройдёт. Vitest не проверяет типы при запуске, так что ошибка типа HTMLElement | null тоже ничего не остановит. Ловушку заменил на findByRole: без await он возвращает промис, и user.type на нём упадёт.
+- id: testing-library-form-submit-fill
+  skill: testing-user-event-flow
+  question: testing-library
+  difficulty: 2
+  prompt: Допишите тест формы подписки. Текст «Спасибо» появляется только после асинхронной отправки.
+  explanation: "userEvent.setup() создаёт сессию и воспроизводит реальную цепочку событий: focus, keydown, input и т. д. fireEvent этого не делает. Поле уже на экране, поэтому его ищем синхронно через getByRole по роли и доступному имени. Асинхронно появляющийся текст ждём через await findBy…: getBy упал бы сразу."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    test('отправляет email', async () => {
+      const user = userEvent.___();
+      const onSubmit = vi.fn();
+      render(<SubscribeForm onSubmit={onSubmit} />);
+      const field = screen.___('textbox', {
+        name: /email/i,
+      });
+      await user.type(field, 'a@b.c');
+      await user.click(
+        screen.getByRole('button', { name: /подп/i })
+      );
+      expect(onSubmit).toHaveBeenCalledWith('a@b.c');
+      expect(await screen.___(/спасибо/i)).toBeVisible();
+    });
+  tokens:
+    - setup
+    - getByRole
+    - findByText
+  decoys:
+    - getByText
+    - findByRole
+    - waitFor
+    - init

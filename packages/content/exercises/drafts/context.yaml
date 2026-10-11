@@ -1,0 +1,99 @@
+# Черновик упражнений: «Как работает Context и какие у него проблемы?» (context)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only context
+
+- id: context-main-problem
+  skill: context-rerenders
+  question: context
+  difficulty: 2
+  prompt: В чём главная проблема Context, из-за которой его не считают полноценным стейт-менеджером?
+  explanation: Context — это механизм передачи значения, а не стейт-менеджер. Подписка идёт на значение целиком, поэтому его стоит мемоизировать и разделять на части. Для часто меняющегося глобального состояния лучше стор с селекторами.
+  type: quiz
+  options:
+    - label: "При смене value перерисовываются все потребители контекста, даже если им нужна лишь часть данных: селекторов нет"
+      why: Верно. useContext подписывает компонент на значение целиком. Изменилось одно поле объекта — рендерятся все, кто читает этот контекст.
+    - label: При смене value перерисовывается всё поддерево провайдера, включая компоненты, которые контекст не читают
+      why: Нет. React точечно обновляет потребителей. Компоненты, которые не читают контекст и обёрнуты в memo или переданы как children, сами по себе не рендерятся.
+    - label: Значение копируется в каждого потребителя, поэтому большие объекты в контексте расходуют много памяти
+      why: "Ничего не копируется: все потребители получают ссылку на один и тот же объект. Проблема в рендерах, а не в памяти."
+    - label: Значение задаётся один раз в createContext и потом не обновляется без перезагрузки дерева
+      why: В createContext задаётся лишь значение по умолчанию. Value провайдера можно менять из state, и потребители получат новое значение.
+  answer: 0
+
+- id: context-nearest-provider
+  skill: context-provider-lookup
+  question: context
+  difficulty: 1
+  prompt: Что по порядку появится на экране?
+  explanation: useContext читает значение ближайшего провайдера выше по дереву. Внутренний провайдер перекрывает внешний. Последний Label стоит вне провайдеров и получает значение по умолчанию из createContext. Из-за этого правила часто кажется, что «контекст не работает».
+  type: predict-output
+  language: tsx
+  code: |-
+    const ThemeContext = createContext('light');
+    const Label = () => <b>{useContext(ThemeContext)} </b>;
+    export function App() {
+      return (
+        <>
+          <ThemeContext value="dark">
+            <Label />
+            <ThemeContext value="blue"><Label /></ThemeContext>
+          </ThemeContext>
+          <Label />
+        </>
+      );
+    }
+  options:
+    - dark blue light
+    - dark dark light
+    - dark blue undefined
+    - dark blue dark
+  answer: 0
+
+- id: context-inline-value-object
+  skill: context-value-memoization
+  question: context
+  difficulty: 2
+  prompt: "`UserMenu` обёрнут в `memo` и читает `AuthContext`, но перерисовывается на каждый символ в поле поиска. Найдите причину."
+  explanation: Каждый ввод перерисовывает App, и литерал `{ user, logout }` даёт новый объект. Context сравнивает value по ссылке, поэтому все потребители рендерятся, и memo не спасает. Исправление — useMemo(() => ({ user, logout }), [user, logout]) или вынести query в отдельный компонент. React Compiler мемоизирует такой объект автоматически.
+  type: find-bug
+  language: tsx
+  code: |-
+    function App() {
+      const [query, setQuery] = useState('');
+      const [user, setUser] = useState<User | null>(null);
+      const logout = useCallback(() => setUser(null), []);
+      return (
+        <AuthContext value={{ user, logout }}>
+          <input value={query}
+            onChange={(e) => setQuery(e.target.value)} />
+          <Dashboard query={query} />
+          <UserMenu />
+        </AuthContext>
+      );
+    }
+  bugLines:
+    - 6
+  causes:
+    - Объект value создаётся заново на каждом рендере App, и при вводе все потребители AuthContext получают новую ссылку
+    - useCallback для logout создаёт новую функцию на каждом рендере и тем самым ломает memo
+    - input находится внутри провайдера и при каждом изменении сам обновляет контекст
+    - В React 19 без AuthContext.Provider значение не передаётся, и UserMenu получает default
+  answer: 0
+
+- id: context-vs-store-selectors
+  skill: context-vs-store-choice
+  question: context
+  difficulty: 2
+  prompt: "Клиентский редактор таблицы: сотни ячеек, тулбар показывает выделение, панель — формулу активной ячейки. Состояние меняется на каждое нажатие клавиши, и каждому компоненту нужен свой маленький срез. Что выбрать?"
+  explanation: "Context подходит для редко меняющихся значений: темы, локали, пользователя, API-клиентов. Если глобальное состояние меняется часто и потребителям нужны разные срезы, берите стор с селекторами (Zustand, Redux, Jotai): компонент рендерится, только когда меняется его срез."
+  type: choose-tool
+  options:
+    - label: Zustand-стор с селекторами
+      why: Лучший выбор. Компонент подписан только на свой срез, например useStore(s => s.cells[id]). Смена одной ячейки не трогает остальные сотни.
+    - label: Один Context со всем состоянием и value в useMemo
+      why: useMemo спасает от лишних рендеров, только пока данные не меняются. Здесь они меняются на каждый ввод, и тогда рендерятся все потребители. Подходит для темы или локали.
+    - label: Разделить на StateContext и DispatchContext
+      why: "Хорошо, когда многим компонентам нужны только действия: они перестанут рендериться. Но всё, что читает state, по-прежнему рендерится целиком на каждый ввод."
+    - label: Хранить состояние в корне и передавать через props с memo
+      why: "Терпимо при малой глубине дерева. Здесь тулбар и ячейки далеко друг от друга: придётся протаскивать props через слои и стабилизировать каждый колбэк."
+  answer: 0

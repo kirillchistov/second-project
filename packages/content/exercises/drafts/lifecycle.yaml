@@ -1,0 +1,100 @@
+# Черновик упражнений: «Какой жизненный цикл у функционального компонента?» (lifecycle)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only lifecycle
+
+- id: lifecycle-effect-mental-model
+  skill: effect-as-synchronization
+  question: lifecycle
+  difficulty: 1
+  prompt: Как правильно описать роль useEffect в жизненном цикле функционального компонента?
+  explanation: Методов жизненного цикла в функциональных компонентах нет. Есть рендеры и эффекты, которые синхронизируют компонент с внешней системой. Эффект запускается после коммита, очищается перед повторным запуском и при размонтировании. Код должен выдерживать лишний цикл «запуск → очистка → запуск», который Strict Mode делает намеренно.
+  type: quiz
+  options:
+    - label: "Это синхронизация с внешней системой: запуск после коммита, очистка и перезапуск при смене зависимостей, очистка при размонтировании"
+      why: Верно. Эффект может запускаться и останавливаться много раз за жизнь компонента, поэтому думать о нём нужно как о подписке, а не как о разовом событии.
+    - label: "useEffect(fn, []) — точный аналог componentDidMount: гарантированно выполнится ровно один раз за жизнь компонента"
+      why: Неверно. В Strict Mode в разработке эффект выполнится дважды, с очисткой между запусками. Код, рассчитанный на один запуск, сломается.
+    - label: Функция компонента вызывается один раз при монтировании, а обновления выполняются через эффекты
+      why: "Неверно. Функция компонента вызывается при каждом рендере: при изменении state, props или контекста. Эффекты — лишь реакция на результат рендера."
+    - label: Эффекты выполняются во время рендера, до обновления DOM, как componentWillMount
+      why: "Неверно. Рендер должен быть чистым. Эффекты запускаются после коммита: useLayoutEffect — до отрисовки кадра, useEffect — обычно после неё."
+  answer: 0
+
+- id: lifecycle-parent-child-effect-order
+  skill: effect-execution-order
+  question: lifecycle
+  difficulty: 3
+  prompt: Parent монтируется впервые, без StrictMode. Что будет в консоли?
+  explanation: "Рендер идёт сверху вниз: сначала родитель, потом ребёнок. Эффекты выполняются снизу вверх: эффект ребёнка раньше, чем эффект родителя. Все useLayoutEffect выполняются синхронно в фазе commit. Только после них, обычно уже после отрисовки кадра, запускаются useEffect, и тоже начиная с ребёнка."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Child() {
+      console.log('child render');
+      useLayoutEffect(() => console.log('child layout'));
+      useEffect(() => console.log('child effect'));
+      return null;
+    }
+    function Parent() {
+      console.log('parent render');
+      useLayoutEffect(() => console.log('parent layout'));
+      useEffect(() => console.log('parent effect'));
+      return <Child />;
+    }
+  options:
+    - parent render → child render → child layout → parent layout → child effect → parent effect
+    - parent render → child render → parent layout → child layout → parent effect → child effect
+    - parent render → child render → child layout → child effect → parent layout → parent effect
+    - parent render → parent layout → parent effect → child render → child layout → child effect
+  answer: 0
+
+# исправлено ревьюером:
+# Начиная с React 18 предупреждения об обновлении state размонтированного компонента нет. В React 19.2 упомянутые в условии «предупреждения в консоли» не появятся, поэтому симптом описан неверно.
+# Фраза «Cleanup — аналог componentWillUnmount» неполна: cleanup выполняется и перед каждым перезапуском эффекта. Формулировку стоит уточнить.
+- id: lifecycle-cleanup-wrong-listener
+  skill: effect-cleanup
+  question: lifecycle
+  difficulty: 2
+  prompt: После многократного монтирования и размонтирования WindowWidth число обработчиков resize на window продолжает расти. Где ошибка?
+  explanation: "removeEventListener снимает обработчик, только если получает ту же ссылку на функцию. Здесь в подписку и в очистку переданы две разные стрелочные функции, поэтому обработчик не снимается и копится. Решение: вынести handler в переменную внутри эффекта и передать её в обе функции. Cleanup должен точно отменять то, что сделал эффект: при размонтировании и перед каждым перезапуском."
+  type: find-bug
+  language: tsx
+  code: |-
+    function WindowWidth() {
+      const [w, setW] = useState(window.innerWidth);
+      useEffect(() => {
+        window.addEventListener('resize', () =>
+          setW(window.innerWidth));
+        return () =>
+          window.removeEventListener('resize', () =>
+            setW(window.innerWidth));
+      }, []);
+      return <p>{w}px</p>;
+    }
+  bugLines:
+    - 4
+    - 7
+  causes:
+    - В addEventListener и removeEventListener переданы разные функции, поэтому обработчик не снимается
+    - "Пустой массив зависимостей: эффект нужно перезапускать при изменении w"
+    - window.innerWidth нельзя читать в инициализаторе useState
+    - Cleanup выполняется до эффекта, поэтому снимать ещё нечего
+  answer: 0
+
+- id: lifecycle-migrate-derived-state
+  skill: reset-state-with-key
+  question: lifecycle
+  difficulty: 2
+  prompt: Классовый EditProfile в getDerivedStateFromProps сбрасывает весь черновик формы, когда меняется props.userId. Как перенести это поведение на хуки?
+  explanation: "Аналог getDerivedStateFromProps — вычисление в рендере или key. Если при смене сущности нужно сбросить всё состояние, проще всего дать компоненту key: React размонтирует старый экземпляр и смонтирует новый с чистым state. Эффект для сброса — лишний рендер со старыми данными."
+  type: choose-tool
+  options:
+    - label: Рендерить <EditProfile key={userId} />
+      why: "Лучший вариант: смена key создаёт новый экземпляр, и всё состояние сбрасывается без эффектов и промежуточных рендеров со старым черновиком."
+    - label: useEffect, который при смене userId вызывает setDraft(initial)
+      why: Сработает, но сначала отрисуется устаревший черновик, а потом пройдёт ещё один рендер. Для частичного сброса лучше обновить state прямо в рендере, сравнив с prevUserId.
+    - label: useState(props.user) в качестве начального значения черновика
+      why: Начальное значение читается только при монтировании. При смене userId черновик останется прежним — это классический баг копирования props в state.
+    - label: Обернуть компонент в React.memo
+      why: "memo — аналог shouldComponentUpdate: он пропускает лишние рендеры при тех же props. К сбросу состояния он отношения не имеет."
+  answer: 0

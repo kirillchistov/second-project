@@ -36,7 +36,7 @@
 # Код занимает 15 строк при лимите 14. Убрана пустая строка между компонентами.
 # Логика и ответ верны. Варианты переведены в формат {label, why} с пояснениями.
 - id: keys-reset-state-by-key
-  skill: key-state-reset
+  skill: reset-state-with-key
   question: keys
   difficulty: 2
   prompt: Приложение отрендерили (без StrictMode), затем один раз нажали next. Что будет на экране в двух абзацах?

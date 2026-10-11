@@ -1,0 +1,112 @@
+# Черновик упражнений: «Как реализовать debounce и throttle в React?» (debounce-throttle)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only debounce-throttle
+
+# исправлено ревьюером:
+# Метка верного варианта длиннее 140 символов. Она заметно длиннее остальных и этим подсказывает ответ.
+- id: debounce-throttle-body-recreate-quiz
+  skill: debounce-stable-instance
+  question: debounce-throttle
+  difficulty: 2
+  prompt: Почему `const onSearch = debounce(search, 300)` прямо в теле компонента не уменьшает число запросов, если каждый ввод меняет state?
+  explanation: "Debounce держит таймер в замыкании своего экземпляра. Экземпляр должен жить между рендерами: `useMemo`/`useRef` и `fnRef` для свежего колбэка. Отложенный вызов отменяют в cleanup при размонтировании."
+  type: quiz
+  options:
+    - label: Каждый рендер — новый экземпляр со своим таймером; старые таймеры никто не сбрасывает, и запрос уходит на каждый ввод
+      why: Верно. clearTimeout сбрасывает только таймер своего экземпляра. После setState вызывается уже новая функция, а таймер старой срабатывает.
+    - label: "Проблема только в производительности: функция пересоздаётся, но таймер у всех экземпляров общий"
+      why: "Общего таймера нет: id хранится в замыкании конкретного вызова debounce(). Поэтому это поломка логики, а не лишние аллокации."
+    - label: Синтетические события React переиспользуются, и к срабатыванию таймера event уже пустой
+      why: "Event pooling убрали в React 17. К тому же проблема не в событии: debounce не работает, даже если передавать строку."
+    - label: Функция замыкается на устаревший query, поэтому запросы уходят со старым значением
+      why: "Устаревшее замыкание — отдельная проблема. Она возникает при обратной ошибке: debounce создают один раз без fnRef. Здесь функция как раз свежая на каждом рендере."
+  answer: 0
+
+- id: debounce-throttle-inline-fn-deps
+  skill: debounce-stable-instance
+  question: debounce-throttle
+  difficulty: 3
+  prompt: "Хук используют, как показано внизу: search вызывают в onChange рядом с setQuery. Запросы почти не уходят. Найдите причину."
+  explanation: Инлайн-стрелка новая на каждом рендере, поэтому `useMemo` с `[fn]` пересоздаёт debounce. Cleanup эффекта отменяет вызов, отложенный в прошлом экземпляре. Решение — держать fn в `useRef`, обновлять ref в эффекте, а в зависимостях оставить только delay.
+  type: find-bug
+  language: tsx
+  code: |-
+    function useDebounced<A extends unknown[]>(
+      fn: (...args: A) => void,
+      delay: number,
+    ) {
+      const debounced = useMemo(
+        () => debounce(fn, delay),
+        [fn, delay],
+      );
+      useEffect(() => () => debounced.cancel(), [debounced]);
+      return debounced;
+    }
+    // in component:
+    const search = useDebounced(
+      (q: string) => api.search(q), 300);
+  bugLines:
+    - 7
+  causes:
+    - "fn — новая инлайн-функция на каждом рендере: useMemo пересоздаёт debounce, и cleanup отменяет отложенный вызов"
+    - delay в зависимостях сбрасывает таймер, ведь число 300 каждый раз сравнивается заново
+    - cancel нужно вызывать в теле эффекта, а не возвращать из него
+    - useMemo не сохраняет функции между рендерами — нужен useCallback
+  answer: 0
+
+# исправлено ревьюером:
+# В коде 15 строк, лимит — 14. Строки `call.cancel = ...` и `return call` объединены через Object.assign.
+- id: debounce-throttle-callback-hook-fill
+  skill: debounce-callback-hook
+  question: debounce-throttle
+  difficulty: 2
+  prompt: "Допишите хук debounced-функции: экземпляр стабилен, вызывается свежий колбэк, при размонтировании вызов отменяется. Тип `Fn = (q: string) => void`."
+  explanation: "`useRef` хранит последний fn, поэтому useMemo зависит только от delay и не пересоздаёт таймер. Вызов идёт через `fnRef.current` — без устаревшего замыкания. Cleanup возвращает `cancel`, и после размонтирования отложенный вызов не сработает."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function useDebouncedFn(fn: Fn, delay: number) {
+      const fnRef = ___(fn);
+      useEffect(() => { fnRef.current = fn; });
+      const debounced = useMemo(() => {
+        let id: ReturnType<typeof setTimeout>;
+        const call = (q: string) => {
+          clearTimeout(id);
+          id = setTimeout(() => fnRef.___(q), delay);
+        };
+        return Object.assign(call, { cancel: () => clearTimeout(id) });
+      }, [___]);
+      useEffect(() => debounced.___, [debounced]);
+      return debounced;
+    }
+  tokens:
+    - useRef
+    - current
+    - delay
+    - cancel
+  decoys:
+    - useState
+    - fn
+    - flush
+    - useCallback
+
+# исправлено ревьюером:
+# В пояснении к debounce неверная связка «хотя», из-за неё смысл противоречив.
+# В пояснении к useMemo неуклюжая формулировка «если дорого вычисление».
+- id: debounce-throttle-local-filter-choice
+  skill: deferred-value-for-heavy-render
+  question: debounce-throttle
+  difficulty: 2
+  prompt: Поле фильтрует локальный список из 5000 строк, данные уже в памяти, запросов нет. При быстром вводе инпут подтормаживает. Что выбрать?
+  explanation: "Debounce и throttle уменьшают число вызовов по времени — это нужно для запросов к API и частых событий. `useDeferredValue` ничего не ждёт: он рендерит тяжёлый результат с низким приоритетом, и ввод не блокируется. Для локальной фильтрации — useDeferredValue, для поиска по API — debounce."
+  type: choose-tool
+  options:
+    - label: useDeferredValue для query + memo-компонент списка
+      why: Ввод обновляется сразу, а тяжёлый рендер списка идёт с низким приоритетом и прерывается новым вводом. Искусственной задержки нет.
+    - label: Debounce query на 300 мс
+      why: Подходит для поиска по API, где важно сократить число запросов. Здесь он добавит лаг, а сам рендер после паузы всё равно заблокирует ввод.
+    - label: Throttle фильтрации раз в 200 мс
+      why: Хорош для scroll, resize и mousemove, где нужен регулярный отклик. При вводе фильтрует промежуточные значения, а рендер остаётся блокирующим.
+    - label: Только useMemo для отфильтрованного массива
+      why: Помогает, если дорого само вычисление. Но query меняется на каждый символ, и пересчёт с рендером 5000 строк всё равно будет. Тормозит рендер, а не повторное вычисление.
+  answer: 0

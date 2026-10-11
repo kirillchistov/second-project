@@ -1,0 +1,94 @@
+# Черновик упражнений: «Спроектируйте компонент автокомплита (frontend system design)» (system-design-autocomplete)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only system-design-autocomplete
+
+- id: system-design-autocomplete-first-step
+  skill: frontend-system-design-structure
+  question: system-design-autocomplete
+  difficulty: 2
+  prompt: "Интервьюер просит: «Спроектируйте компонент автокомплита». С чего лучше начать ответ?"
+  explanation: "В frontend system design оценивают ход рассуждений: требования → API → поток данных → состояния UI → доступность → производительность → краевые случаи и тесты. Уточняющие вопросы задают рамки, и все дальнейшие компромиссы объясняются через них."
+  type: quiz
+  options:
+    - label: "Задать уточняющие вопросы и зафиксировать требования: источник данных, минимум символов, задержка, клавиатура, мобильные, нагрузка"
+      why: "Верно. Требования определяют всё остальное: нужен ли кэш, debounce, виртуализация, какой бюджет по задержке. Это и показывает уровень senior."
+    - label: Сразу написать хук с debounce и fetch — так видно практический навык
+      why: "Это главный подводный камень: код без требований может решать не ту задачу, а гонки, кэш и доступность всплывут слишком поздно."
+    - label: Выбрать готовую библиотеку (Downshift, React Aria) и объяснить, почему она
+      why: Библиотека — нормальное решение, но выбирать её стоит после требований. Иначе неясно, какие возможности и ограничения важны.
+    - label: "Начать с оптимизаций: виртуализация списка и кэш по префиксам"
+      why: "Преждевременно: без требований неизвестно, будет ли список длинным и окупится ли сложный кэш. Оптимизации обсуждают ближе к концу."
+  answer: 0
+
+- id: system-design-autocomplete-answer-plan
+  skill: frontend-system-design-structure
+  question: system-design-autocomplete
+  difficulty: 2
+  prompt: Расставьте этапы ответа на system design «автокомплит» в правильном порядке.
+  explanation: "Каждый шаг опирается на предыдущий. API задают требования, поток данных реализует API, состояния UI вытекают из потока данных. Доступность — отдельный обязательный этап, а не «если останется время»: для combobox это главная сложность."
+  type: order
+  kind: recipe
+  steps:
+    - Уточнить функциональные и нефункциональные требования
+    - "Описать API компонента: fetchSuggestions, renderItem, onSelect, minChars"
+    - "Спроектировать поток данных: debounce, отмена устаревших запросов, кэш"
+    - "Перечислить состояния UI: пусто, загрузка, результаты, ошибка, нет результатов"
+    - "Продумать доступность: паттерн combobox, клавиатура, aria-live"
+    - Обсудить производительность, краевые случаи и тестирование
+
+- id: system-design-autocomplete-query-flow
+  skill: autocomplete-data-flow
+  question: system-design-autocomplete
+  difficulty: 2
+  prompt: "Допишите поток данных автокомплита: кэш по запросу, отмена устаревших запросов и список без мигания."
+  explanation: "В ключе — дебаунсенный query: так каждый запрос кэшируется отдельно, а queryFn согласован с ключом. Если передать signal в fetch, TanStack Query отменит запрос, который стал не нужен до ответа. keepPreviousData показывает старый список, пока грузится новый."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const query = useDebouncedValue(input.trim(), 250);
+
+    const { data = [], isFetching } = useQuery({
+      queryKey: ['suggest', ___],
+      queryFn: ({ ___ }) =>
+        fetchSuggestions(query, signal),
+      enabled: query.length >= minChars,
+      staleTime: 60_000,
+      placeholderData: ___,
+    });
+  tokens:
+    - query
+    - signal
+    - keepPreviousData
+  decoys:
+    - input
+    - abort
+    - initialData
+
+- id: system-design-autocomplete-ime-enter
+  skill: autocomplete-ime-input
+  question: system-design-autocomplete
+  difficulty: 3
+  prompt: "Пользователи с японской раскладкой жалуются: Enter, которым они подтверждают иероглифы в IME, сразу выбирает подсказку. Фрагмент обработчика поля (active всегда валиден, поле не внутри form). Где ошибка?"
+  explanation: "Пока идёт IME-композиция, Enter подтверждает кандидата, а не отправляет ввод. Обработчик должен игнорировать клавиши при `e.nativeEvent.isComposing`, а для Safari часто ещё проверяют `keyCode === 229`. Правило: в любом поле с горячими клавишами учитывать события composition."
+  type: find-bug
+  language: tsx
+  code: |-
+    function onKeyDown(e: React.KeyboardEvent) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setActive((i) => Math.min(i + 1, last));
+      } else if (e.key === 'Enter') {
+        onSelect(items[active]);
+      } else if (e.key === 'Escape') {
+        setOpen(false);
+      }
+    }
+  bugLines:
+    - 5
+    - 6
+  causes:
+    - "Enter во время IME-композиции обрабатывается как выбор: нет проверки e.nativeEvent.isComposing"
+    - В ветке Enter не хватает e.preventDefault() — браузер сам подтверждает подсказку
+    - При IME-вводе keydown не срабатывает, обработчик нужно повесить на onKeyPress
+    - Функциональное обновление setActive запаздывает, поэтому Enter выбирает не тот элемент
+  answer: 0

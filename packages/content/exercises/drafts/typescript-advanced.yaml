@@ -1,0 +1,105 @@
+# Черновик упражнений: «Как типизировать полиморфные и сложные компоненты в TypeScript?» (typescript-advanced)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only typescript-advanced
+
+# исправлено ревьюером:
+# В пояснении к верному варианту ошибка приоритета операторов: `'sm' | 'md' & number` разбирается как `'sm' | ('md' & number)` и даёт `'sm'`, а не `never`. Нужны скобки и полный union.
+- id: ts-polymorphic-omit-conflicts
+  skill: polymorphic-component-typing
+  question: typescript-advanced
+  difficulty: 3
+  prompt: Зачем в типе полиморфного компонента пишут `Omit<React.ComponentPropsWithoutRef<C>, keyof P | 'as'>`, а не просто пересекают `P & ComponentPropsWithoutRef<C>`?
+  explanation: "Пересечение не переопределяет ключи, а сужает их: конфликтующий prop превращается в `never` или в смесь типов. Поэтому из props элемента сначала убирают собственные ключи компонента и `as`, а потом пересекают со своими. Правило: свои props главнее нативных, и это нужно выразить явно через Omit."
+  type: quiz
+  options:
+    - label: Чтобы собственные props (например, `size`) заменили нативные одноимённые, а не пересеклись с ними в `never` или кашу
+      why: "Верно. У `input` есть `size: number`, и `('sm' | 'md' | 'lg') & number` даёт `never`. Omit убирает нативный ключ, остаётся тип компонента."
+    - label: Omit убирает `ref`, который полиморфный компонент не может принять
+      why: Неверно. `ref` убирает сам `ComponentPropsWithoutRef`, а Omit удаляет только `keyof P` и `'as'`. Если ref нужен, берут `ComponentPropsWithRef`.
+    - label: Omit ускоряет проверку TypeScript, потому что уменьшает число props элемента
+      why: "Наоборот: Omit над дженериком — дополнительное вычисление типа. Из-за таких конструкций полиморфные типы и тормозят тайпчек в больших кодовых базах."
+    - label: Без Omit все props элемента стали бы обязательными
+      why: Неверно. Опциональность задаётся в самом `ComponentPropsWithoutRef<C>`, а Omit её не меняет. Проблема в конфликте одноимённых ключей.
+  answer: 0
+
+- id: ts-polymorphic-props-type
+  skill: polymorphic-component-typing
+  question: typescript-advanced
+  difficulty: 2
+  prompt: Допишите тип так, чтобы `<Text as="a" href="/docs" />` компилировался, а `<Text as="button" href="/x" />` давал ошибку.
+  explanation: "`ElementType` охватывает и строки-теги (`'a'`, `'button'`), и компоненты, а `ComponentType` — только компоненты. `ComponentPropsWithoutRef<C>` выводит props выбранного элемента. Prop `as` типизирован тем же `C`: так TypeScript выводит C из переданного значения и подбирает допустимые props."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    type PolymorphicProps<
+      C extends React.___,
+      P = object,
+    > = P &
+      Omit<React.___<C>, keyof P | 'as'> & {
+        as?: ___;
+      };
+
+    function Text<C extends React.ElementType = 'span'>(
+      { as, ...rest }: PolymorphicProps<C>,
+    ) {
+      const Component = as ?? 'span';
+      return <Component {...rest} />;
+    }
+  tokens:
+    - ElementType
+    - ComponentPropsWithoutRef
+    - C
+  decoys:
+    - ComponentType
+    - HTMLAttributes
+    - ReactElement
+
+# исправлено ревьюером:
+# В explanation вложенные обратные кавычки (`/${string}` внутри inline-кода) ломают разметку; переформулировано без вложенного кода.
+- id: ts-satisfies-vs-annotation
+  skill: ts-satisfies
+  question: typescript-advanced
+  difficulty: 2
+  prompt: Опечатка `navigate('hom')` компилируется без ошибки. Найдите строку, из-за которой типобезопасность потерялась.
+  explanation: "Аннотация заменяет выведенный тип объявленным: тип `routes` становится `Record<string, …>`, и `keyof` даёт `string`. `satisfies` только проверяет форму и сохраняет выведенный тип. Если убрать аннотацию и дописать `satisfies Record<string, …>` после литерала объекта, `RouteName` станет `'home' | 'product'`, и опечатка даст ошибку."
+  type: find-bug
+  language: ts
+  code: |-
+    const routes: Record<string, `/${string}`> = {
+      home: '/',
+      product: '/products/:id',
+    };
+
+    type RouteName = keyof typeof routes;
+
+    function navigate(name: RouteName) {
+      return routes[name];
+    }
+
+    navigate('hom');
+  bugLines:
+    - 1
+  causes:
+    - Аннотация типа расширяет `routes` до `Record<string, …>`, поэтому `keyof typeof routes` — это `string`
+    - Шаблонный тип `/${string}` не принимает строку `'/'`, и проверка значений отключается
+    - Без `as const` оператор `keyof typeof` всегда возвращает `string`
+    - Параметр `navigate` нужно типизировать через `typeof routes[number]`
+  answer: 0
+
+- id: ts-button-as-next-link
+  skill: polymorphism-vs-aschild
+  question: typescript-advanced
+  difficulty: 3
+  prompt: "`Button` дизайн-системы иногда должен становиться `<Link>` из Next.js с его props (`prefetch`, `replace`) и сохранять стили и поведение. Тайпчек монорепо уже медленный. Какой подход выбрать?"
+  explanation: "Когда компонент должен «надеть» стили и поведение на чужой элемент, `asChild` (Slot) решает задачу без тяжёлых дженериков: props ребёнка типизирует сам ребёнок. Полиморфный `as` оправдан, когда список элементов небольшой и важен единый API. Union с `href?: never` подходит для простого выбора «ссылка или кнопка»."
+  type: choose-tool
+  options:
+    - label: '`asChild` + Slot: `<Button asChild><Link href="/" prefetch /></Button>`'
+      why: Лучший выбор. Props и поведение передаются единственному ребёнку, его props типизирует сам Link, а дженериков нет, поэтому тайпчек не тормозит.
+    - label: Полиморфный `as` с дженериком `C extends React.ElementType`
+      why: Тоже сработает и выведет props Link, но дженерик с Omit на каждом использовании утяжелит и без того медленный тайпчек. Хорош для небольших примитивов вроде Text.
+    - label: "Union: `{ href: string } & ComponentProps<'a'>` или `{ href?: never } & ComponentProps<'button'>`"
+      why: Подходит для выбора «нативная ссылка или кнопка». Props Next.js Link (`prefetch`) этот union не покрывает.
+    - label: "Принимать `component?: any` и прокидывать `...rest: any`"
+      why: "Работает быстро, но ломает типобезопасность у всех потребителей дизайн-системы: опечатки в props и неверные атрибуты пройдут молча."
+  answer: 0

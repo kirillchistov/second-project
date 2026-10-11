@@ -1,0 +1,109 @@
+# Черновик упражнений: «Как написать дженерик-компонент на TypeScript?» (typescript-generics)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only typescript-generics
+
+- id: typescript-generics-why-generic
+  skill: generic-components
+  question: typescript-generics
+  difficulty: 2
+  prompt: "Зачем объявлять компонент списка как `function List<T>(props: ListProps<T>)`, а не принимать `items: any[]`?"
+  explanation: Параметр типа связывает части props. `T` выводится из `items` и подставляется в `renderItem`, `getKey` и `onSelect`, поэтому колбэки получают точный тип элемента. Опечатки ловятся при компиляции. Типы стираются при сборке, так что на рантайм дженерик не влияет. Это основа переиспользуемых таблиц, селектов и автокомплитов.
+  type: quiz
+  options:
+    - label: "TypeScript выводит T из items и подставляет его в колбэки: renderItem и onSelect получают точный тип элемента"
+      why: "Верно. Дженерик связывает типы между props: передали User[] — и `u.name` в renderItem проверяется компилятором."
+    - label: TypeScript создаёт отдельную версию компонента под каждый тип, и рендер становится быстрее
+      why: Неверно. Типы стираются при компиляции, в JS остаётся одна функция. Дженерик влияет только на проверку типов.
+    - label: "Разницы почти нет: с any[] автодополнение и проверки работают так же, просто запись короче"
+      why: "Неверно. any отключает проверку: в renderItem `item` тоже станет any, и опечатка `u.nmae` пройдёт молча."
+    - label: "Без явного `<List<User> ...>` компонент не скомпилируется: T обязательно указывать вручную"
+      why: Неверно. Обычно T выводится из переданных props. Явный аргумент типа нужен редко, например когда items пустой литерал.
+  answer: 0
+
+- id: typescript-generics-arrow-in-tsx
+  skill: generic-arrow-syntax-tsx
+  question: typescript-generics
+  difficulty: 2
+  prompt: "Файл Options.tsx не компилируется: TypeScript ругается на незакрытый JSX-тег. Найдите строку с ошибкой."
+  explanation: "В .tsx запись `<T>` перед стрелочной функцией парсер читает как открывающий JSX-тег. Исправить можно двумя способами: `<T,>` с запятой или `<T extends unknown>`. У обычного `function Options<T>()` такой проблемы нет."
+  type: find-bug
+  language: tsx
+  code: |-
+    type SelectProps<T> = {
+      options: T[];
+      getLabel: (option: T) => string;
+    };
+    export const Options = <T>({
+      options,
+      getLabel,
+    }: SelectProps<T>) => (
+      <ul>
+        {options.map((o) => (
+          <li key={getLabel(o)}>{getLabel(o)}</li>
+        ))}
+      </ul>
+    );
+  bugLines:
+    - 5
+  causes:
+    - В .tsx `<T>` перед стрелочной функцией парсится как JSX-тег — нужно `<T,>` или `<T extends unknown>`
+    - Стрелочные функции не могут быть дженериками — только объявления через function
+    - key нельзя вычислять функцией, он должен быть полем объекта
+    - В props-типе нужно писать `Array<T>`, а не `T[]`, иначе T не выведется
+  answer: 0
+
+- id: typescript-generics-table-keyof
+  skill: generic-keyof-columns
+  question: typescript-generics
+  difficulty: 3
+  prompt: "Допишите типизацию таблицы: колонка может ссылаться только на существующее поле строки, а ключ строки берётся из её id."
+  explanation: "`K extends keyof T` ограничивает key колонки реальными полями T: опечатка в `{ key: 'emial' }` станет ошибкой компиляции. Ограничение `T extends { id: string }` гарантирует наличие id, поэтому отдельный getKey не нужен."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    type Column<T, K extends ___ T> = { key: K; title: string };
+    function Rows<T extends { id: string }, K extends keyof T>(
+      { rows, columns }: { rows: T[]; columns: Column<T, ___>[] },
+    ) {
+      return rows.map((row) => (
+        <tr key={row.___}>
+          {columns.map((c) => (
+            <td key={String(c.key)}>{String(row[c.key])}</td>
+          ))}
+        </tr>
+      ));
+    }
+  tokens:
+    - keyof
+    - K
+    - id
+  decoys:
+    - typeof
+    - in
+    - T
+    - key
+
+- id: typescript-generics-constrained-list
+  skill: generic-constraints
+  question: typescript-generics
+  difficulty: 2
+  prompt: "Соберите дженерик-список, которому не нужен getKey: у каждого элемента гарантированно есть id."
+  explanation: "Ограничение `T extends { id: string }` разрешает обращаться к `item.id` и при этом сохраняет точный тип элемента в renderItem. Без ограничения `item.id` не скомпилируется. С `ListProps<any>` дженерик теряет смысл: renderItem получит any."
+  type: parsons
+  language: tsx
+  lines:
+    - type ListProps<T> = {
+    - "  items: T[];"
+    - "  renderItem: (item: T) => React.ReactNode;"
+    - "};"
+    - "function List<T extends { id: string }>("
+    - "  { items, renderItem }: ListProps<T>,"
+    - ) {
+    - "  const list = items.map((item) => ("
+    - "    <li key={item.id}>{renderItem(item)}</li>"
+    - "  ));"
+    - "  return <ul>{list}</ul>;"
+    - "}"
+  distractors:
+    - function List<T>(
+    - "  { items, renderItem }: ListProps<any>,"

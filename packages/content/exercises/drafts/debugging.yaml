@@ -1,0 +1,85 @@
+# Черновик упражнений: «Как отлаживать React-приложение?» (debugging)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only debugging
+
+- id: debugging-dev-vs-prod-profile
+  skill: production-profiling
+  question: debugging
+  difficulty: 2
+  prompt: Profiler в dev-сборке показал, что рендер списка занимает 80 мс. Как понять, тормозит ли он у реальных пользователей?
+  explanation: "Dev-сборка в разы медленнее production: в ней дополнительные проверки, предупреждения и двойные вызовы StrictMode. Выводы о скорости делают по production-сборке с профилированием: Profiler в DevTools, `<Profiler onRender>`, панель Performance. Dev-профиль годится, чтобы найти лишние рендеры, а не чтобы оценить их стоимость."
+  type: quiz
+  options:
+    - label: "Собрать production-сборку с профилированием и замерить там: Profiler, `<Profiler onRender>` или панель Performance"
+      why: Верно. Только такая сборка показывает время, близкое к реальному, и при этом сохраняет данные профилирования.
+    - label: "Разделить время на два: в dev StrictMode рендерит дважды, остальное совпадает с production"
+      why: Двойной рендер — лишь одна из причин. Dev добавляет проверки и предупреждения, поэтому разница не сводится к множителю 2.
+    - label: "Доверять dev-цифрам: React одинаково быстр в любой сборке, отличаются только сообщения об ошибках"
+      why: Неверно. Dev-сборка заметно медленнее, и её время нельзя переносить на production.
+    - label: "Сразу обернуть элементы списка в memo: 80 мс — гарантированная проблема"
+      why: Оптимизация без замера в реальных условиях может ничего не дать. Сначала нужна корректная метрика.
+  answer: 0
+
+- id: debugging-investigation-recipe
+  skill: debugging-workflow
+  question: debugging
+  difficulty: 2
+  prompt: Расставьте шаги типового поиска проблемы в React-приложении по порядку.
+  explanation: Движение идёт от общего к частному. Сначала сужают проблему до компонента и действия. Потом смотрят его текущее состояние, затем время рендеров и причины, затем загрузку главного потока целиком. Точки останова ставят последними, чтобы проверить конкретную гипотезу, а не наугад.
+  type: order
+  kind: recipe
+  steps:
+    - "Воспроизвести проблему и сузить: какой компонент, какое действие"
+    - В Components проверить текущие props, state, хуки и owner компонента
+    - Записать взаимодействие в Profiler с «Record why each component rendered»
+    - В Performance Chrome посмотреть треки Scheduler и Components и long tasks
+    - Поставить точки останова или условный лог в обработчике или эффекте и проверить гипотезу
+
+- id: debugging-stale-query-data
+  skill: debugging-tool-choice
+  question: debugging
+  difficulty: 2
+  prompt: Приложение на TanStack Query. После смены фильтра в Network видно запрос с верным параметром и корректный ответ, но список показывает старые данные. Чем искать причину?
+  explanation: "Сеть исправна, значит, ошибка между ответом и UI — в слое данных. Для этого нужен инструмент самой библиотеки: TanStack Query Devtools показывают ключи, данные и статус каждого запроса. Частая находка — фильтр не входит в queryKey. Правило: сначала локализовать слой (сеть, кэш, рендер), потом брать инструмент этого слоя."
+  type: choose-tool
+  options:
+    - label: TanStack Query Devtools
+      why: "Лучший выбор: видно ключи кэша, данные и статус каждого запроса. Сразу понятно, в какую запись лёг ответ и какую читает компонент."
+    - label: Profiler в React DevTools
+      why: Показывает время рендеров и их причины. Он нужен для проблем производительности, а не для расследования, откуда компонент взял устаревшие данные.
+    - label: Панель Performance в Chrome
+      why: Нужна, когда интерфейс тормозит и надо найти long tasks в главном потоке. Логику кэша она не раскроет.
+    - label: «Highlight updates when components render»
+      why: Покажет, перерисовался ли список. Но не объяснит, почему в нём старые данные. Полезна для поиска лишних рендеров.
+  answer: 0
+
+- id: debugging-profiler-onrender
+  skill: profiler-api
+  question: debugging
+  difficulty: 2
+  prompt: Допишите код так, чтобы медленные рендеры ленты (дольше кадра) логировались прямо из приложения.
+  explanation: "`<Profiler>` требует `id` и колбэк `onRender`. Колбэк получает id, фазу (mount или update) и `actualDuration` — время рендера поддерева в этом коммите. `baseDuration` — оценка рендера без мемоизации. В обычной production-сборке Profiler отключён, для замеров нужна профилирующая сборка."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    import { Profiler } from 'react';
+
+    function onRender(
+      id: string,
+      phase: string,
+      actualDuration: number,
+    ) {
+      if (___ > 16) console.warn(id, phase);
+    }
+
+    <Profiler ___="Feed" ___={onRender}>
+      <Feed />
+    </Profiler>
+  tokens:
+    - actualDuration
+    - id
+    - onRender
+  decoys:
+    - baseDuration
+    - name
+    - onCommit

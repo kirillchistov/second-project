@@ -1,0 +1,97 @@
+# Черновик упражнений: «Как сделать глобальное состояние без лишних рендеров?» (context-selectors)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only context-selectors
+
+- id: context-selectors-quiz
+  skill: context-rerender-avoidance
+  question: context-selectors
+  difficulty: 3
+  prompt: Как стор в контексте с подпиской через `useSyncExternalStore` и селектором избавляет от лишних рендеров, которые даёт обычный Context?
+  explanation: "Context не умеет в селекторы: любое новое value перерисует всех потребителей. Поэтому в контекст кладут стабильную ссылку на стор, а подписку на нужный срез делают через `useSyncExternalStore`. По этому принципу устроены Zustand, Redux и Jotai."
+  type: quiz
+  options:
+    - label: Ссылка на стор в контексте не меняется, а компонент перерисуется, только если селектор вернул новое значение (сравнение через Object.is)
+      why: Верно. Контекст больше не меняется, и обновления идут по подписке subscribe. React сравнивает снапшоты и рендерит только тех, у кого изменился срез.
+    - label: Достаточно обернуть value провайдера в useMemo — потребители перестанут рендериться при изменении части данных
+      why: useMemo спасает только от нового объекта при рендере родителя. Когда меняются сами данные, value всё равно новое, и перерисуются все потребители.
+    - label: Можно оставить обычный Context и обернуть потребителей в React.memo — тогда они пропустят лишние обновления
+      why: memo сравнивает props, но не блокирует обновление по useContext. Компонент, читающий контекст, перерисуется при любом новом value.
+    - label: "С React Compiler это не нужно: он сам мемоизирует потребителей и отсекает рендеры от неиспользуемых полей"
+      why: Компилятор мемоизирует вычисления и JSX внутри компонента. Подписку на весь контекст он не отменяет и селекторов не добавляет.
+  answer: 0
+
+- id: context-selectors-unstable-selector
+  skill: store-selector-stability
+  question: context-selectors
+  difficulty: 3
+  prompt: "`useAppStore` построен на `useSyncExternalStore` с селектором. После монтирования компонент падает с «Maximum update depth exceeded». Найдите причину."
+  explanation: "`getSnapshot` вызывает селектор, а тот каждый раз возвращает новый объект. React сравнивает снапшоты через Object.is, видит «изменение» и рендерит снова — получается бесконечный цикл. Чините так: два вызова с примитивными срезами, shallow-сравнение (`useShallow` в Zustand) или мемоизированный селектор."
+  type: find-bug
+  language: tsx
+  code: |-
+    function CartBadge() {
+      const { items, total } = useAppStore((s) => ({
+        items: s.cart.items,
+        total: s.cart.total,
+      }));
+      return (
+        <span>
+          {items.length} · {total}
+        </span>
+      );
+    }
+  bugLines:
+    - 2
+  causes:
+    - Селектор при каждом вызове возвращает новый объект — снапшот никогда не равен прошлому, и React рендерит бесконечно
+    - Инлайн-селектор нужно обернуть в useCallback, иначе подписка пересоздаётся на каждом рендере
+    - Деструктуризация результата хука разрывает подписку на стор
+    - Не передан getServerSnapshot, без него useSyncExternalStore зацикливается
+  answer: 0
+
+- id: context-selectors-use-app-store
+  skill: external-store-subscription
+  question: context-selectors
+  difficulty: 2
+  prompt: "Допишите хук: контекст отдаёт стабильный стор, а компонент подписывается только на свой срез."
+  explanation: Из контекста берём ссылку на стор, она не меняется и не вызывает рендеров. `useSyncExternalStore` получает `subscribe` и функцию снапшота `selector(getState())`. Компонент обновится, только когда изменится значение среза.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    export function useAppStore<S>(
+      selector: (s: AppState) => S,
+    ): S {
+      const store = ___(StoreContext)!;
+      return ___(
+        store.___,
+        () => selector(store.___()),
+      );
+    }
+  tokens:
+    - useContext
+    - useSyncExternalStore
+    - subscribe
+    - getState
+  decoys:
+    - useState
+    - useEffect
+    - setState
+    - useReducer
+
+- id: context-selectors-ssr-dashboard
+  skill: global-state-without-rerenders
+  question: context-selectors
+  difficulty: 3
+  prompt: Next.js App Router, редактор дашборда. Десятки виджетов читают разные поля общего состояния, которое меняется при каждом drag. Начальное состояние строится на сервере из данных пользователя. Что выбрать?
+  explanation: "Частые обновления при многих читателях требуют подписки на срезы, а не Context со значением. При SSR стор нельзя держать в модуле: экземпляр должен быть у каждого запроса. Поэтому стор создают в провайдере и передают через контекст. Свой велосипед со стором не пишем, если есть Zustand или Redux."
+  type: choose-tool
+  options:
+    - label: "Zustand: createStore в провайдере, стор в Context, чтение срезов через useStore(store, selector)"
+      why: Лучший вариант. Виджеты рендерятся только при изменении своего среза, а у каждого запроса свой экземпляр стора, инициализированный серверными данными.
+    - label: Один React Context с value в useMemo
+      why: "Годится для редких изменений: темы, локали, текущего пользователя. Здесь каждый drag создаёт новое value и перерисовывает все десятки виджетов."
+    - label: Разделить состояние на несколько контекстов
+      why: Помогает, когда срезов мало и они меняются с разной частотой, например данные отдельно от действий. Десятки полей с частыми изменениями так не разложить.
+    - label: Глобальный стор Zustand через create() на уровне модуля
+      why: "Нормально для чистого SPA. На сервере модуль общий для всех запросов: данные одного пользователя утекут к другому, а тесты делят один экземпляр."
+  answer: 0

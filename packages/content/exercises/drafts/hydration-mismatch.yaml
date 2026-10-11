@@ -1,0 +1,102 @@
+# Черновик упражнений: «Почему возникают ошибки гидрации и как их исправлять?» (hydration-mismatch)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only hydration-mismatch
+
+- id: hydration-mismatch-quiz
+  skill: hydration-mismatch-causes
+  question: hydration-mismatch
+  difficulty: 3
+  prompt: Что такое ошибка гидрации и что React делает, когда она случается?
+  explanation: "Гидрация «прикрепляет» React к готовому HTML и требует, чтобы первый клиентский рендер совпал с серверным. Отсюда правило: в рендере не должно быть значений, которые различаются на сервере и клиенте. Клиентские значения появляются после монтирования или передаются с сервера."
+  type: quiz
+  options:
+    - label: Серверный HTML не совпал с первым клиентским рендером — React отбрасывает его и рендерит поддерево на клиенте до ближайшей Suspense-границы
+      why: Верно. Привязаться к несовпадающему DOM нельзя, поэтому React восстанавливается клиентским рендером. Это дорого, теряет выгоду SSR и может вызвать мигание.
+    - label: React сравнивает серверный HTML с состоянием после всех эффектов, поэтому setState в useEffect тоже вызывает mismatch
+      why: Нет. Сравнивается только первый рендер. Эффекты выполняются после гидрации, и обновление в useEffect — обычный повторный рендер. На этом и держится паттерн «значение после монтирования».
+    - label: Ошибка возникает, если данные на клиенте изменились уже после загрузки страницы, например пришёл новый ответ API
+      why: Изменения после гидрации — это обычные обновления состояния. Mismatch бывает только при расхождении в самом первом клиентском рендере.
+    - label: "Это лишь предупреждение в dev: React точечно исправляет отличия в DOM и спокойно продолжает гидрацию"
+      why: Неверно. При расхождении текста или структуры React выбрасывает recoverable error и перерисовывает поддерево. Различия в атрибутах он вообще не исправляет, они так и остаются.
+  answer: 0
+
+- id: hydration-mismatch-typeof-window
+  skill: hydration-mismatch-causes
+  question: hydration-mismatch
+  difficulty: 2
+  prompt: Компонент рендерится через SSR. У пользователя в localStorage сохранено theme = 'dark'. Найдите строки, из-за которых возникает ошибка гидрации.
+  explanation: "Проверка `typeof window` в рендере даёт разный результат: на сервере получается 'light', а на клиенте при первом же рендере — 'dark'. Тему лучше хранить в cookie, чтобы сервер знал её заранее, или читать localStorage после монтирования."
+  type: find-bug
+  language: tsx
+  code: |-
+    function ThemeBadge() {
+      const saved =
+        typeof window !== 'undefined'
+          ? localStorage.getItem('theme')
+          : null;
+      const theme = saved ?? 'light';
+      return (
+        <span className={`badge ${theme}`}>
+          {theme}
+        </span>
+      );
+    }
+  bugLines:
+    - 3
+    - 4
+  causes:
+    - "Рендер ветвится по typeof window: сервер рендерит 'light', а первый клиентский рендер — 'dark', поэтому HTML не совпадает"
+    - На сервере localStorage.getItem выбросит ReferenceError и SSR упадёт
+    - Шаблонная строка в className не сериализуется при SSR
+    - Оператор ?? не поддерживается при серверном рендере
+  answer: 0
+
+- id: hydration-mismatch-use-is-client
+  skill: hydration-client-only-value
+  question: hydration-mismatch
+  difficulty: 3
+  prompt: Допишите хук так, чтобы при гидрации компонент показал серверную заглушку, а затем — локальное время.
+  explanation: useSyncExternalStore принимает subscribe, getSnapshot и getServerSnapshot. На сервере и во время гидрации React берёт getServerSnapshot (false), поэтому HTML совпадает. Затем он перерисовывает компонент с клиентским снимком (true). Эффект и лишний state не нужны.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function useIsClient() {
+      return ___(
+        () => () => {},
+        () => ___,
+        () => ___,
+      );
+    }
+    function LocalTime() {
+      const isClient = useIsClient();
+      if (!isClient) return <span>—</span>;
+      const t = new Date().toLocaleTimeString();
+      return <span>{t}</span>;
+    }
+  tokens:
+    - useSyncExternalStore
+    - "true"
+    - "false"
+  decoys:
+    - useEffect
+    - useState
+    - "null"
+    - typeof window
+
+- id: hydration-mismatch-dark-theme
+  skill: hydration-fix-choice
+  question: hydration-mismatch
+  difficulty: 3
+  prompt: "Next.js-приложение рендерится на сервере на каждый запрос. Пользователь выбирает тёмную тему, и после перезагрузки страница должна сразу открыться тёмной: без вспышки светлой и без ошибок гидрации. Что выбрать?"
+  explanation: Если значение нужно уже в первом HTML, сервер должен знать его заранее. Cookie приходит с запросом, поэтому оба рендера совпадают. Чтение после монтирования и ssr:false убирают mismatch ценой мигания. suppressHydrationWarning лишь глушит симптом.
+  type: choose-tool
+  options:
+    - label: Хранить тему в cookie и читать её на сервере при рендере
+      why: "Лучший вариант: сервер знает тему ещё до рендера, HTML сразу тёмный, а клиентский рендер совпадает с серверным. Нет ни мигания, ни mismatch."
+    - label: Читать localStorage в useEffect после монтирования и вызывать setTheme
+      why: Mismatch не будет, но первый кадр отрисуется светлым, и тема мигнёт. Подходит для некритичных клиентских настроек, которые не влияют на первый экран.
+    - label: Повесить suppressHydrationWarning на корневой элемент
+      why: Атрибут работает на один уровень и только для текста и атрибутов. Он глушит предупреждение, но не делает тему правильной. Уместен для заведомо разных значений вроде таймстемпа.
+    - label: "Обернуть страницу в dynamic(..., { ssr: false })"
+      why: "Пропадает вся польза SSR: до загрузки JS пользователь видит пустоту. Подходит для чисто клиентских виджетов вроде карт и редакторов, а не для всей страницы."
+  answer: 0

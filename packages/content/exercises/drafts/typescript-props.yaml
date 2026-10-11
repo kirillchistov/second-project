@@ -1,0 +1,105 @@
+# Черновик упражнений: «Как типизировать props, children и события в TypeScript?» (typescript-props)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only typescript-props
+
+- id: typescript-props-children-type
+  skill: ts-children-type
+  question: typescript-props
+  difficulty: 1
+  prompt: Компонент `Card` принимает в children текст, разметку, список или ничего, например `{isEmpty && <Empty />}`. Какой тип children выбрать?
+  explanation: "`React.ReactNode` описывает всё, что React умеет отрендерить: строки, числа, элементы, массивы, `null`, `undefined`, `boolean`. `JSX.Element` и `ReactElement` подходят, только когда нужен именно один JSX-элемент, например для слота, который клонируют. Для обычных children берите `ReactNode`."
+  type: quiz
+  options:
+    - label: "`children: React.ReactNode`"
+      why: Верно. ReactNode включает строки, числа, элементы, массивы, null, undefined и boolean. Значит, подходят и `{cond && <X />}`, и просто текст.
+    - label: "`children: React.JSX.Element`"
+      why: Это только один JSX-элемент. Строка «Нет заказов», `null` или `false` из условного рендера не пройдут проверку типов. Это частая ошибка.
+    - label: "`children: string | React.ReactElement`"
+      why: Покрывает два частых случая, но не пропускает `null`, `false`, числа и массивы. Условный рендер и `map` сломают компиляцию.
+    - label: "`children: React.ReactElement[]`"
+      why: Требует именно массив элементов. Один элемент или текст уже не подойдут, а для обычного контента такое ограничение ничего не даёт.
+  answer: 0
+
+# исправлено ревьюером:
+# В строке 1 используется необъявленный тип `SearchProps`. Раз в вопросе сказано «TypeScript не компилирует», строка 1 тоже формально содержит ошибку компиляции, и выбор строки становится неоднозначным. Тип props перенесён прямо в сигнатуру.
+- id: typescript-props-event-target-vs-current
+  skill: ts-event-types
+  question: typescript-props
+  difficulty: 3
+  prompt: TypeScript не компилирует этот компонент. В какой строке ошибка?
+  explanation: "В типах React у `SyntheticEvent` поле `target` имеет тип `EventTarget`: событие может всплыть от вложенного элемента. Тип элемента `T` получает `currentTarget`, то есть элемент, на котором висит обработчик. `ChangeEvent` отдельно уточняет `target`, поэтому `e.target.value` работает. Исправление: `e.currentTarget.blur()`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Search({ onSearch }: { onSearch: (q: string) => void }) {
+      const onChange = (
+        e: React.ChangeEvent<HTMLInputElement>,
+      ) => onSearch(e.target.value);
+      const onKeyDown = (
+        e: React.KeyboardEvent<HTMLInputElement>,
+      ) => {
+        if (e.key === 'Escape') e.target.blur();
+      };
+      return (
+        <input onChange={onChange}
+          onKeyDown={onKeyDown} />
+      );
+    }
+  bugLines:
+    - 8
+  causes:
+    - У `KeyboardEvent` поле `target` типизировано как `EventTarget` без `blur()`. Типизированный элемент лежит в `currentTarget`
+    - "`e.key` в React не типизирован, нужно сравнивать `e.code` или `e.keyCode`"
+    - У `ChangeEvent` поле `target` тоже `EventTarget`, поэтому ошибка в `e.target.value`
+    - "`KeyboardEvent` нужно параметризовать `HTMLElement`, а не `HTMLInputElement`"
+  answer: 0
+
+- id: typescript-props-extend-native-button
+  skill: ts-extend-native-props
+  question: typescript-props
+  difficulty: 2
+  prompt: "Допишите типы: Button принимает все атрибуты нативного `<button>`, а иконкой может быть что угодно отрисовываемое, включая строку. В конце возьмите props готового компонента."
+  explanation: "`React.ComponentProps<'button'>` даёт все атрибуты нативного элемента: `type`, `disabled`, `onClick`, aria-* и children. Поэтому `...rest` можно спокойно прокинуть в `<button>`. Для произвольного контента нужен `ReactNode`. `ComponentProps<typeof Button>` достаёт props существующего компонента: это удобно для обёрток."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    type ButtonProps = React.___<'button'> & {
+      variant?: 'primary' | 'ghost';
+      icon?: React.___;
+    };
+    function Button({
+      variant = 'primary', icon, children, ...rest
+    }: ButtonProps) {
+      return (
+        <button className={variant} {...rest}>
+          {icon}{children}
+        </button>
+      );
+    }
+    type Props = React.ComponentProps<___ Button>;
+  tokens:
+    - ComponentProps
+    - ReactNode
+    - typeof
+  decoys:
+    - PropsWithChildren
+    - ReactElement
+    - keyof
+
+- id: typescript-props-runtime-validation
+  skill: runtime-validation-boundaries
+  question: typescript-props
+  difficulty: 2
+  prompt: Экран профиля получает JSON от внешнего API. Бэкенд иногда присылает `age` строкой или вовсе без `email`. Нужно поймать это до рендера, показать ошибку и получить типизированный объект. Что выбрать?
+  explanation: Типы TypeScript стираются при компиляции и ничего не проверяют в рантайме. На границах системы (API, формы, URL) данные валидируют схемой, например Zod или Valibot. Тип выводят из схемы через `z.infer`, а внутри приложения уже доверяют TypeScript. PropTypes в React 19 больше не проверяются.
+  type: choose-tool
+  options:
+    - label: Zod-схема и `safeParse` ответа в слое загрузки данных
+      why: Проверяет данные в рантайме, возвращает понятную ошибку и выводит тип через `z.infer`. Схема и тип не расходятся. Valibot подошёл бы так же, если важен размер бандла.
+    - label: PropTypes на компоненте Profile
+      why: В React 19 проверка PropTypes удалена. Раньше они только писали предупреждение в dev-режиме и не давали ни типа, ни обработки ошибки.
+    - label: "`interface User` и `res.json() as User`"
+      why: Это утверждение для компилятора, а не проверка. Битые данные пройдут и упадут позже в глубине UI. Подходит только для полностью доверенного и типизированного источника.
+    - label: Ручные проверки `typeof` прямо в компоненте
+      why: Сработает для одного-двух полей, но логика размазывается по UI, тип приходится сужать вручную, а проверки быстро расходятся с интерфейсом.
+  answer: 0
