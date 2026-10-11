@@ -1,6 +1,6 @@
 import { ITEMS } from '@/lib/content';
 import { lessonXp, localDay, review, summarize, type SessionState, type StoredCard } from '@rr/core';
-import type { SQLiteDatabase } from 'expo-sqlite';
+import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
 /**
  * Локальная база — источник правды о прогрессе (local-first): всё работает офлайн,
@@ -24,7 +24,7 @@ const MIGRATIONS: string[] = [
   `,
 ];
 
-export async function migrate(db: SQLiteDatabase): Promise<void> {
+async function migrate(db: SQLiteDatabase): Promise<void> {
   await db.execAsync('PRAGMA journal_mode = WAL');
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   let version = row?.user_version ?? 0;
@@ -35,6 +35,21 @@ export async function migrate(db: SQLiteDatabase): Promise<void> {
     });
     version++;
   }
+}
+
+let database: Promise<SQLiteDatabase> | null = null;
+
+/**
+ * Единственное соединение с базой на всё время жизни приложения: открывается и мигрирует один раз
+ * и никогда не закрывается. SQLiteProvider закрывает базу при размонтировании и при смене onInit —
+ * после Fast Refresh это рвало соединение под незавершёнными запросами («Access to closed resource»).
+ */
+export function getDatabase(): Promise<SQLiteDatabase> {
+  database ??= openDatabaseAsync('progress.db').then(async (db) => {
+    await migrate(db);
+    return db;
+  });
+  return database;
 }
 
 export interface ProgressSnapshot {

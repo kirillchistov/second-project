@@ -41,6 +41,7 @@ export default function LessonScreen() {
   );
   const [state, dispatch] = useReducer(sessionReducer, items, startSession);
   const [saved, setSaved] = useState<SavedLesson | null>(null);
+  const [saveFailed, setSaveFailed] = useState(false);
   const savingRef = useRef(false);
 
   const item = currentItem(state);
@@ -48,10 +49,16 @@ export default function LessonScreen() {
   useEffect(() => {
     if (state.phase !== 'done' || savingRef.current || items.length === 0) return;
     savingRef.current = true;
-    progress.save(state, lesson?.id ?? null).then((result) => {
-      setSaved(result);
-      Haptics.notificationAsync(result.perfect ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning);
-    });
+    progress
+      .save(state, lesson?.id ?? null)
+      .then((result) => {
+        setSaved(result);
+        Haptics.notificationAsync(result.perfect ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning);
+      })
+      .catch((error) => {
+        console.error('Не удалось сохранить урок', error);
+        setSaveFailed(true);
+      });
   }, [state, items.length, lesson?.id, progress]);
 
   const answer = (outcome: Outcome, feedback: boolean) => {
@@ -94,7 +101,10 @@ export default function LessonScreen() {
             <Stat label="Стрик" value={`${streak} дн.`} color={c.accent} />
           </View>
         )}
-        <Button title="Готово" onPress={() => router.back()} disabled={!saved} style={styles.wide} />
+        {saveFailed && (
+          <Text style={[styles.muted, { color: c.danger }]}>Не удалось сохранить прогресс урока. Попробуй пройти его ещё раз.</Text>
+        )}
+        <Button title="Готово" onPress={() => router.back()} disabled={!saved && !saveFailed} style={styles.wide} />
       </View>
     );
   }
