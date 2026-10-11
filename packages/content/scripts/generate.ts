@@ -4,6 +4,7 @@
  *   npm run generate -w @rr/content -- --only keys,rules-of-hooks
  *   npm run generate -w @rr/content -- --topic hooks --limit 5
  *   npm run generate -w @rr/content -- --dry-run --only keys     # показать промпты, без запросов
+ *   npm run generate -w @rr/content -- --model claude-sonnet-5-5 --out /tmp/pilot   # другой автор, своя папка
  *
  * Для каждого вопроса два прохода: генератор пишет упражнения (structured outputs → проверка схемой,
  * при ошибках одна попытка исправить), затем ревьюер проверяет правильность ответов и правит или отбрасывает.
@@ -41,15 +42,27 @@ const { values: args } = parseArgs({
     topic: { type: 'string' },
     limit: { type: 'string' },
     concurrency: { type: 'string', default: '3' },
+    /** Кто пишет упражнения */
     model: { type: 'string', default: 'claude-opus-5-5' },
+    /** Кто проверяет: ревьюер должен быть не слабее автора — неверный ответ в тренажёре хуже пропуска */
+    'review-model': { type: 'string', default: 'claude-opus-5-5' },
+    /** Куда писать черновики (по умолчанию exercises/drafts) — для сравнения прогонов */
+    out: { type: 'string' },
     force: { type: 'boolean', default: false },
     'dry-run': { type: 'boolean', default: false },
   },
 });
 
 const MODEL = args.model!;
-// Цены claude-opus-5-5, $ за 1M токенов — для оценки стоимости прогона
-const PRICE = { input: 4, output: 20, cacheWrite: 5, cacheRead: 0.2 };
+const REVIEW_MODEL = args['review-model']!;
+const OUT_DIR = args.out ?? DRAFTS_DIR;
+
+// $ за 1M токенов — для оценки стоимости прогона. Запись в кеш — 1.25× от входа.
+const PRICES: Record<string, { input: number; output: number; cacheRead: number }> = {
+  'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2 },
+  'claude-sonnet-5-5': { input: 2, output: 10, cacheRead: 0.2 },
+  'claude-haiku-5-5': { input: 0.1, output: 0.5, cacheRead: 0.01 },
+};
 
 const questions = loadQuestions();
 const approved = loadExercises();
@@ -61,7 +74,7 @@ let selected = questions.filter((q) => {
   return true;
 });
 // Без --force не трогаем вопросы, по которым уже есть черновик
-if (!args.force) selected = selected.filter((q) => !existsSync(join(DRAFTS_DIR, `${q.slug}.yaml`)));
+if (!args.force) selected = selected.filter((q) => !existsSync(join(OUT_DIR, `${q.slug}.yaml`)));
 if (args.limit) selected = selected.slice(0, Number(args.limit));
 
 // Примеры для генератора — вручную написанные упражнения: задают стиль и уровень
@@ -80,19 +93,26 @@ if (selected.length === 0) {
   process.exit(0);
 }
 
-const client = new Anthropic();
-const usage = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+// Ключ организации без привязки к workspace требует явный workspace в заголовке
+const workspace = process.env.ANTHROPIC_WORKSPACE_ID?.trim();
+const client = new Anthropic(workspace ? { defaultHeaders: { 'anthropic-workspace-id': workspace } } : {});
+type Usage = { input: number; output: number; cacheWrite: number; cacheRead: number };
+/** Расход по моделям: автор и ревьюер могут быть разными */
+const usage = new Map<string, Usage>();
 
 class GenerationError extends Error {}
 
 /** Один запрос со structured outputs. Стрим — потому что с thinking ответ бывает длинным. */
-async function ask<T>(systemPrompt: string, messages: Anthropic.Beta.BetaMessageParam[], schema: z.ZodType<T>) {
+async function ask<T>(model: string, systemPrompt: string, messages: Anthropic.Beta.BetaMessageParam[], schema: z.ZodType<T>) {
+  // Если модель откажет из-за ложного срабатывания классификатора, запрос продолжит резервная модель.
+  // У Haiku серверного fallback нет.
+  const fallback = model.startsWith('claude-haiku')
+    ? {}
+    : { betas: ['server-side-fallback-2026-07-01'] as Anthropic.Beta.AnthropicBeta[], fallbacks: 'default' as const };
   const stream = client.beta.messages.stream({
-    model: MODEL,
+    model,
     max_tokens: 64000,
-    // Если модель откажет из-за ложного срабатывания классификатора, запрос продолжит резервная модель
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
+    ...fallback,
     thinking: { type: 'adaptive' },
     output_config: { effort: 'high', format: betaZodOutputFormat(schema) },
     // Системный промпт одинаковый для всех вопросов — кешируем
@@ -101,10 +121,14 @@ async function ask<T>(systemPrompt: string, messages: Anthropic.Beta.BetaMessage
   });
   const message = await stream.finalMessage();
 
-  usage.input += message.usage.input_tokens;
-  usage.output += message.usage.output_tokens;
-  usage.cacheWrite += message.usage.cache_creation_input_tokens ?? 0;
-  usage.cacheRead += message.usage.cache_read_input_tokens ?? 0;
+  // Считаем по модели, которая реально ответила: при fallback это может быть не запрошенная
+  const served = message.model in PRICES ? message.model : model;
+  const u = usage.get(served) ?? { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+  u.input += message.usage.input_tokens;
+  u.output += message.usage.output_tokens;
+  u.cacheWrite += message.usage.cache_creation_input_tokens ?? 0;
+  u.cacheRead += message.usage.cache_read_input_tokens ?? 0;
+  usage.set(served, u);
 
   if (message.stop_reason === 'refusal') throw new GenerationError(`отказ модели: ${message.stop_details?.category ?? 'без категории'}`);
   if (message.stop_reason === 'max_tokens') throw new GenerationError('ответ обрезан по max_tokens');
@@ -115,7 +139,7 @@ async function ask<T>(systemPrompt: string, messages: Anthropic.Beta.BetaMessage
 async function generateFor(q: Question): Promise<string> {
   // 1. Генерация
   const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: generatorUserPrompt(q, existingFor(q)) }];
-  const first = await ask(system, messages, generationOutput);
+  const first = await ask(MODEL, system, messages, generationOutput);
   let wires: WireExercise[] = first.parsed.exercises;
   let checked = validateWire(wires, q.slug);
 
@@ -126,7 +150,7 @@ async function generateFor(q: Question): Promise<string> {
       role: 'user',
       content: `Эти упражнения не прошли проверку схемы:\n${checked.invalid.map((i) => `- ${i.id}: ${i.error}`).join('\n')}\nВерни полный исправленный список упражнений.`,
     });
-    wires = (await ask(system, messages, generationOutput)).parsed.exercises;
+    wires = (await ask(MODEL, system, messages, generationOutput)).parsed.exercises;
     checked = validateWire(wires, q.slug);
   }
   const validIds = new Set(checked.valid.map((e) => e.id));
@@ -134,7 +158,7 @@ async function generateFor(q: Question): Promise<string> {
   if (wires.length === 0) throw new GenerationError('ни одно упражнение не прошло схему');
 
   // 3. Ревью: правильность ответов, однозначность, ограничения экрана
-  const review = await ask(REVIEWER_SYSTEM_PROMPT, [{ role: 'user', content: reviewerUserPrompt(q, wires) }], reviewOutput);
+  const review = await ask(REVIEW_MODEL, REVIEWER_SYSTEM_PROMPT, [{ role: 'user', content: reviewerUserPrompt(q, wires) }], reviewOutput);
   const { kept, notes, dropped } = applyReviews(wires, review.parsed.reviews);
   const final = validateWire(kept, q.slug);
   for (const bad of final.invalid) {
@@ -145,12 +169,10 @@ async function generateFor(q: Question): Promise<string> {
   // 4. Черновик: id уникальны относительно банка и других черновиков
   const taken = new Set([...approved, ...drafts].map((e) => e.id));
   const exercises: Exercise[] = uniqueIds(final.valid, taken);
-  mkdirSync(DRAFTS_DIR, { recursive: true });
-  const file = join(DRAFTS_DIR, `${q.slug}.yaml`);
-  writeFileSync(
-    file,
-    renderDraft({ question: q, exercises, notes, dropped, model: MODEL, date: new Date().toISOString().slice(0, 10) }),
-  );
+  mkdirSync(OUT_DIR, { recursive: true });
+  const file = join(OUT_DIR, `${q.slug}.yaml`);
+  const model = MODEL === REVIEW_MODEL ? MODEL : `${MODEL}, ревьюер ${REVIEW_MODEL}`;
+  writeFileSync(file, renderDraft({ question: q, exercises, notes, dropped, model, date: new Date().toISOString().slice(0, 10) }));
   for (const e of exercises) taken.add(e.id);
   drafts.push(...exercises);
   return `${exercises.length} упр.${dropped.length ? `, отброшено ${dropped.length}` : ''}`;
@@ -160,11 +182,16 @@ function errorText(error: unknown): string {
   if (error instanceof GenerationError) return error.message;
   if (error instanceof Anthropic.AuthenticationError) return 'нет доступа к API — задайте ANTHROPIC_API_KEY или выполните `ant auth login`';
   if (error instanceof Anthropic.RateLimitError) return 'превышен лимит запросов — уменьшите --concurrency и запустите снова';
+  if (error instanceof Anthropic.BadRequestError && /workspace/i.test(error.message)) {
+    return 'ключ не привязан к workspace — добавьте ANTHROPIC_WORKSPACE_ID в .env или выпустите ключ внутри workspace';
+  }
   if (error instanceof Anthropic.APIError) return `ошибка API ${error.status}: ${error.message}`;
   return String(error);
 }
 
-console.log(`Генерация по ${selected.length} вопросам, модель ${MODEL}, параллельно ${args.concurrency}. Черновики → ${DRAFTS_DIR.replace(CONTENT_ROOT + '/', '')}`);
+console.log(
+  `Генерация по ${selected.length} вопросам: пишет ${MODEL}, проверяет ${REVIEW_MODEL}, параллельно ${args.concurrency}. Черновики → ${OUT_DIR.replace(CONTENT_ROOT + '/', '')}`,
+);
 
 const queue = [...selected];
 const failed: string[] = [];
@@ -177,18 +204,27 @@ await Promise.all(
         failed.push(q.slug);
         console.error(`✗ ${q.slug}: ${errorText(error)}`);
         // Без доступа к API продолжать бессмысленно
-        if (error instanceof Anthropic.AuthenticationError) queue.length = 0;
+        if (error instanceof Anthropic.AuthenticationError || (error instanceof Anthropic.BadRequestError && /workspace/i.test(error.message))) {
+          queue.length = 0;
+        }
       }
     }
   }),
 );
 
-const cost =
-  (usage.input * PRICE.input + usage.output * PRICE.output + usage.cacheWrite * PRICE.cacheWrite + usage.cacheRead * PRICE.cacheRead) /
-  1_000_000;
-console.log(
-  `\nТокены: вход ${usage.input}, выход ${usage.output}, запись в кеш ${usage.cacheWrite}, чтение из кеша ${usage.cacheRead}. ≈ $${cost.toFixed(2)}`,
-);
+let total = 0;
+console.log('');
+for (const [model, u] of usage) {
+  const price = PRICES[model];
+  const cost = price
+    ? (u.input * price.input + u.output * price.output + u.cacheWrite * price.input * 1.25 + u.cacheRead * price.cacheRead) / 1_000_000
+    : NaN;
+  total += cost;
+  console.log(
+    `${model}: вход ${u.input}, выход ${u.output}, запись в кеш ${u.cacheWrite}, чтение из кеша ${u.cacheRead} — ≈ $${price ? cost.toFixed(2) : '? (нет цены)'}`,
+  );
+}
+console.log(`Итого ≈ $${Number.isNaN(total) ? '?' : total.toFixed(2)} (${selected.length} вопр.)`);
 if (failed.length) {
   console.log(`Не получилось: ${failed.join(', ')} — можно перезапустить с --only.`);
   process.exitCode = 1;
