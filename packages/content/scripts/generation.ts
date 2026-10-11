@@ -40,7 +40,61 @@ export const wireExercise = z.discriminatedUnion('type', [
 ]);
 export type WireExercise = z.infer<typeof wireExercise>;
 
-export const generationOutput = z.object({ exercises: z.array(wireExercise) });
+/**
+ * То, что реально уходит в structured outputs: один плоский объект со всеми полями всех типов.
+ * Объединение семи типов даёт слишком большую грамматику («compiled grammar is too large»),
+ * поэтому модель заполняет только поля своего типа, остальные оставляет пустыми, а fromFlat
+ * собирает из этого упражнение нужного типа.
+ */
+export const flatExercise = z.object({
+  type: z.enum(['quiz', 'predict-output', 'find-bug', 'parsons', 'fill-tokens', 'order', 'choose-tool']),
+  id: z.string(),
+  skill: z.string(),
+  difficulty: z.number().int(),
+  prompt: z.string(),
+  explanation: z.string(),
+  /** Для типов с кодом; иначе "tsx" */
+  language: z.enum(['tsx', 'ts', 'jsx', 'js']),
+  /** predict-output, find-bug, fill-tokens; иначе "" */
+  code: z.string(),
+  /** quiz, choose-tool, predict-output (why для predict-output можно оставить пустым); иначе [] */
+  options: z.array(option),
+  /** Индекс верного варианта для quiz, choose-tool, predict-output; верной причины для find-bug; иначе 0 */
+  answer: z.number().int(),
+  bugLines: z.array(z.number().int()),
+  causes: z.array(z.string()),
+  /** parsons: строки решения по порядку */
+  lines: z.array(z.string()),
+  distractors: z.array(z.string()),
+  tokens: z.array(z.string()),
+  decoys: z.array(z.string()),
+  /** order: timeline или recipe; иначе "none" */
+  kind: z.enum(['timeline', 'recipe', 'none']),
+  steps: z.array(z.string()),
+});
+export type FlatExercise = z.infer<typeof flatExercise>;
+
+export function fromFlat(f: FlatExercise): WireExercise {
+  const common = { id: f.id, skill: f.skill, difficulty: f.difficulty, prompt: f.prompt, explanation: f.explanation };
+  switch (f.type) {
+    case 'quiz':
+    case 'choose-tool':
+      return { ...common, type: f.type, options: f.options, answer: f.answer };
+    case 'predict-output':
+      return { ...common, type: f.type, language: f.language, code: f.code, options: f.options.map((o) => o.label), answer: f.answer };
+    case 'find-bug':
+      return { ...common, type: f.type, language: f.language, code: f.code, bugLines: f.bugLines, causes: f.causes, answer: f.answer };
+    case 'parsons':
+      return { ...common, type: f.type, language: f.language, lines: f.lines, distractors: f.distractors };
+    case 'fill-tokens':
+      return { ...common, type: f.type, language: f.language, code: f.code, tokens: f.tokens, decoys: f.decoys };
+    case 'order':
+      // kind=none — ошибка модели; timeline как безопасный вариант, ревьюер увидит формулировку
+      return { ...common, type: f.type, kind: f.kind === 'recipe' ? 'recipe' : 'timeline', steps: f.steps };
+  }
+}
+
+export const generationOutput = z.object({ exercises: z.array(flatExercise) });
 
 export const reviewOutput = z.object({
   reviews: z.array(
@@ -50,11 +104,16 @@ export const reviewOutput = z.object({
       /** Что не так — уходит комментарием в черновик для человека */
       issues: z.array(z.string()),
       /** Исправленное упражнение целиком, только при verdict = fix */
-      fixed: wireExercise.nullable(),
+      fixed: flatExercise.nullable(),
     }),
   ),
 });
-export type Review = z.infer<typeof reviewOutput>['reviews'][number];
+export type Review = Omit<z.infer<typeof reviewOutput>['reviews'][number], 'fixed'> & { fixed: WireExercise | null };
+
+/** Вердикты ревьюера с исправлениями, переведёнными из плоского формата. */
+export function reviewsFromOutput(output: z.infer<typeof reviewOutput>): Review[] {
+  return output.reviews.map((r) => ({ ...r, fixed: r.fixed ? fromFlat(r.fixed) : null }));
+}
 
 // ─── Промпты ─────────────────────────────────────────────────────────────────
 
@@ -104,6 +163,12 @@ export function generatorSystemPrompt(examples: readonly Exercise[]): string {
   и то же умение получают один skill — по нему считается интервальное повторение.
 - difficulty — 1 (база), 2 (middle), 3 (тонкости и senior-нюансы).
 - answer — индекс верного варианта с 0. Порядок вариантов не важен: приложение их перемешивает.
+
+## Формат ответа
+
+Каждое упражнение — объект со всеми полями сразу. Заполняй только поля своего типа,
+остальные оставь пустыми: строки "", массивы [], answer 0, kind "none", language "tsx".
+У predict-output варианты — options с пустым why.
 - explanation — разбор после ответа: почему верно и какое правило вынести.
 
 ## Примеры хороших упражнений

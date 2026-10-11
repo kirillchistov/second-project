@@ -3,6 +3,8 @@ import { parseExercises } from '../src/exercises.ts';
 import { loadExercises, loadQuestions } from '../src/node.ts';
 import {
   applyReviews,
+  flatExercise,
+  fromFlat,
   generationOutput,
   generatorSystemPrompt,
   generatorUserPrompt,
@@ -68,9 +70,20 @@ describe('промпты', () => {
 });
 
 describe('ответ модели', () => {
-  test('проводная схема разбирает ответ, схема банка проверяет упражнения', () => {
-    const wire = generationOutput.parse({ exercises: [quiz, bug, { ...quiz, id: 'broken', answer: 7 }] });
-    const { valid, invalid } = validateWire(wire.exercises, 'keys');
+  test('плоский ответ модели превращается в упражнение своего типа', () => {
+    const empty = { language: 'tsx', code: '', options: [], answer: 0, bugLines: [], causes: [], lines: [], distractors: [], tokens: [], decoys: [], kind: 'none', steps: [] } as const;
+    const flat = flatExercise.parse({ ...empty, ...bug });
+    expect(fromFlat(flat)).toEqual(bug);
+    expect(fromFlat(flatExercise.parse({ ...empty, ...quiz }))).toEqual(quiz);
+    const predict = fromFlat(
+      flatExercise.parse({ ...empty, ...quiz, type: 'predict-output', code: 'console.log(1)', options: [{ label: '1', why: '' }, { label: '2', why: '' }] }),
+    );
+    expect(predict).toMatchObject({ type: 'predict-output', options: ['1', '2'] });
+    expect(() => generationOutput.parse({ exercises: [quiz] })).toThrow(); // плоский формат требует все поля
+  });
+
+  test('схема банка отсеивает неверные упражнения', () => {
+    const { valid, invalid } = validateWire([quiz, bug, { ...quiz, id: 'broken', answer: 7 }], 'keys');
     expect(valid.map((e) => e.id)).toEqual(['keys-index-quiz', 'keys-bug']);
     expect(valid.every((e) => e.question === 'keys')).toBe(true);
     expect(valid[1].difficulty).toBe(3); // сложность зажимается в 1..3

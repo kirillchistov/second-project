@@ -1,0 +1,104 @@
+# Черновик упражнений: «Как выбрать способ управления состоянием: Context, Zustand, Jotai, Redux?» (state-management-choice)
+# Сгенерировано claude-opus-5-5, 2026-10-11. Проверено ревьюером-моделью, нужна вычитка человеком.
+# Принять: npm run approve -w @rr/content -- --only state-management-choice
+
+- id: state-management-choice-first-step
+  skill: state-classification
+  question: state-management-choice
+  difficulty: 2
+  prompt: Команда спорит, что взять в новое приложение — Redux Toolkit или Zustand. С чего правильно начать выбор?
+  explanation: "Большая часть «глобального состояния» на деле серверная, URL, формы или локальное UI, и у каждого класса есть свой инструмент. Глобального клиентского состояния остаётся мало, и выбирать стейт-менеджер нужно под него: Context для редких изменений, Zustand/Jotai для простых сторов, RTK для больших команд."
+  type: quiz
+  options:
+    - label: "Классифицировать состояние: серверное, URL, формы, локальное UI — и подбирать стор только для оставшегося глобального клиентского"
+      why: Верно. Серверные данные уходят в TanStack Query, фильтры — в search params, формы — в React Hook Form. Остаток обычно небольшой, и выбор под него становится очевидным.
+    - label: "Сразу взять Redux Toolkit: он масштабируется, и потом не придётся переезжать"
+      why: Это подводный камень «потому что так принято». Для трёх глобальных флагов RTK — лишний бойлерплейт. Он оправдан при большой команде и сложной логике.
+    - label: Положить всё в Context — он встроенный и не добавляет зависимостей
+      why: "Context — транспорт, а не стейт-менеджер: у него нет подписки на срез. Любое изменение значения перерисует всех потребителей, поэтому он годится только для редко меняющихся данных."
+    - label: Выбрать самую лёгкую библиотеку и хранить в ней всё, включая ответы API
+      why: Главная ошибка — тащить серверные данные в глобальный стор. Кэш, инвалидацию и гонки запросов придётся писать вручную, а это и так умеют TanStack Query и RTK Query.
+  answer: 0
+
+- id: state-management-zustand-no-selector
+  skill: zustand-selectors
+  question: state-management-choice
+  difficulty: 2
+  prompt: CartBadge перерисовывается при каждом открытии и закрытии панели корзины (toggle), хотя items не меняются. Найдите причину.
+  explanation: "Вызов `useCart()` без селектора подписывает компонент на весь стор: любое изменение (здесь isOpen) создаёт новый объект состояния и вызывает перерисовку. Правило: всегда выбирайте нужный срез — `useCart((s) => s.items.length)`. Для нескольких полей подойдёт `useShallow`."
+  type: find-bug
+  language: tsx
+  code: |-
+    const useCart = create<CartStore>()((set) => ({
+      items: [],
+      isOpen: false,
+      add: (item) =>
+        set((s) => ({ items: [...s.items, item] })),
+      toggle: () => set((s) => ({ isOpen: !s.isOpen })),
+    }));
+
+    function CartBadge() {
+      const { items } = useCart();
+      return <span>{items.length}</span>;
+    }
+  bugLines:
+    - 10
+  causes:
+    - "Стор вызван без селектора: компонент подписан на всё состояние и перерисовывается при любом его изменении"
+    - set должен возвращать полное состояние, иначе Zustand теряет items и пересоздаёт массив
+    - toggle мутирует состояние напрямую, поэтому Zustand не может сравнить старое и новое значение
+    - Стор не обёрнут в Provider, из-за чего каждый рендер получает новый экземпляр стора
+  answer: 0
+
+# вычитка: хук-селектор перенесён внутрь компонента — вызов вне компонента нарушал правила хуков
+- id: state-management-zustand-store-api
+  skill: zustand-store-api
+  question: state-management-choice
+  difficulty: 2
+  prompt: "Допишите стор боковой панели: создание хука, обновление состояния, подписку на срез в компоненте и закрытие панели из кода вне React."
+  explanation: В Zustand `create` возвращает хук, `set` делает поверхностное слияние, а селектор подписывает компонент только на нужное поле. Стор живёт вне React, поэтому `getState()` позволяет читать его и вызывать действия из роутера, сокетов или горячих клавиш — в этом его преимущество перед Context.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    type Store = { open: boolean; toggle(): void; close(): void };
+
+    export const useSidebar = ___<Store>()((set) => ({
+      open: false,
+      toggle: () => ___((s) => ({ open: !s.open })),
+      close: () => set({ open: false }),
+    }));
+
+    function Burger() {
+      const open = useSidebar((s) => s.___);
+      return <Icon name={open ? 'close' : 'menu'} />;
+    }
+    // вне React: роутер, сокеты, горячие клавиши
+    onRouteChange(() => useSidebar.___().close());
+  tokens:
+    - create
+    - set
+    - open
+    - getState
+  decoys:
+    - createStore
+    - setState
+    - useStore
+    - getSnapshot
+
+- id: state-management-player-outside-react
+  skill: global-store-choice
+  question: state-management-choice
+  difficulty: 2
+  prompt: "Небольшая команда делает музыкальный сервис. Глобально нужно состояние плеера (трек, пауза, позиция): оно часто меняется, читается в разных частях UI и управляется из WebSocket-обработчика и горячих клавиш вне React. Хочется минимум бойлерплейта. Что выбрать?"
+  explanation: Для часто меняющегося глобального клиентского состояния нужна подписка на срез, а здесь ещё и доступ вне React. Zustand даёт и то и другое почти без кода. Context — транспорт для редких изменений, RTK — для больших команд и строгих соглашений, Jotai — для множества мелких независимых атомов.
+  type: choose-tool
+  options:
+    - label: Zustand
+      why: "Лучший выбор: селекторы перерисовывают только подписанные компоненты, а getState/setState работают из сокетов и обработчиков клавиш без бойлерплейта."
+    - label: React Context + useReducer
+      why: Подходит для редко меняющихся значений вроде темы или локали. Здесь каждое обновление позиции перерисует всех потребителей, а из кода вне React стор недоступен.
+    - label: Redux Toolkit
+      why: Тоже работает вне React и даёт лучшие DevTools. Оправдан в большой команде со сложной логикой и строгими соглашениями. Для одного плеера бойлерплейт избыточен.
+    - label: Jotai
+      why: Хорош, когда состояние — много мелких независимых и производных кусочков (атомов). Вне React понадобится явный store, а это меньше подходит под ТЗ.
+  answer: 0
