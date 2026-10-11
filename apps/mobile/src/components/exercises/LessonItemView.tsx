@@ -13,13 +13,17 @@ export function LessonItemView({
 }: {
   item: LessonItem;
   revealed: boolean;
-  onAnswer: (outcome: Outcome) => void;
+  /** `feedback` — показать панель разбора; самооценка карточки разбора не требует */
+  onAnswer: (outcome: Outcome, feedback: boolean) => void;
 }) {
-  if (item.kind === 'card') return <CardExercise question={item.question} onGrade={onAnswer} />;
+  if (item.kind === 'card') return <CardExercise question={item.question} quiz={item.quiz} revealed={revealed} onAnswer={onAnswer} />;
 
-  const onSubmit = (correct: boolean) => onAnswer(correct ? 'good' : 'again');
+  const onSubmit = (correct: boolean) => onAnswer(correct ? 'good' : 'again', true);
   const ex = item.exercise;
   switch (ex.type) {
+    case 'quiz':
+      // quiz проходится внутри карточки вопроса, отдельным заданием не встречается
+      return null;
     case 'predict-output':
     case 'choose-tool':
       return <ChoiceExercise exercise={ex} revealed={revealed} onSubmit={onSubmit} />;

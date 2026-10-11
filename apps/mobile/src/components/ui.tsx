@@ -129,7 +129,7 @@ export function Prompt({ text, label }: { text: string; label: string }) {
 
 const styles = StyleSheet.create({
   button: { minHeight: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
-  buttonText: { fontSize: 17, fontWeight: '700' },
+  buttonText: { fontSize: 17, fontWeight: '700', textAlign: 'center' },
   option: { borderWidth: 2, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16 },
   optionText: { fontSize: 16, lineHeight: 22 },
   mono: { fontFamily: MONO, fontSize: 13 },

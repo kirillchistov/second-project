@@ -83,14 +83,34 @@ const chooseTool = z.object({
   answer: z.number().int().nonnegative(),
 });
 
+/**
+ * Карточка с вариантами: альтернатива режиму «объясни своими словами» для вопроса из банка.
+ * Варианты — правдоподобные формулировки ответа, неверные построены на типичных заблуждениях;
+ * `why` объясняет каждый вариант после ответа.
+ */
+const quiz = z.object({
+  ...base,
+  type: z.literal('quiz'),
+  question: kebab,
+  options: z
+    .array(z.object({ label: text, why: text }))
+    .min(3)
+    .max(5),
+  answer: z.number().int().nonnegative(),
+});
+
 export const exerciseSchema = z
-  .discriminatedUnion('type', [predictOutput, findBug, parsons, fillTokens, order, chooseTool])
+  .discriminatedUnion('type', [predictOutput, findBug, parsons, fillTokens, order, chooseTool, quiz])
   .superRefine((ex, ctx) => {
     const issue = (message: string) => ctx.addIssue({ code: 'custom', message: `${ex.id}: ${message}` });
 
     if ('answer' in ex) {
       const count = ex.type === 'find-bug' ? ex.causes.length : ex.options.length;
       if (ex.answer >= count) issue(`answer=${ex.answer}, а вариантов ${count}`);
+    }
+    if ('options' in ex) {
+      const labels = ex.options.map((o) => (typeof o === 'string' ? o : o.label));
+      if (new Set(labels).size !== labels.length) issue('варианты ответа повторяются');
     }
     if (ex.type === 'find-bug') {
       const lines = ex.code.split('\n').length;

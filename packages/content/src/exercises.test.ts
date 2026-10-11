@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { exerciseSchema, parseExercises } from './exercises.ts';
-import { loadExercises, loadQuestions } from './node.ts';
+import { loadDraftFiles, loadExercises, loadQuestions } from './node.ts';
 
 const EXERCISES = loadExercises();
 const slugs = new Set(loadQuestions().map((q) => q.slug));
@@ -15,9 +15,20 @@ describe('банк упражнений', () => {
     for (const e of EXERCISES) if (e.question) expect(slugs, e.id).toContain(e.question);
   });
 
+  test('черновики проходят схему, называются по вопросу и не пересекаются с банком по id', () => {
+    const bank = new Set(EXERCISES.map((e) => e.id));
+    for (const [slug, drafts] of loadDraftFiles()) {
+      expect(slugs, `drafts/${slug}.yaml`).toContain(slug);
+      for (const e of drafts) {
+        expect(e.question, e.id).toBe(slug);
+        expect(bank.has(e.id), e.id).toBe(false);
+      }
+    }
+  });
+
   test('есть хотя бы по одному упражнению каждого типа', () => {
     const types = new Set(EXERCISES.map((e) => e.type));
-    expect([...types].sort()).toEqual(['choose-tool', 'fill-tokens', 'find-bug', 'order', 'parsons', 'predict-output']);
+    expect([...types].sort()).toEqual(['choose-tool', 'fill-tokens', 'find-bug', 'order', 'parsons', 'predict-output', 'quiz']);
   });
 });
 
@@ -53,6 +64,14 @@ describe('схема упражнения', () => {
   test('строка с багом существует в коде', () => {
     const bug = { ...choose, type: 'find-bug', code: 'a\nb', bugLines: [3], causes: ['a', 'b'], options: undefined };
     expect(exerciseSchema.safeParse(bug).success).toBe(false);
+  });
+
+  test('quiz привязан к вопросу, вариантов 3–5, без повторов', () => {
+    const quiz = { ...choose, type: 'quiz', question: 'keys', options: [...choose.options, { label: 'c', why: 'c' }] };
+    expect(exerciseSchema.safeParse(quiz).success).toBe(true);
+    expect(exerciseSchema.safeParse({ ...quiz, question: undefined }).success).toBe(false);
+    expect(exerciseSchema.safeParse({ ...quiz, options: choose.options }).success).toBe(false);
+    expect(exerciseSchema.safeParse({ ...quiz, options: [...choose.options, choose.options[0]] }).success).toBe(false);
   });
 
   test('ошибка разбора называет файл и упражнение', () => {

@@ -50,7 +50,9 @@ packages/
       node.ts           загрузка вопросов и упражнений с диска (@rr/content/node)
       topics.ts, types.ts, legacy.ts
     scripts/bundle.ts   сборка JSON-бандла с версией-хешем
-  core/                 @rr/core — логика без UI: подбор вопросов, форматирование, режимы таймера
+    scripts/generate.ts черновики упражнений через Claude, approve.ts — перенос в банк
+  core/                 @rr/core — логика без UI: интервальное повторение, проверка ответов, путь, ход урока, XP
+apps/mobile/            приложение на Expo (iOS): путь, уроки, повторение, профиль; прогресс в SQLite
 ```
 
 ### Как добавить или изменить вопрос
@@ -90,6 +92,29 @@ packages/
 `parsons`, `fill-tokens`, `order` (`timeline` или `recipe`), `choose-tool`. Поля и проверки описаны в
 `packages/content/src/exercises.ts`. Схема ловит частые ошибки: ответ вне списка вариантов, строка бага за пределами
 кода, число пропусков `___` не совпадает с числом токенов. Примеры каждого типа — в `exercises/hooks.yaml`.
+
+### Генерация упражнений с помощью Claude
+
+Черновики упражнений по вопросам банка делает скрипт: Claude пишет упражнения (structured outputs, проверка
+Zod-схемой), второй проход — ревьюер — проверяет правильность ответов, исправляет или отбрасывает спорное.
+На каждый вопрос — карточка с вариантами (`quiz`, альтернатива ответу своими словами) и 2–3 практических задания.
+
+```bash
+npm run generate -w @rr/content -- --dry-run --only keys   # посмотреть промпты, без запросов
+npm run generate -w @rr/content -- --only keys,rules-of-hooks
+npm run generate -w @rr/content -- --topic hooks --concurrency 3
+```
+
+Нужен ключ: `ANTHROPIC_API_KEY` или профиль `ant auth login`. В конце скрипт печатает расход токенов и стоимость.
+
+Черновики появляются в `packages/content/exercises/drafts/<slug>.yaml` с замечаниями ревьюера в комментариях.
+Вычитайте и поправьте их, затем перенесите в банк:
+
+```bash
+npm run approve -w @rr/content -- --only keys
+```
+
+`npm test` проверяет и банк, и черновики: схему, ссылки на вопросы, уникальность id.
 
 ## Деплой на Vercel
 

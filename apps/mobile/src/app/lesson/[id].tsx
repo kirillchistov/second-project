@@ -54,11 +54,11 @@ export default function LessonScreen() {
     });
   }, [state, items.length, lesson?.id, progress]);
 
-  const answer = (outcome: Outcome) => {
+  const answer = (outcome: Outcome, feedback: boolean) => {
     if (!item) return;
     const correct = outcome !== 'again';
-    if (item.kind === 'card') {
-      // Карточка уже показала эталон — отдельный экран разбора не нужен
+    if (!feedback) {
+      // Самооценка: эталон уже на экране — отдельный разбор не нужен
       dispatch({ type: 'answer', outcome });
       dispatch({ type: 'continue' });
       return;
@@ -100,6 +100,8 @@ export default function LessonScreen() {
   }
 
   const revealed = state.phase === 'feedback';
+  // Что разбирать: упражнение или карточку, пройденную через варианты
+  const graded = item?.kind === 'exercise' ? item.exercise : item?.quiz;
   const repeat = item ? state.results[item.id] !== undefined && !revealed : false;
 
   return (
@@ -117,7 +119,7 @@ export default function LessonScreen() {
         {item && <LessonItemView key={`${item.id}:${state.position}`} item={item} revealed={revealed} onAnswer={answer} />}
       </ScrollView>
 
-      {revealed && item?.kind === 'exercise' && state.last && (
+      {revealed && graded && state.last && (
         <View
           style={[styles.feedback, { backgroundColor: state.last.correct ? c.successSoft : c.dangerSoft, paddingBottom: insets.bottom + 12 }]}
         >
@@ -126,9 +128,9 @@ export default function LessonScreen() {
           </Text>
           <ScrollView style={styles.feedbackScroll}>
             {!state.last.correct && (
-              <Text style={[styles.feedbackAnswer, { color: c.text }]}>Правильно: {correctAnswerText(item.exercise)}</Text>
+              <Text style={[styles.feedbackAnswer, { color: c.text }]}>Правильно: {correctAnswerText(graded)}</Text>
             )}
-            <Text style={[styles.feedbackText, { color: c.text }]}>{item.exercise.explanation}</Text>
+            <Text style={[styles.feedbackText, { color: c.text }]}>{graded.explanation}</Text>
           </ScrollView>
           <Button
             title="Дальше"

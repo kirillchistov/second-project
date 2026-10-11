@@ -1,6 +1,7 @@
 import { CodeView } from '@/components/CodeView';
 import { Button, OptionCard, Prompt } from '@/components/ui';
 import { useColors } from '@/lib/theme';
+import { useShuffledOrder } from '@/lib/useShuffled';
 import { checkAnswer } from '@rr/core';
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -11,6 +12,7 @@ export function FindBugExercise({ exercise, revealed, onSubmit }: ExerciseProps<
   const c = useColors();
   const [line, setLine] = useState<number | null>(null);
   const [cause, setCause] = useState<number | null>(null);
+  const order = useShuffledOrder(exercise.causes.length);
 
   const marked = useMemo(() => {
     if (!revealed) return undefined;
@@ -34,7 +36,7 @@ export function FindBugExercise({ exercise, revealed, onSubmit }: ExerciseProps<
       ) : (
         <View style={styles.options}>
           <Text style={[styles.step, { color: c.textMuted }]}>Строка {line}. Почему это ошибка?</Text>
-          {exercise.causes.map((text, i) => (
+          {order.map((i) => (
             <OptionCard
               key={i}
               selected={cause === i}
@@ -42,7 +44,7 @@ export function FindBugExercise({ exercise, revealed, onSubmit }: ExerciseProps<
               disabled={revealed}
               onPress={() => setCause(i)}
             >
-              {text}
+              {exercise.causes[i]}
             </OptionCard>
           ))}
         </View>

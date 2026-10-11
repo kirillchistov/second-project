@@ -1,6 +1,7 @@
 import { CodeView } from '@/components/CodeView';
 import { Button, InlineText, OptionCard, Prompt } from '@/components/ui';
 import { useColors } from '@/lib/theme';
+import { useShuffledOrder } from '@/lib/useShuffled';
 import { checkAnswer } from '@rr/core';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -11,13 +12,15 @@ export function ChoiceExercise({ exercise, revealed, onSubmit }: ExerciseProps<'
   const c = useColors();
   const [selected, setSelected] = useState<number | null>(null);
   const isTool = exercise.type === 'choose-tool';
+  const order = useShuffledOrder(exercise.options.length);
 
   return (
     <View style={styles.root}>
       <Prompt label={isTool ? 'Выбери инструмент' : 'Предскажи вывод'} text={exercise.prompt} />
       {exercise.type === 'predict-output' && <CodeView code={exercise.code} language={exercise.language} />}
       <View style={styles.options}>
-        {exercise.options.map((option, i) => {
+        {order.map((i) => {
+          const option = exercise.options[i];
           const label = typeof option === 'string' ? option : option.label;
           const state = revealed ? (i === exercise.answer ? 'correct' : i === selected ? 'wrong' : undefined) : undefined;
           return (

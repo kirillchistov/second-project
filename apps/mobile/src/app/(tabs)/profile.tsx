@@ -1,8 +1,9 @@
 import { useNow } from '@/lib/now';
+import { setCardMode, useCardMode, type CardMode } from '@/lib/preferences';
 import { useProgress } from '@/lib/progress';
 import { useColors, type Colors } from '@/lib/theme';
 import { addDays, currentStreak, DAILY_GOAL_XP, isLearned, localDay, longestStreak, retrievability } from '@rr/core';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const WEEKS = 15;
@@ -41,6 +42,37 @@ function ContributionGraph({ activity, now, c }: { activity: ReadonlyMap<string,
   );
 }
 
+const CARD_MODES: { id: CardMode; label: string }[] = [
+  { id: 'ask', label: 'Спрашивать' },
+  { id: 'explain', label: 'Своими словами' },
+  { id: 'quiz', label: 'С вариантами' },
+];
+
+function CardModeSetting({ c }: { c: Colors }) {
+  const mode = useCardMode();
+  return (
+    <View style={[styles.panel, { backgroundColor: c.surface, borderColor: c.border }]}>
+      <Text style={[styles.panelTitle, { color: c.text }]}>Карточки вопросов</Text>
+      <View style={[styles.segment, { backgroundColor: c.surfaceAlt }]}>
+        {CARD_MODES.map((m) => (
+          <Pressable
+            key={m.id}
+            accessibilityRole="button"
+            accessibilityState={{ selected: mode === m.id }}
+            onPress={() => setCardMode(m.id)}
+            style={[styles.segmentItem, mode === m.id && { backgroundColor: c.surface }]}
+          >
+            <Text style={[styles.segmentText, { color: mode === m.id ? c.text : c.textMuted }]}>{m.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={[styles.note, { color: c.textMuted }]}>
+        Свой ответ сильнее закрепляет память; варианты — быстрый режим, когда нет возможности подумать вслух.
+      </Text>
+    </View>
+  );
+}
+
 export default function ProfileScreen() {
   const c = useColors();
   const { activity, cards, lessonsDone } = useProgress();
@@ -75,6 +107,7 @@ export default function ProfileScreen() {
             </View>
           ))}
         </View>
+        <CardModeSetting c={c} />
         <Text style={[styles.note, { color: c.textMuted }]}>
           «Помнишь сейчас» — средняя вероятность вспомнить пройденные навыки по модели FSRS. Повторение поднимает её
           обратно к 90%.
@@ -98,4 +131,7 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 24, fontWeight: '800' },
   statLabel: { fontSize: 13 },
   note: { fontSize: 13, lineHeight: 18 },
+  segment: { flexDirection: 'row', borderRadius: 10, padding: 3 },
+  segmentItem: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
+  segmentText: { fontSize: 13, fontWeight: '600' },
 });

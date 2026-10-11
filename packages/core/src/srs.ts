@@ -18,7 +18,9 @@ const GRADE: Record<Outcome, Grade> = {
 };
 
 // Без fuzz расписание детерминировано — проще тестировать и объяснять пользователю.
-const scheduler = fsrs(generatorParameters({ enable_fuzz: false, request_retention: 0.9 }));
+// Без коротких шагов (минуты внутри дня): ошибку и так повторяют в конце урока,
+// а следующее повторение навыка имеет смысл не раньше следующего дня.
+const scheduler = fsrs(generatorParameters({ enable_fuzz: false, enable_short_term: false, request_retention: 0.9 }));
 
 function toStored(card: Card): StoredCard {
   return {

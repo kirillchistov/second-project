@@ -11,6 +11,13 @@ describe('интервальное повторение', () => {
     expect(typeof card.due).toBe('string');
   });
 
+  test('следующее повторение — не раньше чем через день, даже после ошибки', () => {
+    for (const outcome of ['again', 'hard', 'good', 'easy'] as const) {
+      const card = review(undefined, outcome, t0);
+      expect(new Date(card.due).getTime() - t0.getTime(), outcome).toBeGreaterThanOrEqual(day * 0.99);
+    }
+  });
+
   test('ошибка возвращает навык быстрее, чем верный ответ', () => {
     const good = review(undefined, 'good', t0);
     const again = review(undefined, 'again', t0);

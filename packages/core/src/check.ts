@@ -2,7 +2,7 @@ import type { Exercise } from '@rr/content';
 
 /** Ответ пользователя. Форма зависит от того, как упражнение решается пальцем. */
 export type Answer =
-  /** predict-output, choose-tool: выбран вариант */
+  /** predict-output, choose-tool, quiz: выбран вариант */
   | { kind: 'choice'; index: number }
   /** find-bug: тап по строке, затем выбор причины */
   | { kind: 'bug'; line: number; cause: number }
@@ -19,6 +19,7 @@ export function checkAnswer(exercise: Exercise, answer: Answer): boolean {
   switch (exercise.type) {
     case 'predict-output':
     case 'choose-tool':
+    case 'quiz':
       return answer.kind === 'choice' && answer.index === exercise.answer;
     case 'find-bug':
       return answer.kind === 'bug' && exercise.bugLines.includes(answer.line) && answer.cause === exercise.answer;
@@ -44,6 +45,7 @@ export function correctAnswerText(exercise: Exercise): string {
     case 'predict-output':
       return exercise.options[exercise.answer];
     case 'choose-tool':
+    case 'quiz':
       return exercise.options[exercise.answer].label;
     case 'find-bug': {
       const lines = exercise.bugLines.length > 1 ? `строки ${exercise.bugLines.join(', ')}` : `строка ${exercise.bugLines[0]}`;

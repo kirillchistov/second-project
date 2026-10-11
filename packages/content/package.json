@@ -10,10 +10,15 @@
     "./bundle.json": "./dist/content.json"
   },
   "scripts": {
-    "bundle": "node scripts/bundle.ts"
+    "bundle": "node scripts/bundle.ts",
+    "generate": "node scripts/generate.ts",
+    "approve": "node scripts/approve.ts"
   },
   "dependencies": {
     "yaml": "^2.9.1",
     "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.133.0"
   }
 }

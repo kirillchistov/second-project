@@ -29,6 +29,14 @@ describe('путь обучения', () => {
     }
   });
 
+  test('quiz не становится отдельным заданием, а прикрепляется к карточке вопроса', () => {
+    const lesson = path.flatMap((u) => u.lessons).find((l) => l.questions.some((q) => q.slug === 'keys'))!;
+    const items = lessonItems(lesson);
+    expect(items.some((i) => i.kind === 'exercise' && i.exercise.type === 'quiz')).toBe(false);
+    const card = items.find((i) => i.id === 'q:keys');
+    expect(card?.kind === 'card' && card.quiz?.id).toBe('keys-quiz');
+  });
+
   test('в уроке упражнения идут перед карточкой своего вопроса', () => {
     const lesson = path.flatMap((u) => u.lessons).find((l) => l.exercises.some((e) => e.id === 'hook-after-early-return'))!;
     const ids = lessonItems(lesson).map((i) => i.id);
