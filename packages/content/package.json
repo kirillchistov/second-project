@@ -14,7 +14,8 @@
     "bundle": "node scripts/bundle.ts",
     "generate": "node --env-file-if-exists=../../.env scripts/generate.ts",
     "approve": "node scripts/approve.ts",
-    "rubrics": "node --env-file-if-exists=../../.env scripts/rubrics.ts"
+    "rubrics": "node --env-file-if-exists=../../.env scripts/rubrics.ts",
+    "radar": "node --env-file-if-exists=../../.env scripts/radar.ts"
   },
   "dependencies": {
     "yaml": "^2.9.1",

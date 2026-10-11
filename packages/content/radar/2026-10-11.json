@@ -1,0 +1,96 @@
+{
+  "changes": [
+    {
+      "library": "React и React DOM",
+      "version": "19.3.0",
+      "summary": "Компонент <ViewTransition> и функция addTransitionType стали стабильными. Анимации enter/exit/update/share запускаются только для обновлений внутри Transition: startTransition, раскрытие <Suspense>, useDeferredValue. Обёртка <ViewTransition> вокруг Suspense анимирует переход от fallback к контенту и заставляет картинки и шрифты внутри неё приостанавливаться до загрузки.",
+      "source": "https://react.dev/blog/2026/09/09/react-19-3"
+    },
+    {
+      "library": "React и React DOM",
+      "version": "19.3.0",
+      "summary": "Стабилизированы Fragment Refs: <Fragment ref={...}> отдаёт FragmentInstance. Через него можно работать с DOM-детьми фрагмента как с группой: addEventListener/removeEventListener/dispatchEvent, focus/focusLast/blur, observeUsing для IntersectionObserver и ResizeObserver, getClientRects, scrollIntoView. Для этого не нужен лишний div-обёртка и не нужно, чтобы дочерний компонент пробрасывал ref.",
+      "source": "https://react.dev/blog/2026/09/09/react-19-3"
+    },
+    {
+      "library": "React и React DOM",
+      "version": "19.3.0",
+      "summary": "<Context> теперь можно рендерить прямо в Server Components. В React DOM добавлена поддержка Trusted Types.",
+      "source": "https://react.dev/blog/2026/09/09/react-19-3"
+    },
+    {
+      "library": "Next.js (App Router)",
+      "version": "16.4",
+      "summary": "Cache Components ('use cache', cacheLife) вместе с Partial Prefetching (флаги cacheComponents и partialPrefetching) рекомендованы для всех приложений. В create-next-app эта модель включена по умолчанию, а в Next.js 17 станет поведением по умолчанию. Она заменяет неявное кэширование прежних версий App Router.",
+      "source": "https://nextjs.org/blog/next-16-4"
+    },
+    {
+      "library": "Next.js (App Router)",
+      "version": "16.4",
+      "summary": "Новая опция сегмента export const ensureStatic = 'navigation' | 'prefetch' | 'shell'. Она валит сборку, если в маршрут или layout попадает динамический контент, и так гарантирует статичность shell, prefetch или всей навигации.",
+      "source": "https://nextjs.org/blog/next-16-4"
+    },
+    {
+      "library": "Next.js (App Router)",
+      "version": "16.4",
+      "summary": "Новые API navigation() и prefetch() из next/cache. await navigation() исключает кэшированный контент из prefetch и откладывает его до реального перехода. await prefetch() исключает контент из shell маршрута до явного prefetch.",
+      "source": "https://nextjs.org/blog/next-16-4"
+    },
+    {
+      "library": "Next.js (App Router)",
+      "version": "16.4",
+      "summary": "Добавлена команда next upgrade --agent, которая готовит агенту миграционные гайды, codemods и шаги проверки. Опция experimental.agentUpgrade ('security' по умолчанию, 'latest' или false) напоминает о доступных обновлениях во время next dev и next build.",
+      "source": "https://nextjs.org/blog/next-16-4"
+    }
+  ],
+  "affected": [
+    {
+      "slug": "fragments",
+      "change": "В React 19.3 Fragment принимает не только key, но и ref. Ref даёт FragmentInstance для работы с DOM-детьми группой: события, фокус, наблюдатели, измерения. Тезис «если нужно навесить ref или слушатель на группу узлов, придётся добавить обёртку» больше не верен. Упражнения про назначение фрагментов стоит дополнить сценарием с ref.",
+      "questionEdit": "В краткий ответ дописать: «С React 19.3 полной форме <Fragment> можно передать ref — он даёт FragmentInstance (addEventListener, focus, observeUsing, getClientRects, scrollIntoView и др.), что позволяет работать с DOM-детьми без обёртки-div».",
+      "outdatedExercises": []
+    },
+    {
+      "slug": "server-components",
+      "change": "С React 19.3 <Context> можно рендерить прямо в Server Components. Стандартный ответ «провайдер контекста обязательно выносится в отдельный клиентский компонент с 'use client'» нужно уточнить. Объяснение границы server/client и работы контекста стоит дополнить этим изменением.",
+      "questionEdit": "В краткий ответ дописать: «С React 19.3 <Context> можно рендерить непосредственно в Server Components».",
+      "outdatedExercises": []
+    },
+    {
+      "slug": "react-19-changes",
+      "change": "В минорном релизе 19.3 стабилизированы <ViewTransition> с addTransitionType и Fragment Refs, появились <Context> в Server Components и поддержка Trusted Types. Обзор изменений React 19 следует дополнить этими пунктами, чтобы кандидат знал, что относится к 19.0, а что к 19.3.",
+      "questionEdit": "В краткий ответ дописать: «В React 19.3 стабилизированы <ViewTransition>/addTransitionType и refs у <Fragment>, а <Context> можно рендерить в Server Components».",
+      "outdatedExercises": []
+    },
+    {
+      "slug": "rendering-strategies",
+      "change": "В Next.js 16.4 модель Cache Components рекомендована для всех приложений и включена по умолчанию в create-next-app. Статический и динамический контент теперь смешиваются в одном ответе через 'use cache' и cacheLife, а не выбираются стратегией на уровне всей страницы. Деление CSR/SSR/SSG/ISR стоит дополнить этой моделью и опцией ensureStatic для гарантии статичности.",
+      "questionEdit": "В краткий ответ дописать: «В Next.js 16.4+ по умолчанию используется модель Cache Components: статические ('use cache') и динамические части страницы рендерятся и стримятся в одном ответе, а ensureStatic позволяет гарантировать полностью статичный маршрут».",
+      "outdatedExercises": []
+    }
+  ],
+  "newQuestions": [
+    {
+      "title": "Как анимировать изменения UI с <ViewTransition> и addTransitionType и почему анимируются только Transition-обновления?",
+      "topic": "modern",
+      "why": "В React 19.3 API стало стабильным. Типичные темы собеседования: виды анимаций (enter/exit/update/share), связь с startTransition/Suspense/useDeferredValue, паттерн update=\"auto\" default=\"none\" для Suspense."
+    },
+    {
+      "title": "Что такое Fragment refs и какие задачи решает FragmentInstance?",
+      "topic": "rendering",
+      "why": "Новый стабильный API React 19.3 для работы с группой DOM-узлов без обёртки: фокус, IntersectionObserver, события на детях чужих компонентов."
+    },
+    {
+      "title": "Что такое Cache Components в Next.js и чем 'use cache' с cacheLife отличается от прежнего неявного кэширования App Router?",
+      "topic": "server",
+      "why": "С Next.js 16.4 это рекомендованная и включённая по умолчанию модель, а в Next.js 17 она станет стандартом. Для middle на Next.js это базовое знание."
+    },
+    {
+      "title": "Как управлять тем, что попадает в prefetch и shell маршрута в Next.js: navigation(), prefetch() и ensureStatic?",
+      "topic": "server",
+      "why": "Новые API Next.js 16.4 для баланса между мгновенными переходами и нагрузкой на сервер, а также для защиты статичных страниц от случайного динамического контента."
+    }
+  ],
+  "since": "2026-07-13",
+  "until": "2026-10-11"
+}
