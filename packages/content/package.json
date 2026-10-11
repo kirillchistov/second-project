@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./exercises": "./src/exercises.ts",
-    "./node": "./src/node.ts"
+    "./node": "./src/node.ts",
+    "./bundle.json": "./dist/content.json"
   },
   "scripts": {
     "bundle": "node scripts/bundle.ts"

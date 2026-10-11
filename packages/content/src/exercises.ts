@@ -1,11 +1,11 @@
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
+import { GAP } from './format.ts';
+
+export { GAP };
 
 const kebab = z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, 'ожидается kebab-case');
 const text = z.string().trim().min(1);
-
-/** Маркер пропуска в упражнении `fill-tokens`. */
-export const GAP = '___';
 
 const base = {
   id: kebab,

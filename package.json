@@ -14,12 +14,17 @@
     "lint": "oxlint",
     "test": "vitest run",
     "typecheck": "tsc -b",
-    "check": "tsc -b && oxlint && vitest run"
+    "check": "tsc -b && oxlint && vitest run",
+    "ios": "npm run ios -w @rr/mobile --"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
     "oxlint": "^1.81.0",
     "typescript": "~6.0.2",
     "vitest": "^5.0.3"
+  },
+  "overrides": {
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
   }
 }
