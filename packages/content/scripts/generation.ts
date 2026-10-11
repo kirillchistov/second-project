@@ -117,8 +117,25 @@ export function reviewsFromOutput(output: z.infer<typeof reviewOutput>): Review[
 
 // ─── Промпты ─────────────────────────────────────────────────────────────────
 
+/** Эталонные упражнения, написанные вручную: по одному на тип. Задают стиль и уровень генератору. */
+export const EXAMPLE_IDS = [
+  'effect-cleanup-order',
+  'hook-after-early-return',
+  'abort-stale-request',
+  'build-use-debounced-value',
+  'render-commit-timeline',
+  'server-list-with-cache',
+  'keys-quiz',
+];
+
+/** Из банка — только эталоны: весь банк в промпте раздул бы его в десятки раз. */
+export function pickExamples(bank: readonly Exercise[]): Exercise[] {
+  return EXAMPLE_IDS.flatMap((id) => bank.filter((e) => e.id === id));
+}
+
 /** Стабильная часть промпта генератора — кешируется между вопросами, поэтому без дат и случайных данных. */
-export function generatorSystemPrompt(examples: readonly Exercise[]): string {
+export function generatorSystemPrompt(bank: readonly Exercise[]): string {
+  const examples = pickExamples(bank);
   return `Ты — методист и senior frontend-разработчик. Ты делаешь упражнения для мобильного тренажёра,
 который помогает middle-разработчикам не забывать React и смежные технологии.
 
@@ -187,15 +204,23 @@ ${q.body}
 ${list('Подводные камни', q.pitfalls)}${list('Что спросят дальше', q.followUps)}`;
 }
 
-export function generatorUserPrompt(q: Question, existing: readonly Exercise[]): string {
-  const hasQuiz = existing.some((e) => e.type === 'quiz');
+/** Блок актуализации: что поменялось в новых версиях библиотек и как это отразить. */
+function updateBlock(update: string | undefined, forReviewer = false): string {
+  if (!update) return '';
+  return forReviewer
+    ? `\n## Актуализация\n\nУпражнения сделаны после выхода новых версий. Проверь, что они соответствуют изменениям:\n${update}\n`
+    : `\n## Актуализация\n\nВышли новые версии, и материал вопроса частично устарел:\n${update}\n\nСделай упражнения, которые тренируют актуальное поведение и новые возможности. Если существующее упражнение из списка выше устарело, сделай ему актуальную замену с другим id.\n`;
+}
+
+export function generatorUserPrompt(q: Question, existing: readonly Exercise[], update?: string): string {
+  const hasQuiz = !update && existing.some((e) => e.type === 'quiz');
   const existingList = existing.length
     ? `\nУже есть упражнения по этому вопросу — не повторяй их идеи:\n${existing.map((e) => `- ${e.type} ${e.id}: ${e.prompt}`).join('\n')}\n`
     : '';
   return `Сделай упражнения по вопросу из банка.
 
 ${questionMarkdown(q)}
-${existingList}
+${existingList}${updateBlock(update)}
 Нужно:
 ${hasQuiz ? '' : '- ровно один quiz по главной мысли вопроса;\n'}- 2–3 практических упражнения разных типов, которые лучше всего подходят к содержанию:
   для кода — find-bug, fill-tokens, predict-output, parsons; для выбора подхода — choose-tool;
@@ -224,12 +249,12 @@ function numbered(code: string): string {
     .join('\n');
 }
 
-export function reviewerUserPrompt(q: Question, exercises: readonly WireExercise[]): string {
+export function reviewerUserPrompt(q: Question, exercises: readonly WireExercise[], update?: string): string {
   const withNumbers = exercises
     .flatMap((e) => (e.type === 'find-bug' ? [`Код ${e.id} с номерами строк:\n${numbered(e.code)}`] : []))
     .join('\n\n');
   return `${questionMarkdown(q)}
-
+${updateBlock(update, true)}
 ## Упражнения на проверку
 
 ${JSON.stringify(exercises, null, 2)}

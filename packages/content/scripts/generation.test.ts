@@ -48,11 +48,22 @@ const bug: WireExercise = {
 };
 
 describe('промпты', () => {
-  test('системный промпт стабилен и содержит примеры из банка', () => {
+  test('системный промпт стабилен и содержит только эталонные примеры', () => {
     const a = generatorSystemPrompt(examples);
     expect(a).toBe(generatorSystemPrompt(examples));
     expect(a).toContain('effect-cleanup-order');
+    expect(a).not.toContain('keys-random-key-in-render'); // сгенерированные упражнения в примеры не попадают
     expect(a).not.toMatch(/\d{4}-\d{2}-\d{2}/); // никаких дат — иначе кеш промпта не сработает
+    expect(a.length).toBeLessThan(20_000);
+  });
+
+  test('в режиме актуализации промпты получают изменения, и quiz можно обновить', () => {
+    const existing = examples.filter((e) => e.question === 'keys');
+    const update = 'React 20: key больше не нужен у фрагментов';
+    const prompt = generatorUserPrompt(keys, existing, update);
+    expect(prompt).toContain(update);
+    expect(prompt).toContain('ровно один quiz');
+    expect(reviewerUserPrompt(keys, [bug], update)).toContain(update);
   });
 
   test('если quiz уже есть, второй не просим, а существующие упражнения перечисляем', () => {

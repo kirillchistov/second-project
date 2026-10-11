@@ -25,7 +25,14 @@
     "scheme": "rrefresher",
     "plugins": [
       "expo-router",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Микрофон нужен, чтобы ты мог отвечать на вопросы голосом.",
+          "speechRecognitionPermission": "Распознавание речи превращает твой устный ответ в текст для проверки."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false

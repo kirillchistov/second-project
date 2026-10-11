@@ -3,7 +3,13 @@ import { ProgressContext } from '@/lib/progress';
 import type { SessionState } from '@rr/core';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-const EMPTY: ProgressSnapshot = { cards: new Map(), backlog: [], activity: new Map(), lessonsDone: new Map() };
+const EMPTY: ProgressSnapshot = {
+  cards: new Map(),
+  backlog: [],
+  activity: new Map(),
+  lessonsDone: new Map(),
+  voice: { answers: 0, withoutHints: 0 },
+};
 
 /** Прогресс пользователя в памяти; после каждого сохранения перечитывается из SQLite. */
 export function ProgressProvider({ children }: { children: ReactNode }) {

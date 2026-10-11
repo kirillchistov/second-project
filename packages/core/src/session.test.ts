@@ -47,3 +47,12 @@ test('пустой урок сразу завершён', () => {
   expect(startSession([]).phase).toBe('done');
   expect(lessonXp(summarize(startSession([])))).toBe(0);
 });
+
+test('способ ответа и подсказки сохраняются для первой попытки', () => {
+  const s = run(startSession([item('a')]), [
+    { type: 'answer', outcome: 'again', meta: { mode: 'voice', hints: 2 } },
+    { type: 'continue' },
+    { type: 'answer', outcome: 'good', meta: { mode: 'voice', hints: 0 } },
+  ]);
+  expect(s.results.a).toEqual({ first: 'again', attempts: 2, solved: true, meta: { mode: 'voice', hints: 2 } });
+});

@@ -1,0 +1,150 @@
+- question: error-boundaries
+  points:
+    - id: catches-render-errors
+      text: Error Boundary перехватывает ошибки, выброшенные при рендере, в методах жизненного цикла и конструкторах компонентов-потомков, и показывает запасной UI вместо падения всего дерева
+      weight: 3
+    - id: not-caught-cases
+      text: Boundary не ловит ошибки в обработчиках событий, в асинхронном коде (`setTimeout`, промисы), при SSR и ошибки внутри самого boundary
+      weight: 3
+    - id: class-only
+      text: Error Boundary можно написать только классовым компонентом через `getDerivedStateFromError` и/или `componentDidCatch`, поэтому на практике часто берут `react-error-boundary`
+      weight: 2
+    - id: handle-uncaught
+      text: Ошибки событий обрабатывают через `try/catch` и state, а асинхронные можно передать в boundary через `useErrorBoundary().showBoundary(error)` или выбросив их в рендере через state
+      weight: 2
+    - id: granular-placement
+      text: Boundaries ставят гранулярно — вокруг роутов и независимых виджетов, чтобы падение одного не уничтожало всё приложение
+      weight: 1
+    - id: react19-extras
+      text: В React 19 отклонённый промис, прочитанный через `use()`, и ошибки в Actions попадают в ближайший boundary, а `createRoot` принимает `onCaughtError`/`onUncaughtError` для централизованного логирования
+      weight: 1
+  misconceptions:
+    - Error Boundary ловит ошибки в обработчиках событий вроде `onClick`
+    - Error Boundary можно реализовать функциональным компонентом на хуках без библиотек
+    - Error Boundary перехватывает ошибки в собственном рендере, а не только у потомков
+    - Если в dev-режиме появился оверлей с ошибкой, значит boundary не сработал
+- question: accessibility
+  points:
+    - id: semantic-html-first
+      text: "Основа доступности — семантический HTML: `<button>` для действий, `<a href>` для навигации, `<label>` для полей, корректные заголовки и landmarks; `div` с `onClick` не даёт фокуса, активации через Enter/Space и роли"
+      weight: 3
+    - id: aria-only-when-needed
+      text: 'ARIA добавляют только там, где нативного HTML не хватает: доступное имя для кнопки-иконки через `aria-label`, `aria-live`/`role="status"` для динамических сообщений, `aria-invalid` и `aria-describedby` для ошибок полей'
+      weight: 2
+    - id: focus-management-spa
+      text: "В SPA фокусом нужно управлять явно: при открытии модалки (focus trap, закрытие по Escape, возврат фокуса на триггер), после смены страницы (перенос на заголовок или объявление) и при появлении ошибок"
+      weight: 3
+    - id: keyboard-and-visual
+      text: Всё доступно с клавиатуры в логичном порядке, фокус виден (`:focus-visible`), у изображений есть `alt` (пустой для декоративных), контраст текста не ниже 4.5:1, анимации учитывают `prefers-reduced-motion`
+      weight: 2
+    - id: testing-tools
+      text: Проверка — вручную клавиатурой и скринридером плюс автоматически через axe и `eslint-plugin-jsx-a11y`
+      weight: 2
+    - id: headless-libraries
+      text: "Сложные виджеты (комбобокс, меню, табы, датапикер) лучше брать из headless-библиотек с готовой доступностью: React Aria, Radix UI, Ariakit"
+      weight: 1
+  misconceptions:
+    - Достаточно навесить `onClick` и `role="button"` на `div` — и он станет полноценной кнопкой (без `tabIndex` и обработки Enter/Space он недоступен с клавиатуры)
+    - Положительный `tabIndex` (больше 0) — нормальный способ задать порядок фокуса; на деле он ломает естественный порядок
+    - "`aria-label` работает на любом элементе, включая `div` без роли"
+    - Автоматические инструменты вроде axe находят все проблемы доступности, поэтому ручная проверка клавиатурой и скринридером не нужна
+- question: xss
+  points:
+    - id: jsx-auto-escaping
+      text: React по умолчанию экранирует значения, выводимые через `{}` в JSX, поэтому пользовательская строка отображается как текст, а не исполняется как HTML
+      weight: 3
+    - id: sanitize-raw-html
+      text: "`dangerouslySetInnerHTML` и прямая запись `innerHTML` через ref обходят экранирование, поэтому пользовательский HTML нужно санитизировать, например через `DOMPurify.sanitize`"
+      weight: 3
+    - id: validate-url-scheme
+      text: URL из пользовательских данных в `href`/`src` проверяют по белому списку схем (`http:`, `https:`, `mailto:`), потому что схема `javascript:` позволяет выполнить код
+      weight: 2
+    - id: csp-second-line
+      text: "CSP (`Content-Security-Policy`) с nonce служит второй линией защиты: запрещает выполнение внедрённых атакующим инлайн-скриптов"
+      weight: 2
+    - id: ssr-safe-serialization
+      text: При SSR состояние встраивают в `<script>` через безопасную сериализацию с экранированием `</script>` и `<`, а не через `JSON.stringify` как есть
+      weight: 1
+    - id: tokens-httponly
+      text: Токены доступа хранят в httpOnly cookies, а не в `localStorage`, потому что при XSS скрипт атакующего легко прочитает `localStorage`
+      weight: 1
+  misconceptions:
+    - React полностью защищает от XSS, поэтому санитизация и проверка URL не нужны
+    - React сам санитизирует содержимое `dangerouslySetInnerHTML`
+    - Достаточно настроить CSP, и санитизировать пользовательский HTML уже не нужно
+    - Результат `JSON.stringify` безопасно вставлять внутрь `<script>` без дополнительного экранирования
+- question: spa-auth
+  points:
+    - id: httponly-cookie-storage
+      text: Сессию или refresh-токен хранят в httpOnly Secure SameSite cookie, недоступной из JS, чтобы XSS не мог украсть токен; короткоживущий access-токен держат в памяти, а не в `localStorage`.
+      weight: 3
+    - id: server-enforces-access
+      text: "Проверки на клиенте (защищённые маршруты, скрытые кнопки) нужны только для UX: реальные права всегда проверяет сервер."
+      weight: 3
+    - id: protected-routes-loading
+      text: Защищённые маршруты реализуются через проверку в loader или компонент-обёртку (`RequireAuth`) с провайдером текущего пользователя; пока пользователь загружается, показывается состояние загрузки, чтобы защищённая страница не мерцала.
+      weight: 2
+    - id: single-refresh-on-401
+      text: "Ответы 401 обрабатываются централизованно в http-клиенте: токен обновляется и запрос повторяется, причём все параллельные запросы ждут один общий refresh-запрос."
+      weight: 2
+    - id: csrf-protection
+      text: "Cookie отправляется браузером автоматически, поэтому при аутентификации через cookie нужна защита от CSRF: атрибут `SameSite` и/или CSRF-токен."
+      weight: 2
+    - id: logout-oauth-extras
+      text: При выходе очищают кэш запросов (`queryClient.clear()`), чтобы данные прошлого пользователя не показались следующему; для OAuth/OIDC применяют Authorization Code Flow с PKCE через готовую библиотеку или BFF.
+      weight: 1
+  misconceptions:
+    - Хранить токены в `localStorage` безопасно, потому что другие сайты не имеют к нему доступа (на деле любой XSS на своём домене прочитает токен).
+    - Если скрыть кнопки и закрыть маршруты на клиенте, этого достаточно для защиты данных, и сервер может не проверять права.
+    - httpOnly cookie полностью решает вопрос безопасности, и защита от CSRF не нужна.
+    - Для SPA подходит OAuth Implicit Flow с токеном в URL, а PKCE необязателен.
+- question: error-handling-strategy
+  points:
+    - id: layered-error-boundaries
+      text: "Error Boundaries ставятся на нескольких уровнях: корень, маршруты и независимые виджеты, чтобы падение одной части не роняло всё приложение и давало «Повторить»"
+      weight: 3
+    - id: classify-errors-by-type
+      text: "Ошибки классифицируются по типу с разной реакцией: бизнес-ошибка показывается у поля и не логируется как сбой, сетевая — повтор с backoff, 401/403 — обновление токена или редирект на вход, ошибка чанка — предложение перезагрузить"
+      weight: 3
+    - id: centralized-api-handling
+      text: Ошибки API обрабатываются централизованно в http-клиенте и библиотеке данных (например, `QueryCache.onError`, `retry` без повторов для 4xx)
+      weight: 2
+    - id: global-handlers
+      text: Глобально ошибки перехватываются через `onUncaughtError`/`onCaughtError` в `createRoot`, а также `window.onerror` и `unhandledrejection` для того, что не ловят Error Boundaries
+      weight: 2
+    - id: monitoring-context-sourcemaps
+      text: Ошибки отправляются в мониторинг (Sentry) с загруженными source maps, контекстом пользователя, релиза и `componentStack`
+      weight: 2
+    - id: observability-beyond-errors
+      text: Наблюдаемость включает RUM (Web Vitals), трассировку запросов фронт–бэкенд, отметки релизов, feature flags для быстрого отключения и алерты на рост ошибок после деплоя
+      weight: 1
+  misconceptions:
+    - Error Boundary ловит ошибки в обработчиках событий, асинхронном коде и промисах
+    - Ожидаемые ошибки валидации стоит отправлять в мониторинг как исключения
+    - Source maps не нужны в мониторинге — минифицированного стека достаточно
+    - Любую ошибку запроса нужно повторять, включая 4xx
+- question: security-advanced
+  points:
+    - id: client-env-public
+      text: Переменные окружения с префиксом `VITE_` / `NEXT_PUBLIC_` встраиваются в клиентский бандл и видны всем, поэтому секреты должны жить только на сервере (пакет `server-only` защищает от случайного импорта серверного кода в клиент)
+      weight: 3
+    - id: server-functions-authz
+      text: "Server Functions и API-роуты — это публичные эндпоинты: в каждой нужны аутентификация, авторизация и серверная валидация входных данных, плюс rate limiting"
+      weight: 3
+    - id: csrf-cookies
+      text: При cookie-аутентификации актуален CSRF; защита — `SameSite=Lax/Strict`, проверка заголовка `Origin` и CSRF-токены для небезопасных методов
+      weight: 2
+    - id: csp-and-headers
+      text: "CSP с nonce (`script-src 'nonce-…' 'strict-dynamic'`, без `unsafe-inline`/`unsafe-eval`) и заголовки безопасности: `frame-ancestors` против кликджекинга, `X-Content-Type-Options: nosniff`, HSTS, `Referrer-Policy`"
+      weight: 2
+    - id: supply-chain
+      text: "Атаки на цепочку поставок через npm-пакеты и сторонние скрипты: lockfile, `npm audit`/Dependabot/Renovate, проверка новых пакетов, `ignore-scripts`, Subresource Integrity для CDN-скриптов"
+      weight: 2
+    - id: rsc-payload-redirect
+      text: Всё, что передаётся из Server Component в Client Component, попадает в RSC payload и видно в браузере — нельзя передавать запись из БД целиком; также open redirect закрывается разрешением только относительных путей (не `//`) или белым списком
+      weight: 1
+  misconceptions:
+    - Если положить API-ключ в `.env` с префиксом `VITE_` или `NEXT_PUBLIC_`, он останется секретным
+    - Server Functions вызываются только из своего же UI, поэтому проверять авторизацию и валидировать аргументы в них не нужно
+    - Пропсы, переданные из Server Component в Client Component, не видны пользователю, раз рендеринг серверный
+    - React экранирует вывод, поэтому XSS и прочие угрозы фронтенду не грозят и CSP не нужен

@@ -2,10 +2,19 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildQuestions } from './build.ts';
 import { parseExercises, type Exercise } from './exercises.ts';
+import { parseRubrics, type Rubric } from './rubrics.ts';
 import type { Question } from './types.ts';
 
 /** Корень пакета: здесь лежат `questions/` и `exercises/`. */
 export const CONTENT_ROOT = join(import.meta.dirname, '..');
+
+/** Рубрики устных ответов: rubrics/<тема>.yaml. */
+export const RUBRICS_DIR = join(CONTENT_ROOT, 'rubrics');
+
+export function loadRubrics(dir = RUBRICS_DIR): Rubric[] {
+  if (!existsSync(dir)) return [];
+  return readDir(dir, '.yaml').flatMap(([name, raw]) => parseRubrics(raw, `rubrics/${name}`));
+}
 
 /** Черновики от генератора: в банк не входят, пока их не вычитали и не приняли. */
 export const DRAFTS_DIR = join(CONTENT_ROOT, 'exercises', 'drafts');

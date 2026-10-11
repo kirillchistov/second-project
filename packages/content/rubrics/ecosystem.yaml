@@ -1,0 +1,172 @@
+- question: styling
+  points:
+    - id: main-approaches
+      text: "Перечисляет основные подходы: обычный CSS / CSS Modules, utility-first (Tailwind CSS), runtime CSS-in-JS (styled-components, Emotion) и zero-runtime CSS-in-JS (vanilla-extract, Panda CSS, StyleX)"
+      weight: 3
+    - id: css-modules-isolation
+      text: CSS Modules изолируют имена классов на уровне файла и не имеют рантайм-стоимости, в отличие от глобального CSS, где без соглашений (BEM) возникают конфликты
+      weight: 2
+    - id: runtime-cssinjs-cost
+      text: Runtime CSS-in-JS вычисляет стили во время рендера в браузере, что стоит производительности и плохо сочетается с Server Components и стримингом, поэтому тренд — уход к zero-runtime решениям
+      weight: 3
+    - id: css-variables-dynamic
+      text: "Динамические значения удобно передавать через CSS-переменные: `style={{ '--progress': '40%' }}` и `var(--progress)` в CSS"
+      weight: 2
+    - id: inline-style-limits
+      text: "Inline-стили (`style`) подходят только для по-настоящему динамических значений: в них нельзя использовать псевдоклассы и медиазапросы"
+      weight: 2
+    - id: choice-tradeoffs
+      text: Выбор подхода зависит от команды, требований SSR/RSC и производительности; упоминает компромиссы вроде «шумной» разметки Tailwind или настройки сборки для zero-runtime, либо утилиту `clsx` для склейки классов
+      weight: 1
+  misconceptions:
+    - Inline-стили через `style` полностью заменяют CSS, включая `:hover` и медиазапросы
+    - Tailwind и CSS Modules добавляют заметную рантайм-нагрузку, сравнимую со styled-components
+    - Runtime CSS-in-JS (styled-components, Emotion) без ограничений работает внутри Server Components
+    - Zero-runtime CSS-in-JS генерирует стили в браузере во время рендера
+- question: project-setup
+  points:
+    - id: recommended-tools
+      text: Для нового проекта рекомендуется фреймворк (Next.js, React Router в режиме фреймворка, Expo для мобильных) или Vite для SPA (например, `npm create vite@latest -- --template react-ts`)
+      weight: 3
+    - id: cra-deprecated-why
+      text: "Create React App официально признан устаревшим (февраль 2025): он медленный, не развивался и не решал роутинг, загрузку данных и code splitting"
+      weight: 3
+    - id: vite-advantages
+      text: Vite быстр благодаря dev-серверу на нативных ES-модулях без полной сборки и быстрому HMR с сохранением состояния (Fast Refresh)
+      weight: 2
+    - id: framework-when
+      text: Фреймворк нужен, когда требуются SSR/SSG для SEO, серверная загрузка данных, Server Components, файловый роутинг или API-роуты; без фреймворка это решается вручную
+      weight: 2
+    - id: ssr-overkill
+      text: Для внутренней админки за логином SSR-фреймворк — лишняя инфраструктура, достаточно SPA на Vite
+      weight: 1
+  misconceptions:
+    - Create React App по-прежнему официально рекомендуемый способ создать React-проект
+    - Vite в dev-режиме собирает весь проект в бандл, как webpack, просто оптимизированнее
+    - Vite сам по себе даёт SSR, роутинг и загрузку данных так же, как фреймворк
+    - Для любого React-приложения обязательно нужен SSR-фреймворк вроде Next.js
+- question: forms
+  points:
+    - id: complexity-levels
+      text: "Подход выбирается по сложности формы: простые — неконтролируемые поля и `FormData`, средние — контролируемые поля в state, сложные (много полей, динамические массивы, зависимая валидация) — библиотека вроде React Hook Form"
+      weight: 3
+    - id: server-revalidation
+      text: Клиентская валидация нужна только для UX, сервер обязан валидировать данные повторно, потому что клиентскую проверку легко обойти
+      weight: 3
+    - id: rhf-uncontrolled-perf
+      text: React Hook Form работает с неконтролируемыми полями через `register`, поэтому ввод символа не перерисовывает всю форму
+      weight: 2
+    - id: zod-schema-types
+      text: Схема Zod подключается через `zodResolver` и одновременно даёт тип TypeScript (`z.infer`) и runtime-валидацию, её можно переиспользовать на сервере
+      weight: 2
+    - id: react19-form-actions
+      text: "В React 19 для простых форм есть `<form action>`, `useActionState` и `useFormStatus`: состояние отправки и ошибки без библиотек, прогрессивное улучшение с серверными функциями"
+      weight: 2
+    - id: form-a11y
+      text: "Доступность форм: `<label htmlFor>`, `aria-invalid`, связь ошибки с полем через `aria-describedby`, фокус на первом невалидном поле"
+      weight: 1
+  misconceptions:
+    - Достаточно валидации на клиенте, сервер может доверять пришедшим данным
+    - React Hook Form по умолчанию делает все поля контролируемыми и хранит их в `useState`, перерисовывая форму на каждый ввод
+    - Типы TypeScript проверяют данные формы во время выполнения, поэтому runtime-валидация не нужна
+    - "`useActionState` и form actions в React 19 работают только с серверными функциями и не подходят для клиентских обработчиков"
+- question: react-router
+  points:
+    - id: three-modes
+      text: "React Router v7 объединился с Remix и работает в трёх режимах: declarative (`<BrowserRouter>`/`<Routes>`), data (`createBrowserRouter` с `loader`/`action`) и framework (файловые роуты, SSR, типизация, Vite-плагин)"
+      weight: 3
+    - id: nested-outlet
+      text: "Маршруты вложенные: родительский layout рендерит дочерний маршрут через `<Outlet>`, `index`-маршрут отображается по пути родителя"
+      weight: 2
+    - id: loader-before-render
+      text: "`loader` загружает данные до рендера маршрута, компонент получает их через `useLoaderData`, а состояние перехода видно через `useNavigation`"
+      weight: 3
+    - id: loader-vs-effect
+      text: "Loaders лучше `useEffect`: загрузка стартует при навигации параллельно для всех вложенных маршрутов без водопада, запросы отменяются через `request.signal`, ошибки уходят в `errorElement`"
+      weight: 2
+    - id: actions-revalidate
+      text: Мутации и формы обрабатываются через `action`, после которого данные loaders автоматически перезагружаются
+      weight: 2
+    - id: protected-routes
+      text: Защищённый маршрут делают проверкой в `loader` с `redirect('/login')` или обёрткой с `<Navigate>`
+      weight: 1
+  misconceptions:
+    - В v7 основным пакетом остаётся `react-router-dom` (на деле основной пакет — `react-router`, `react-router-dom` оставлен лишь для совместимости)
+    - "`loader` выполняется после рендера компонента, как `useEffect`"
+    - В v7 обязательно использовать framework-режим с файловыми роутами; `<BrowserRouter>` и `<Routes>` больше не поддерживаются
+    - На статическом хостинге прямые ссылки на вложенные пути работают без настройки fallback на `index.html`
+- question: debugging
+  points:
+    - id: devtools-components
+      text: Во вкладке Components в React DevTools смотрят текущие props, state и хуки компонента, а также его owner — кто его отрендерил
+      weight: 3
+    - id: profiler-commits
+      text: Profiler в React DevTools записывает взаимодействие и показывает долгие коммиты и лишние рендеры; опция «Record why each component rendered» объясняет причину каждого рендера
+      weight: 3
+    - id: chrome-performance-tracks
+      text: В панели Performance Chrome DevTools (React 19.2) есть треки React (Scheduler, Components), по которым видно long tasks и что блокирует главный поток
+      weight: 2
+    - id: breakpoints-sourcemaps
+      text: "Обычный отладчик браузера с source maps: точки останова в обработчиках и эффектах, `debugger`, условное логирование"
+      weight: 2
+    - id: network-data-devtools
+      text: Сетевые проблемы и данные отлаживают через вкладку Network и DevTools библиотек (TanStack Query Devtools, Redux DevTools)
+      weight: 1
+    - id: prod-vs-dev-pitfalls
+      text: Выводы о производительности делают по production-профилирующей сборке, а не dev (dev медленнее в разы), и учитывают двойной рендер StrictMode при подсчёте вызовов
+      weight: 1
+  misconceptions:
+    - Замеры производительности в dev-сборке достоверно отражают поведение production
+    - Двойной вызов рендера или эффектов в разработке под StrictMode — это баг приложения, который нужно чинить
+    - "`<Profiler onRender>` вообще не работает в production — на деле он работает в production-профилирующей сборке"
+    - Owner stack в React 19 — это обычный стек вызовов JavaScript, а не цепочка компонентов, которые привели к ошибке
+- question: react-vs-others
+  points:
+    - id: react-rerender-model
+      text: React обновляет UI через перерендер компонента и сравнение дерева (reconciliation), а Svelte и Solid используют мелкозернистую реактивность (сигналы/компиляцию), обновляя конкретный DOM-узел без перерендера компонента и без VDOM
+      weight: 3
+    - id: library-vs-framework
+      text: React — библиотека с минимумом «в коробке», роутинг, формы и данные выбираются отдельно; Angular — фреймворк «всё включено» (DI, роутинг, формы, HTTP) с TypeScript
+      weight: 3
+    - id: vue-proxy-angular-signals
+      text: Vue — прогрессивный фреймворк с реактивностью на `Proxy` и шаблонами поверх VDOM; Angular в последних версиях перешёл на сигналы вместе с change detection
+      weight: 2
+    - id: react-strengths-weaknesses
+      text: Сильные стороны React — крупнейшая экосистема и рынок специалистов, React Native, Server Components, конкурентный рендеринг; слабые — нужно самому собирать стек, ручная мемоизация (частично решена React Compiler), сложные правила эффектов
+      weight: 2
+    - id: choose-by-context
+      text: "Выбор фреймворка зависит от контекста: команда и наличие специалистов, требования к производительности, SEO, мобильные платформы, долгосрочная поддержка — а не от того, «какой лучше»"
+      weight: 2
+    - id: signals-not-always-faster
+      text: "Сигналы не гарантируют ощутимый выигрыш: в типичных приложениях разница в производительности меньше, чем от архитектурных решений"
+      weight: 1
+  misconceptions:
+    - Сигналы и мелкозернистая реактивность всегда делают приложение заметно быстрее, чем React
+    - Svelte и Solid используют виртуальный DOM, как React
+    - React — полноценный фреймворк «всё включено» с встроенными роутингом, формами и HTTP-клиентом, как Angular
+    - Vue и Angular имеют прямой аналог React Server Components
+- question: choosing-framework
+  points:
+    - id: criteria-seo-ssr
+      text: "Выбор определяется критериями: нужен ли SEO и быстрый первый контент (SSR), сколько данных грузится на сервере и нужны ли Server Components"
+      weight: 3
+    - id: spa-for-auth-apps
+      text: Для дашбордов и админок за логином, где SEO не нужен, достаточно SPA на Vite с клиентским роутером (React Router / TanStack Router) и TanStack Query
+      weight: 3
+    - id: nextjs-tradeoff
+      text: Next.js (App Router) даёт больше всего возможностей — RSC, Server Functions, стриминг, кэширование, — но ценой более высокой сложности, в том числе отладки кэшей
+      weight: 2
+    - id: react-router-framework
+      text: React Router v7 в режиме фреймворка даёт loaders/actions и SSR, ближе к веб-стандартам и является прямым наследником Remix
+      weight: 2
+    - id: hosting-vendor
+      text: "Учитываются хостинг и зависимость от вендора: Next.js лучше всего работает на Vercel, при self-hosted нужно самостоятельно разбираться с кэшем, ISR и изображениями"
+      weight: 2
+    - id: team-reversibility
+      text: Сильный ответ учитывает опыт команды и обратимость решения (стоимость миграции через несколько лет), а также упоминает альтернативы вроде TanStack Start или Astro для статичного контента
+      weight: 1
+  misconceptions:
+    - Next.js — универсальный выбор по умолчанию для любого проекта, включая внутреннюю админку за логином
+    - SEO-критичный контентный сайт можно спокойно делать как чистое SPA без SSR/SSG
+    - Next.js работает на self-hosted (Docker, Node) точно так же, как на Vercel, без дополнительной настройки кэша, ISR и изображений
+    - React Router — только клиентский роутер и не умеет SSR и загрузку данных через loaders/actions

@@ -1,4 +1,4 @@
-import type { LessonItem, Outcome } from '@rr/core';
+import type { AnswerMeta, LessonItem, Outcome } from '@rr/core';
 import { ArrangeExercise } from './ArrangeExercise';
 import { CardExercise } from './CardExercise';
 import { ChoiceExercise } from './ChoiceExercise';
@@ -14,7 +14,7 @@ export function LessonItemView({
   item: LessonItem;
   revealed: boolean;
   /** `feedback` — показать панель разбора; самооценка карточки разбора не требует */
-  onAnswer: (outcome: Outcome, feedback: boolean) => void;
+  onAnswer: (outcome: Outcome, feedback: boolean, meta?: AnswerMeta) => void;
 }) {
   if (item.kind === 'card') return <CardExercise question={item.question} quiz={item.quiz} revealed={revealed} onAnswer={onAnswer} />;
 

@@ -7,12 +7,14 @@
     ".": "./src/index.ts",
     "./exercises": "./src/exercises.ts",
     "./node": "./src/node.ts",
-    "./bundle.json": "./dist/content.json"
+    "./bundle.json": "./dist/content.json",
+    "./rubrics": "./src/rubrics.ts"
   },
   "scripts": {
     "bundle": "node scripts/bundle.ts",
     "generate": "node --env-file-if-exists=../../.env scripts/generate.ts",
-    "approve": "node scripts/approve.ts"
+    "approve": "node scripts/approve.ts",
+    "rubrics": "node --env-file-if-exists=../../.env scripts/rubrics.ts"
   },
   "dependencies": {
     "yaml": "^2.9.1",

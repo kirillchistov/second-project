@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useNow } from '@/lib/now';
 import { setCardMode, useCardMode, type CardMode } from '@/lib/preferences';
 import { useProgress } from '@/lib/progress';
@@ -42,10 +43,11 @@ function ContributionGraph({ activity, now, c }: { activity: ReadonlyMap<string,
   );
 }
 
-const CARD_MODES: { id: CardMode; label: string }[] = [
-  { id: 'ask', label: 'Спрашивать' },
-  { id: 'explain', label: 'Своими словами' },
-  { id: 'quiz', label: 'С вариантами' },
+const CARD_MODES: { id: CardMode; label: string; hint: string }[] = [
+  { id: 'ask', label: 'Спрашивать', hint: 'выбирать на каждой карточке' },
+  { id: 'voice', label: 'Рассказать, ИИ проверит', hint: 'лучшая тренировка, нужна сеть' },
+  { id: 'explain', label: 'Про себя, потом сверить', hint: 'без сети, самооценка' },
+  { id: 'quiz', label: 'Выбрать из вариантов', hint: 'быстро, когда неудобно говорить' },
 ];
 
 function CardModeSetting({ c }: { c: Colors }) {
@@ -53,29 +55,33 @@ function CardModeSetting({ c }: { c: Colors }) {
   return (
     <View style={[styles.panel, { backgroundColor: c.surface, borderColor: c.border }]}>
       <Text style={[styles.panelTitle, { color: c.text }]}>Карточки вопросов</Text>
-      <View style={[styles.segment, { backgroundColor: c.surfaceAlt }]}>
-        {CARD_MODES.map((m) => (
-          <Pressable
-            key={m.id}
-            accessibilityRole="button"
-            accessibilityState={{ selected: mode === m.id }}
-            onPress={() => setCardMode(m.id)}
-            style={[styles.segmentItem, mode === m.id && { backgroundColor: c.surface }]}
-          >
-            <Text style={[styles.segmentText, { color: mode === m.id ? c.text : c.textMuted }]}>{m.label}</Text>
-          </Pressable>
-        ))}
+      <View style={styles.modes}>
+        {CARD_MODES.map((m) => {
+          const selected = mode === m.id;
+          return (
+            <Pressable
+              key={m.id}
+              accessibilityRole="radio"
+              accessibilityState={{ selected }}
+              onPress={() => setCardMode(m.id)}
+              style={[styles.modeRow, { borderColor: selected ? c.accent : c.border, backgroundColor: selected ? c.accentSoft : 'transparent' }]}
+            >
+              <Ionicons name={selected ? 'radio-button-on' : 'radio-button-off'} size={20} color={selected ? c.accent : c.textMuted} />
+              <View style={styles.modeText}>
+                <Text style={[styles.modeLabel, { color: c.text }]}>{m.label}</Text>
+                <Text style={[styles.note, { color: c.textMuted }]}>{m.hint}</Text>
+              </View>
+            </Pressable>
+          );
+        })}
       </View>
-      <Text style={[styles.note, { color: c.textMuted }]}>
-        Свой ответ сильнее закрепляет память; варианты — быстрый режим, когда нет возможности подумать вслух.
-      </Text>
     </View>
   );
 }
 
 export default function ProfileScreen() {
   const c = useColors();
-  const { activity, cards, lessonsDone } = useProgress();
+  const { activity, cards, lessonsDone, voice } = useProgress();
   const now = useNow();
   const totalXp = [...activity.values()].reduce((a, b) => a + b, 0);
   const learned = [...cards.values()].filter(isLearned).length;
@@ -89,6 +95,11 @@ export default function ProfileScreen() {
     { label: 'Уроков', value: `${lessonsDone.size}` },
     { label: 'Навыков выучено', value: `${learned}/${cards.size}` },
     { label: 'Помнишь сейчас', value: reviewed.length ? `${Math.round(memory * 100)}%` : '—' },
+    {
+      label: voice.answers ? `Без подсказок (из ${voice.answers})` : 'Без подсказок',
+      value: voice.answers ? `${Math.round((voice.withoutHints / voice.answers) * 100)}%` : '—',
+    },
+    { label: 'Ответов голосом', value: `${voice.answers}` },
   ];
 
   return (
@@ -110,7 +121,8 @@ export default function ProfileScreen() {
         <CardModeSetting c={c} />
         <Text style={[styles.note, { color: c.textMuted }]}>
           «Помнишь сейчас» — средняя вероятность вспомнить пройденные навыки по модели FSRS. Повторение поднимает её
-          обратно к 90%.
+          обратно к 90%. «Без подсказок» — доля ответов голосом, данных без единого наводящего вопроса: чем выше, тем
+          больше ты думаешь сам.
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -131,7 +143,8 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 24, fontWeight: '800' },
   statLabel: { fontSize: 13 },
   note: { fontSize: 13, lineHeight: 18 },
-  segment: { flexDirection: 'row', borderRadius: 10, padding: 3 },
-  segmentItem: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
-  segmentText: { fontSize: 13, fontWeight: '600' },
+  modes: { gap: 8 },
+  modeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, padding: 10 },
+  modeText: { flex: 1, gap: 1 },
+  modeLabel: { fontSize: 15, fontWeight: '600' },
 });

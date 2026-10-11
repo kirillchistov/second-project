@@ -22,6 +22,11 @@ const MIGRATIONS: string[] = [
     at TEXT NOT NULL
   );
   `,
+  // Фаза 2: способ ответа на карточку и число подсказок — для метрики «без подсказок»
+  `
+  ALTER TABLE attempts ADD COLUMN mode TEXT;
+  ALTER TABLE attempts ADD COLUMN hints INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 async function migrate(db: SQLiteDatabase): Promise<void> {
@@ -59,20 +64,26 @@ export interface ProgressSnapshot {
   activity: Map<string, number>;
   /** id урока → лучшая точность */
   lessonsDone: Map<string, number>;
+  /** Ответы голосом с проверкой ИИ: сколько всего и сколько без единой подсказки */
+  voice: { answers: number; withoutHints: number };
 }
 
 export async function loadProgress(db: SQLiteDatabase): Promise<ProgressSnapshot> {
-  const [cards, backlog, activity, lessons] = await Promise.all([
+  const [cards, backlog, activity, lessons, voice] = await Promise.all([
     db.getAllAsync<{ skill: string; card: string }>('SELECT skill, card FROM skill_cards'),
     db.getAllAsync<{ item_id: string }>('SELECT item_id FROM backlog ORDER BY added_at'),
     db.getAllAsync<{ day: string; xp: number }>('SELECT day, xp FROM activity'),
     db.getAllAsync<{ lesson_id: string; best_accuracy: number }>('SELECT lesson_id, best_accuracy FROM lessons_done'),
+    db.getFirstAsync<{ answers: number; withoutHints: number | null }>(
+      "SELECT COUNT(*) AS answers, SUM(hints = 0) AS withoutHints FROM attempts WHERE mode = 'voice'",
+    ),
   ]);
   return {
     cards: new Map(cards.map((r) => [r.skill, JSON.parse(r.card) as StoredCard])),
     backlog: backlog.map((r) => r.item_id),
     activity: new Map(activity.map((r) => [r.day, r.xp])),
     lessonsDone: new Map(lessons.map((r) => [r.lesson_id, r.best_accuracy])),
+    voice: { answers: voice?.answers ?? 0, withoutHints: voice?.withoutHints ?? 0 },
   };
 }
 
@@ -109,13 +120,15 @@ export async function saveSession(
         JSON.stringify(card),
       );
       await txn.runAsync(
-        'INSERT INTO attempts (item_id, skill, outcome, attempts, lesson_id, at) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO attempts (item_id, skill, outcome, attempts, lesson_id, at, mode, hints) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         itemId,
         item.skill,
         result.first,
         result.attempts,
         lessonId,
         at,
+        result.meta?.mode ?? null,
+        result.meta?.hints ?? 0,
       );
       if (result.first === 'again') {
         await txn.runAsync('INSERT OR IGNORE INTO backlog (item_id, added_at) VALUES (?, ?)', itemId, at);

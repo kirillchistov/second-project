@@ -1,5 +1,6 @@
 export * from './check.ts';
 export * from './format.ts';
+export * from './grading.ts';
 export * from './interview.ts';
 export * from './path.ts';
 export * from './progress.ts';

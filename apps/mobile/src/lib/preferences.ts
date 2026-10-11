@@ -3,18 +3,19 @@ import { useSyncExternalStore } from 'react';
 
 /**
  * Как проходить карточку вопроса:
- * explain — сформулировать ответ самому и оценить себя (сильнее для памяти),
+ * voice — рассказать ответ, ИИ оценит по рубрике (сильнее всего для памяти и для собеседований),
+ * explain — сформулировать про себя и оценить себя самому (без сети),
  * quiz — выбрать из вариантов (быстрее, удобно в дороге),
  * ask — решать каждый раз.
  */
-export type CardMode = 'ask' | 'explain' | 'quiz';
+export type CardMode = 'ask' | 'voice' | 'explain' | 'quiz';
 
 const KEY = 'card-mode';
 const listeners = new Set<() => void>();
 
 function read(): CardMode {
   const value = Storage.getItemSync(KEY);
-  return value === 'explain' || value === 'quiz' ? value : 'ask';
+  return value === 'voice' || value === 'explain' || value === 'quiz' ? value : 'ask';
 }
 
 let cardMode = read();

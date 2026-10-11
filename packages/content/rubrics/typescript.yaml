@@ -1,0 +1,100 @@
+- question: typescript-props
+  points:
+    - id: props-type-destructure
+      text: "Props описывают через `type` или `interface` и аннотируют деструктурированный параметр функции-компонента (`{ variant, children }: ButtonProps`)"
+      weight: 3
+    - id: children-reactnode
+      text: Для `children` используют `React.ReactNode` (строки, числа, элементы, массивы, `null`), а не `JSX.Element`/`ReactElement`, который допускает только JSX-элемент
+      weight: 3
+    - id: event-generics
+      text: "События типизируют дженериками по элементу: `React.ChangeEvent<HTMLInputElement>`, `React.MouseEvent<HTMLButtonElement>`, `React.KeyboardEvent<...>` — это даёт типизированные `e.target`/`e.currentTarget` вместо `any`"
+      weight: 2
+    - id: extend-native-props
+      text: Чтобы расширить нативный элемент, берут `React.ComponentProps<'button'>` и пересекают со своими props, пробрасывая остальное через `...rest`; `React.ComponentProps<typeof MyComponent>` достаёт props существующего компонента
+      weight: 2
+    - id: no-proptypes
+      text: "PropTypes устарели: в React 19 их проверка удалена, типы проверяет TypeScript на этапе компиляции, а runtime-валидацию на границах системы (API, формы, URL) делают через Zod/Valibot"
+      weight: 1
+    - id: fc-optional
+      text: "`React.FC` не обязателен: чаще пишут обычные функции с типизированными props, так проще с дженериками и нет неявных особенностей"
+      weight: 1
+  misconceptions:
+    - Для `children` правильно использовать `JSX.Element` — на самом деле тогда нельзя передать строку или `null`, нужен `React.ReactNode`
+    - PropTypes в React 19 по-прежнему проверяют props в рантайме и нужны вместе с TypeScript
+    - TypeScript проверяет типы props в рантайме, поэтому валидировать ответы API и данные форм отдельно не нужно
+    - Компоненты обязательно типизировать через `React.FC`, иначе props не будут проверяться
+- question: typescript-generics
+  points:
+    - id: generic-function-signature
+      text: "Дженерик-компонент объявляется как функция с параметром типа, который прокидывается в тип пропсов: `function List<T>(props: ListProps<T>)`"
+      weight: 3
+    - id: inference-to-callbacks
+      text: TypeScript сам выводит `T` из переданных данных (например, `items`), и колбэки вроде `renderItem`/`onSelect`/`getKey` получают точный тип элемента без явного указания
+      weight: 3
+    - id: tsx-arrow-comma
+      text: В `.tsx` у стрелочной функции параметр типа пишут с запятой `<T,>` (или с `extends`), иначе `<T>` парсится как JSX-тег
+      weight: 2
+    - id: constraints-keyof
+      text: "Ограничения сужают `T`: `<T extends { id: string }>` позволяет брать ключ из `item.id`, а `<K extends keyof T>` типизирует, например, колонки таблицы по ключам объекта"
+      weight: 2
+    - id: memo-loses-generic
+      text: Обёртка в `memo` (и `forwardRef`) теряет дженерик, поэтому нужен каст типа; в React 19 `ref` — обычный prop и `forwardRef` не нужен
+      weight: 1
+    - id: no-any-default
+      text: Не стоит задавать `T = any` по умолчанию — это убивает типобезопасность и смысл дженерика
+      weight: 1
+  misconceptions:
+    - Дженерик-компонент нельзя сделать на стрелочной функции в `.tsx` — можно, через `<T,>` или `<T extends unknown>`
+    - "`React.memo`/`forwardRef` автоматически сохраняют параметр типа компонента — на самом деле дженерик теряется и нужен каст"
+    - При использовании всегда нужно явно указывать тип, например `<List<User> ... />` — обычно `T` выводится из пропсов
+    - Использование `any` или `unknown` для элементов вместо дженерика даёт ту же типобезопасность колбэков
+- question: typescript-hooks
+  points:
+    - id: usestate-explicit-generic
+      text: "`useState` выводит тип из начального значения. Если начальное значение `null` или пустой массив, тип указывают явно: `useState<User | null>(null)`. Иначе `useState([])` в strict-режиме даёт `never[]`, и добавить элементы нельзя."
+      weight: 3
+    - id: discriminated-union-state
+      text: Асинхронное состояние описывают одним discriminated union с общим полем-дискриминантом (например, `status`), а не набором независимых флагов `isLoading`/`error`/`data`. Так невозможные комбинации состояний становятся непредставимыми.
+      weight: 3
+    - id: narrowing-by-discriminant
+      text: Проверка дискриминанта (`state.status === 'success'`) сужает тип. После неё TypeScript знает, что в этой ветке есть `data`, а в ветке `error` есть `error`.
+      weight: 2
+    - id: useref-usereducer-typing
+      text: DOM-ссылки типизируют как `useRef<HTMLInputElement>(null)`, получая `RefObject<HTMLInputElement | null>`. `useReducer` типизируют через тип состояния и union действий.
+      weight: 2
+    - id: tuple-as-const
+      text: Кастомный хук, возвращающий кортеж, должен возвращать его с `as const`. Без этого TypeScript выведет массив объединённых типов (`(boolean | (() => void))[]`) вместо `readonly [boolean, () => void]`.
+      weight: 2
+    - id: exhaustive-never
+      text: Полноту `switch` по union проверяют через присваивание в `never` в ветке `default`. Если добавить новый статус и забыть ветку, будет ошибка компиляции.
+      weight: 1
+  misconceptions:
+    - Утверждение, что `useState([])` в strict-режиме выводит `any[]` или `unknown[]` и туда можно добавлять что угодно. На деле выводится `never[]`.
+    - Утверждение, что TypeScript сам выводит кортеж из `return [a, b]` в кастомном хуке и `as const` не нужен.
+    - Утверждение, что `useRef<T>()` без аргумента корректен в типах React 19. На деле аргумент обязателен.
+    - Утверждение, что набор независимых флагов `isLoading`/`error`/`data` типобезопасен так же, как discriminated union. На деле флаги допускают противоречивые комбинации, например `isLoading && error && data`.
+- question: typescript-advanced
+  points:
+    - id: generic-element-type
+      text: Полиморфный компонент типизируется дженериком `<C extends React.ElementType>`, а его props берутся из `React.ComponentPropsWithoutRef<C>`, поэтому при `as="a"` разрешён `href`, а при `as="button"` — нет
+      weight: 3
+    - id: omit-conflicting-keys
+      text: Из props выбранного элемента исключаются через `Omit` ключи собственных props компонента и `as`, чтобы они не конфликтовали
+      weight: 2
+    - id: discriminated-union-props
+      text: "Взаимоисключающие props описываются union-типом (дискриминант или `never`, например `href: string` против `href?: never`), чтобы TypeScript запрещал недопустимые комбинации"
+      weight: 3
+    - id: satisfies-literals
+      text: "`satisfies` проверяет соответствие значения типу, но в отличие от аннотации сохраняет узкие литеральные типы (например, `keyof typeof routes` даёт `'home' | 'product'`)"
+      weight: 2
+    - id: aschild-alternative
+      text: Альтернатива полиморфизму — паттерн `asChild` (Slot), где props передаются единственному ребёнку и типизация становится тривиальной
+      weight: 1
+    - id: perf-and-any-pitfalls
+      text: Полиморфные типы замедляют проверку TypeScript в больших кодовых базах, а `as any` в дизайн-системе ломает типобезопасность у всех потребителей
+      weight: 1
+  misconceptions:
+    - Достаточно типизировать `as` как `string` или `keyof JSX.IntrinsicElements` и принимать `any` для остальных props — типобезопасность при этом сохраняется
+    - "`satisfies` работает так же, как аннотация типа `: Type`, и расширяет значение до объявленного типа"
+    - Для проверки props в современном React стандартом остаются PropTypes или Flow, а не TypeScript в strict-режиме
+    - Взаимоисключающие props можно выразить, просто сделав оба поля опциональными в одном объектном типе

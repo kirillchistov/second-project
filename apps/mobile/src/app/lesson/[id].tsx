@@ -17,6 +17,7 @@ import {
   sessionProgress,
   sessionReducer,
   startSession,
+  type AnswerMeta,
   type LessonItem,
   type Outcome,
 } from '@rr/core';
@@ -61,17 +62,17 @@ export default function LessonScreen() {
       });
   }, [state, items.length, lesson?.id, progress]);
 
-  const answer = (outcome: Outcome, feedback: boolean) => {
+  const answer = (outcome: Outcome, feedback: boolean, meta?: AnswerMeta) => {
     if (!item) return;
     const correct = outcome !== 'again';
     if (!feedback) {
-      // Самооценка: эталон уже на экране — отдельный разбор не нужен
-      dispatch({ type: 'answer', outcome });
+      // Самооценка или разбор ИИ: результат уже на экране — отдельная панель не нужна
+      dispatch({ type: 'answer', outcome, meta });
       dispatch({ type: 'continue' });
       return;
     }
     Haptics.notificationAsync(correct ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error);
-    dispatch({ type: 'answer', outcome });
+    dispatch({ type: 'answer', outcome, meta });
   };
 
   if (items.length === 0) {

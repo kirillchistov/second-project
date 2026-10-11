@@ -1,6 +1,15 @@
 import type { LessonItem } from './path.ts';
 import type { Outcome } from './srs.ts';
 
+/** Как ответили на карточку вопроса: голосом с проверкой ИИ, про себя с самооценкой или выбором варианта. */
+export type AnswerMode = 'voice' | 'explain' | 'quiz';
+
+export interface AnswerMeta {
+  mode: AnswerMode;
+  /** Сколько наводящих подсказок понадобилось */
+  hints: number;
+}
+
 /**
  * Ход урока как чистый редьюсер: UI только отправляет события и рисует состояние.
  * Ошибка не «отнимает жизнь», а возвращает задание в конец урока — урок не закончится, пока всё не решено.
@@ -10,6 +19,8 @@ export interface ItemResult {
   first: Outcome;
   attempts: number;
   solved: boolean;
+  /** Способ и подсказки первой попытки — для метрики «без подсказок» */
+  meta?: AnswerMeta;
 }
 
 export interface SessionState {
@@ -25,7 +36,7 @@ export interface SessionState {
 
 export type SessionAction =
   /** Ответ на упражнение или самооценка карточки */
-  | { type: 'answer'; outcome: Outcome }
+  | { type: 'answer'; outcome: Outcome; meta?: AnswerMeta }
   | { type: 'continue' };
 
 export function startSession(items: LessonItem[]): SessionState {
@@ -45,7 +56,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       const prev = state.results[item.id];
       const result: ItemResult = prev
         ? { ...prev, attempts: prev.attempts + 1, solved: correct }
-        : { first: action.outcome, attempts: 1, solved: correct };
+        : { first: action.outcome, attempts: 1, solved: correct, meta: action.meta };
       return {
         ...state,
         phase: 'feedback',

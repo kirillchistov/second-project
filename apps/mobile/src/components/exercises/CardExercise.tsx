@@ -4,17 +4,19 @@ import { useCardMode } from '@/lib/preferences';
 import { useColors } from '@/lib/theme';
 import { useShuffledOrder } from '@/lib/useShuffled';
 import type { Question } from '@rr/content';
-import { checkAnswer, type Outcome, type QuizExercise } from '@rr/core';
+import { checkAnswer, type AnswerMeta, type Outcome, type QuizExercise } from '@rr/core';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { VoiceExercise } from './VoiceExercise';
 
-type Mode = 'choose' | 'explain' | 'quiz';
+type Mode = 'choose' | 'voice' | 'explain' | 'quiz';
 
 /**
- * Карточка вопроса. Два способа ответить:
- * - своими словами: вспомнить, открыть эталон и честно оценить себя;
+ * Карточка вопроса. Три способа ответить:
+ * - голосом: рассказать ответ, ИИ разберёт его по рубрике;
+ * - про себя: вспомнить, открыть эталон и честно оценить себя;
  * - с вариантами: выбрать верную формулировку, если для вопроса есть quiz.
- * Оба способа двигают интервальное повторение одного и того же навыка.
+ * Все способы двигают интервальное повторение одного и того же навыка.
  */
 export function CardExercise({
   question,
@@ -25,36 +27,52 @@ export function CardExercise({
   question: Question;
   quiz?: QuizExercise;
   revealed: boolean;
-  /** `feedback` — показать разбор (для варианта с выбором), иначе урок идёт дальше сразу */
-  onAnswer: (outcome: Outcome, feedback: boolean) => void;
+  /** `feedback` — показать панель разбора (для варианта с выбором), иначе урок идёт дальше сразу */
+  onAnswer: (outcome: Outcome, feedback: boolean, meta: AnswerMeta) => void;
 }) {
   const preferred = useCardMode();
-  const [mode, setMode] = useState<Mode>(() => (!quiz || preferred === 'explain' ? 'explain' : preferred === 'quiz' ? 'quiz' : 'choose'));
+  const [mode, setMode] = useState<Mode>(() => {
+    if (preferred === 'quiz') return quiz ? 'quiz' : 'choose';
+    return preferred === 'ask' ? 'choose' : preferred;
+  });
   const label = `Вопрос · ${topicTitle.get(question.topic) ?? ''}`;
 
-  if (mode === 'quiz' && quiz) return <QuizMode quiz={quiz} label={label} revealed={revealed} onAnswer={onAnswer} />;
+  if (mode === 'quiz' && quiz) {
+    return <QuizMode quiz={quiz} label={label} revealed={revealed} onAnswer={(o) => onAnswer(o, true, { mode: 'quiz', hints: 0 })} />;
+  }
+  if (mode === 'voice') {
+    return (
+      <VoiceExercise
+        question={question}
+        label={label}
+        onAnswer={(o, meta) => onAnswer(o, false, meta)}
+        onFallback={() => setMode('explain')}
+      />
+    );
+  }
 
   return (
     <View style={styles.root}>
       <Prompt label={label} text={question.title} />
       {mode === 'choose' ? (
-        <ChooseMode onExplain={() => setMode('explain')} onQuiz={() => setMode('quiz')} />
+        <ChooseMode hasQuiz={!!quiz} onPick={setMode} />
       ) : (
-        <ExplainMode question={question} onGrade={(outcome) => onAnswer(outcome, false)} />
+        <ExplainMode question={question} onGrade={(outcome) => onAnswer(outcome, false, { mode: 'explain', hints: 0 })} />
       )}
     </View>
   );
 }
 
-function ChooseMode({ onExplain, onQuiz }: { onExplain: () => void; onQuiz: () => void }) {
+function ChooseMode({ hasQuiz, onPick }: { hasQuiz: boolean; onPick: (mode: Mode) => void }) {
   const c = useColors();
   return (
     <View style={styles.choose}>
       <Text style={[styles.hint, { color: c.textMuted }]}>Как ответишь?</Text>
-      <Button title="Своими словами" onPress={onExplain} />
-      <Button title="Выбрать из вариантов" variant="secondary" onPress={onQuiz} />
+      <Button title="Рассказать — ИИ проверит" onPress={() => onPick('voice')} />
+      <Button title="Про себя, потом сверить" variant="secondary" onPress={() => onPick('explain')} />
+      {hasQuiz && <Button title="Выбрать из вариантов" variant="secondary" onPress={() => onPick('quiz')} />}
       <Text style={[styles.small, { color: c.textMuted }]}>
-        Свой ответ лучше закрепляет память, варианты — быстрее. Режим по умолчанию меняется в профиле.
+        Рассказать вслух — лучшая тренировка памяти и собеседования. Режим по умолчанию меняется в профиле.
       </Text>
     </View>
   );
