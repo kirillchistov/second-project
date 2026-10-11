@@ -1,0 +1,273 @@
+# testing-async-msw: принято из черновика 2026-10-11
+- id: testing-async-msw-why-http-level
+  skill: msw-network-mocking
+  question: testing-async-msw
+  difficulty: 2
+  prompt: Почему в тестах компонентов сеть обычно мокают через MSW, а не через `vi.mock('./api')`?
+  explanation: Чем ниже граница мока, тем больше настоящего кода проверяет тест. MSW подменяет только сервер, а клиентский код от вызова до обработки ответа работает как в проде. Поэтому рефакторинг слоя API не ломает тесты, а одни и те же handlers используются в тестах, Storybook и dev.
+  type: quiz
+  options:
+    - label: "Мок стоит на уровне HTTP: работает реальный клиентский код, тест не завязан на структуру модулей, а handlers переиспользуются"
+      why: Верно. Проверяются fetch, заголовки, парсинг и обработка статусов. Переименование модуля API не ломает тест, а те же handlers работают в Storybook и при разработке.
+    - label: MSW быстрее, потому что не выполняет сетевых запросов, а vi.mock выполняет
+      why: Ни один из подходов не ходит в реальную сеть. Скорость тут ни при чём, разница в том, какая часть кода выполняется по-настоящему.
+    - label: vi.mock не умеет возвращать промисы, поэтому для асинхронного кода не подходит
+      why: "Умеет: `vi.fn().mockResolvedValue(...)` возвращает промис. Проблема vi.mock в другом: он вырезает слой API и привязывает тест к деталям реализации."
+    - label: MSW поднимает настоящий локальный бэкенд, и тест становится интеграционным с сервером
+      why: MSW не запускает сервер. В Node он перехватывает запросы на уровне модулей http/fetch, в браузере — через Service Worker. Бэкенд по-прежнему подменён.
+  answer: 0
+- id: testing-async-msw-error-case
+  skill: msw-async-test-setup
+  question: testing-async-msw
+  difficulty: 2
+  prompt: "Допишите тест: переопределите ответ сервера только для этого теста и дождитесь появления ошибки."
+  explanation: "`server.use` добавляет обработчик поверх базовых, а `resetHandlers` в afterEach убирает его, чтобы он не попал в следующий тест. Ошибка появляется асинхронно, поэтому нужен `findByRole`: он возвращает промис и ретраит поиск. `getByRole` упал бы сразу."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    beforeAll(() =>
+      server.listen({ onUnhandledRequest: 'error' }),
+    );
+    afterEach(() => server.___());
+
+    test('показывает ошибку', async () => {
+      server.___(
+        http.get('/api/users/:id', () =>
+          new HttpResponse(null, { status: 500 })),
+      );
+      renderWithProviders(<UserCard userId="1" />);
+      const alert = await screen.___('alert');
+      expect(alert).toHaveTextContent(/не удалось/i);
+    });
+  tokens:
+    - resetHandlers
+    - use
+    - findByRole
+  decoys:
+    - close
+    - getByRole
+    - queryByRole
+    - listen
+- id: testing-async-shared-query-client
+  skill: test-providers-isolation
+  question: testing-async-msw
+  difficulty: 2
+  prompt: По отдельности тесты проходят, но при запуске всего файла результат зависит от порядка тестов. Где ошибка?
+  explanation: "Кэш TanStack Query живёт в экземпляре QueryClient. Если клиент создан на уровне модуля, данные одного теста видны следующему. Создавайте `new QueryClient` внутри `renderWithProviders`, на каждый рендер, с `retry: false`, чтобы ошибки не ретраились и тест не ждал лишнего."
+  type: find-bug
+  language: tsx
+  code: |-
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    export function renderWithProviders(ui: ReactNode) {
+      return render(
+        <QueryClientProvider client={queryClient}>
+          {ui}
+        </QueryClientProvider>,
+      );
+    }
+  bugLines:
+    - 1
+  causes:
+    - "QueryClient создан один раз на модуль: кэш запросов «протекает» между тестами"
+    - "`retry: false` скрывает реальные ошибки сети, поэтому тесты нестабильны"
+    - render нужно вызывать с await, иначе провайдер не успевает инициализироваться
+    - QueryClientProvider должен быть внутри ui, а не оборачивать его
+  answer: 0
+- id: testing-async-debounce-search
+  skill: testing-debounce-fake-timers
+  question: testing-async-msw
+  difficulty: 2
+  prompt: "Поиск отправляет запрос через 500 мс после последнего ввода. Нужно быстро и стабильно проверить: при быстром наборе «react» уходит ровно один запрос. Что выбрать?"
+  explanation: "Время в тесте должно быть управляемым. Фейковые таймеры делают debounce детерминированным и мгновенным. Без опции `advanceTimers` user-event сам ждёт между нажатиями по таймерам, которые теперь фейковые, и тест зависает. После теста верните реальные таймеры: `vi.useRealTimers()`."
+  type: choose-tool
+  options:
+    - label: "`vi.useFakeTimers()` + `userEvent.setup({ advanceTimers: vi.advanceTimersByTime })`, затем сдвинуть время"
+      why: "Лучший вариант. Время двигается вручную: можно проверить, что до 500 мс запроса нет, а после ровно один. Тест быстрый и детерминированный."
+    - label: Реальные таймеры и `findBy…` с увеличенным timeout
+      why: Подходит, когда задержки короткие и проверяется только итог. Здесь каждый тест ждёт реальные 500 мс, а проверку «запроса ещё нет» сделать надёжно трудно.
+    - label: "`vi.mock` утилиты debounce, чтобы она вызывала функцию сразу"
+      why: "Уместно, если debounce не относится к предмету теста. Здесь проверяется именно debounce, а мок его выключает: уйдёт пять запросов вместо одного."
+    - label: "`await new Promise((r) => setTimeout(r, 600))` после ввода"
+      why: "Слепой sleep: тест медленный, и запас по времени приходится подбирать. Если CI работает медленно, тест начинает падать."
+  answer: 0
+
+# testing-library: принято из черновика 2026-10-11
+- id: testing-library-philosophy-quiz
+  skill: testing-user-behavior
+  question: testing-library
+  difficulty: 2
+  prompt: Почему Testing Library советует искать элементы по ролям и подписям и проверять видимый результат, а не state компонента?
+  explanation: Тест должен падать, когда ломается поведение, а не когда меняется реализация. Запросы по ролям и подписям повторяют то, как интерфейс видят пользователь и скринридер. Если элемент не найти по роли, это часто сигнал о проблеме с доступностью.
+  type: quiz
+  options:
+    - label: "Тест проверяет то же, что видит пользователь: рефакторинг внутренностей его не ломает, а падает он только при сломанном поведении"
+      why: Верно. Тест привязан к контракту «что видно и что можно сделать», а не к именам state, хуков и CSS-классов.
+    - label: getByRole работает быстрее остальных запросов, поэтому тесты проходят быстрее
+      why: "Наоборот: getByRole обходит дерево доступности и обычно самый медленный запрос. Его выбирают ради надёжности, а не ради скорости."
+    - label: В React 19 доступ к state компонента из тестов закрыт, поэтому остаётся только DOM
+      why: Дело не в ограничениях API. Enzyme умел лезть во внутренности, и именно поэтому его тесты ломались при каждом рефакторинге.
+    - label: Так тест покрывает больше строк кода, и coverage растёт
+      why: Coverage от способа запроса не зависит. Цель — уверенность, что фича работает для пользователя, а не процент покрытия.
+  answer: 0
+- id: testing-library-async-query-choice
+  skill: testing-library-queries
+  question: testing-library
+  difficulty: 2
+  prompt: Компонент при монтировании загружает профиль (fetch замокан), после загрузки появляется заголовок с именем. Как в тесте получить этот заголовок?
+  explanation: Выбирайте запрос по ожиданию. Элемент уже есть — getBy. Элемента быть не должно — queryBy + not.toBeInTheDocument(). Элемент появится асинхронно — await findBy, по сути это getBy внутри waitFor. Среди запросов приоритет у роли, testid — в последнюю очередь.
+  type: choose-tool
+  options:
+    - label: "await screen.findByRole('heading', { name: /ann/i })"
+      why: "Лучший вариант: findBy возвращает промис и повторяет поиск, пока элемент не появится или не выйдет таймаут. Поиск по роли проверяет и доступность."
+    - label: "screen.getByRole('heading', { name: /ann/i })"
+      why: getBy ищет синхронно, сразу после render. Данные ещё не пришли, поэтому запрос бросит ошибку. Подходит, когда элемент уже на экране.
+    - label: "screen.queryByRole('heading', { name: /ann/i })"
+      why: queryBy сразу вернёт null и ничего не ждёт. Он нужен, чтобы проверить отсутствие элемента, например что спиннер исчез.
+    - label: await waitFor(() => screen.getByTestId('title'))
+      why: Сработает, но вручную повторяет findBy, а testid ничего не говорит о доступности. testid оставьте для элементов, у которых нет роли и текста.
+  answer: 0
+- id: testing-library-absence-check-bug
+  skill: testing-library-queries
+  question: testing-library
+  difficulty: 2
+  prompt: Тест должен проверить, что после ввода корректного email ошибка пропадает. Почему он падает, даже когда компонент работает правильно?
+  explanation: "getBy… бросает ошибку, если элемента нет, поэтому до not.toBeInTheDocument() дело не доходит. Для проверки отсутствия используйте queryBy…: он возвращает null. Если элемент исчезает асинхронно, подойдёт waitForElementToBeRemoved."
+  type: find-bug
+  language: tsx
+  code: |-
+    test('скрывает ошибку', async () => {
+      const user = userEvent.setup();
+      render(<EmailField />);
+      const input = screen.getByLabelText(/email/i);
+      await user.type(input, 'bad');
+      await user.tab();
+      expect(screen.getByText(/неверный email/i))
+        .toBeInTheDocument();
+      await user.clear(input);
+      await user.type(input, 'ann@example.com');
+      expect(screen.getByText(/неверный email/i))
+        .not.toBeInTheDocument();
+    });
+  bugLines:
+    - 11
+    - 12
+  causes:
+    - "Для проверки отсутствия нужен queryByText: getByText бросает ошибку, когда элемента нет"
+    - После user.clear нужно заново получить input через getByLabelText
+    - user.tab() не вызывает blur, поэтому ошибка вообще не появится
+    - toBeInTheDocument нельзя использовать с отрицанием .not
+  answer: 0
+- id: testing-library-form-submit-fill
+  skill: testing-user-event-flow
+  question: testing-library
+  difficulty: 2
+  prompt: Допишите тест формы подписки. Текст «Спасибо» появляется только после асинхронной отправки.
+  explanation: "userEvent.setup() создаёт сессию и воспроизводит реальную цепочку событий: focus, keydown, input и т. д. fireEvent этого не делает. Поле уже на экране, поэтому его ищем синхронно через getByRole по роли и доступному имени. Асинхронно появляющийся текст ждём через await findBy…: getBy упал бы сразу."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    test('отправляет email', async () => {
+      const user = userEvent.___();
+      const onSubmit = vi.fn();
+      render(<SubscribeForm onSubmit={onSubmit} />);
+      const field = screen.___('textbox', {
+        name: /email/i,
+      });
+      await user.type(field, 'a@b.c');
+      await user.click(
+        screen.getByRole('button', { name: /подп/i })
+      );
+      expect(onSubmit).toHaveBeenCalledWith('a@b.c');
+      expect(await screen.___(/спасибо/i)).toBeVisible();
+    });
+  tokens:
+    - setup
+    - getByRole
+    - findByText
+  decoys:
+    - getByText
+    - findByRole
+    - waitFor
+    - init
+
+# testing-strategy: принято из черновика 2026-10-11
+- id: testing-strategy-trophy-quiz
+  skill: testing-trophy-balance
+  question: testing-strategy
+  difficulty: 2
+  prompt: Как распределить усилия по тестированию фронтенда, чтобы получить максимум уверенности в релизе при разумной цене поддержки?
+  explanation: "«Тестовый трофей»: фундамент — статический анализ, основная масса — интеграционные тесты поведения, unit — для чистой логики, e2e — для немногих критичных путей. Метрика — уверенность в релизе, а не процент покрытия."
+  type: quiz
+  options:
+    - label: Основа — TS и ESLint, основная масса — интеграционные тесты фич (Testing Library + MSW), unit для чистой логики, e2e для критичных путей
+      why: Верно. Интеграционные тесты проверяют поведение как пользователь и почти не ломаются при рефакторинге. E2E дороги, поэтому их оставляют для регистрации, оплаты и подобных путей.
+    - label: "Классическая пирамида: максимум unit-тестов на каждый компонент и хук с моками дочерних, цель — 100% покрытия"
+      why: Такие тесты привязаны к деталям реализации и ломаются при каждом рефакторинге. Покрытие растёт, а уверенность в том, что фича работает целиком, — нет.
+    - label: "Покрыть все сценарии e2e на Playwright: они ближе всего к пользователю, значит дают больше всего уверенности"
+      why: E2E медленные и чаще бывают нестабильными. Сотни таких тестов тормозят PR и приучают команду игнорировать красные прогоны.
+    - label: Хватит TypeScript strict и линтера, а тесты фронтенду нужны только для сложных утилит
+      why: "Статический анализ ловит ошибки типов и нарушения правил хуков, но не проверяет поведение: что форма отправляется и ошибка API показывается."
+  answer: 0
+- id: testing-strategy-catalog-filter-layer
+  skill: testing-layer-choice
+  question: testing-strategy
+  difficulty: 2
+  prompt: "Каталог: выбор категории делает запрос к API, и список должен обновиться. При ответе 500 нужно показать ошибку и кнопку «Повторить». Тест запускается на каждом PR и должен быть быстрым. Что выбрать?"
+  explanation: "Поведение фичи вместе с сетью — это класс задач для интеграционного теста: MSW подменяет API на сетевом уровне, Testing Library взаимодействует с UI как пользователь. E2E оставляют для критичных сквозных путей, unit — для чистой логики."
+  type: choose-tool
+  options:
+    - label: "Интеграционный тест страницы: Testing Library + MSW в Vitest"
+      why: "Лучший выбор: проверяется поведение целиком, ответы 200 и 500 легко задать хендлерами MSW. Тест быстрый, детерминированный и не зависит от стенда."
+    - label: E2E-тест в Playwright на стенде с реальным бэкендом
+      why: Подходит для критичного пути вроде оплаты. Здесь он медленнее, к тому же получить стабильный ответ 500 от реального API сложно.
+    - label: Unit-тест хука фильтра с замоканным fetch (vi.spyOn)
+      why: Годится для чистой логики, например построения query-параметров. Но такой тест не проверит, что пользователь увидит список, ошибку и кнопку.
+    - label: Скриншот-тест в Storybook + Chromatic
+      why: Ловит регрессии вёрстки в дизайн-системе. Логику запроса, обновление списка и повтор после ошибки он не проверяет.
+  answer: 0
+- id: testing-strategy-playwright-flaky-wait
+  skill: playwright-web-first-assertions
+  question: testing-strategy
+  difficulty: 2
+  prompt: Тест иногда падает в CI, хотя локально проходит. Найдите причину нестабильности.
+  explanation: "isVisible() проверяет состояние один раз и не ждёт, а фиксированная пауза — это лотерея. Если сервер ответит позже 1 с, тест упадёт. Правило: вместо пауз используйте web-first assertions, например await expect(locator).toBeVisible(). Они повторяют проверку до таймаута."
+  type: find-bug
+  language: ts
+  code: |-
+    test('итог заказа', async ({ page }) => {
+      await page.goto('/cart');
+      await page
+        .getByRole('button', { name: 'Оформить' })
+        .click();
+      await page.waitForTimeout(1000);
+      const heading = page.getByRole('heading', {
+        name: 'Заказ оформлен',
+      });
+      expect(await heading.isVisible()).toBe(true);
+    });
+  bugLines:
+    - 6
+    - 10
+  causes:
+    - "Фиксированная пауза и разовая проверка isVisible(): при медленном ответе тест упадёт. Нужно await expect(heading).toBeVisible() с автоожиданием"
+    - click() не ждёт появления кнопки, поэтому перед ним нужен page.waitForSelector
+    - getByRole не умеет искать заголовки по name, поэтому локатор иногда ничего не находит
+    - "page.goto нужно вызывать с { waitUntil: 'networkidle' }, иначе клик срабатывает до загрузки JS"
+  answer: 0
+- id: testing-strategy-flaky-test-recipe
+  skill: flaky-test-investigation
+  question: testing-strategy
+  difficulty: 3
+  prompt: В CI появился нестабильный e2e-тест. Расставьте шаги разбора по порядку.
+  explanation: "Флак сначала замечают по отчёту: ретраи допустимы, только если попадают в отчёт. Затем его воспроизводят многократными прогонами с включённым trace и по trace находят причину. Типичные причины — фиксированные паузы, общие тестовые данные, зависимость от порядка тестов. После исправления тест возвращают в обязательный набор только после стабильных повторных прогонов."
+  type: order
+  kind: recipe
+  steps:
+    - "Заметить флак по отчёту: тест прошёл только после ретрая"
+    - Воспроизвести падение, прогнав тест многократно (--repeat-each, --trace on) в условиях, близких к CI
+    - "Изучить trace воспроизведённого падения: шаги, сеть, DOM в момент ошибки"
+    - "Устранить причину: заменить паузы на автоожидающие проверки, изолировать тестовые данные"
+    - Снова прогнать тест многократно и вернуть его в обязательный набор

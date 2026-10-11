@@ -18,3 +18,1028 @@
   explanation: >-
     Правило выбора: серверное состояние (принадлежит серверу, может устареть) — TanStack Query, SWR или RTK Query;
     клиентское — useState, Zustand или Redux; URL-состояние — в адресе.
+
+# context-selectors: принято из черновика 2026-10-11
+- id: context-selectors-quiz
+  skill: context-rerender-avoidance
+  question: context-selectors
+  difficulty: 3
+  prompt: Как стор в контексте с подпиской через `useSyncExternalStore` и селектором избавляет от лишних рендеров, которые даёт обычный Context?
+  explanation: "Context не умеет в селекторы: любое новое value перерисует всех потребителей. Поэтому в контекст кладут стабильную ссылку на стор, а подписку на нужный срез делают через `useSyncExternalStore`. По этому принципу устроены Zustand, Redux и Jotai."
+  type: quiz
+  options:
+    - label: Ссылка на стор в контексте не меняется, а компонент перерисуется, только если селектор вернул новое значение (сравнение через Object.is)
+      why: Верно. Контекст больше не меняется, и обновления идут по подписке subscribe. React сравнивает снапшоты и рендерит только тех, у кого изменился срез.
+    - label: Достаточно обернуть value провайдера в useMemo — потребители перестанут рендериться при изменении части данных
+      why: useMemo спасает только от нового объекта при рендере родителя. Когда меняются сами данные, value всё равно новое, и перерисуются все потребители.
+    - label: Можно оставить обычный Context и обернуть потребителей в React.memo — тогда они пропустят лишние обновления
+      why: memo сравнивает props, но не блокирует обновление по useContext. Компонент, читающий контекст, перерисуется при любом новом value.
+    - label: "С React Compiler это не нужно: он сам мемоизирует потребителей и отсекает рендеры от неиспользуемых полей"
+      why: Компилятор мемоизирует вычисления и JSX внутри компонента. Подписку на весь контекст он не отменяет и селекторов не добавляет.
+  answer: 0
+- id: context-selectors-unstable-selector
+  skill: store-selector-stability
+  question: context-selectors
+  difficulty: 3
+  prompt: "`useAppStore` построен на `useSyncExternalStore` с селектором. После монтирования компонент падает с «Maximum update depth exceeded». Найдите причину."
+  explanation: "`getSnapshot` вызывает селектор, а тот каждый раз возвращает новый объект. React сравнивает снапшоты через Object.is, видит «изменение» и рендерит снова — получается бесконечный цикл. Чините так: два вызова с примитивными срезами, shallow-сравнение (`useShallow` в Zustand) или мемоизированный селектор."
+  type: find-bug
+  language: tsx
+  code: |-
+    function CartBadge() {
+      const { items, total } = useAppStore((s) => ({
+        items: s.cart.items,
+        total: s.cart.total,
+      }));
+      return (
+        <span>
+          {items.length} · {total}
+        </span>
+      );
+    }
+  bugLines:
+    - 2
+  causes:
+    - Селектор при каждом вызове возвращает новый объект — снапшот никогда не равен прошлому, и React рендерит бесконечно
+    - Инлайн-селектор нужно обернуть в useCallback, иначе подписка пересоздаётся на каждом рендере
+    - Деструктуризация результата хука разрывает подписку на стор
+    - Не передан getServerSnapshot, без него useSyncExternalStore зацикливается
+  answer: 0
+- id: context-selectors-use-app-store
+  skill: external-store-subscription
+  question: context-selectors
+  difficulty: 2
+  prompt: "Допишите хук: контекст отдаёт стабильный стор, а компонент подписывается только на свой срез."
+  explanation: Из контекста берём ссылку на стор, она не меняется и не вызывает рендеров. `useSyncExternalStore` получает `subscribe` и функцию снапшота `selector(getState())`. Компонент обновится, только когда изменится значение среза.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    export function useAppStore<S>(
+      selector: (s: AppState) => S,
+    ): S {
+      const store = ___(StoreContext)!;
+      return ___(
+        store.___,
+        () => selector(store.___()),
+      );
+    }
+  tokens:
+    - useContext
+    - useSyncExternalStore
+    - subscribe
+    - getState
+  decoys:
+    - useState
+    - useEffect
+    - setState
+    - useReducer
+- id: context-selectors-ssr-dashboard
+  skill: global-state-without-rerenders
+  question: context-selectors
+  difficulty: 3
+  prompt: Next.js App Router, редактор дашборда. Десятки виджетов читают разные поля общего состояния, которое меняется при каждом drag. Начальное состояние строится на сервере из данных пользователя. Что выбрать?
+  explanation: "Частые обновления при многих читателях требуют подписки на срезы, а не Context со значением. При SSR стор нельзя держать в модуле: экземпляр должен быть у каждого запроса. Поэтому стор создают в провайдере и передают через контекст. Свой велосипед со стором не пишем, если есть Zustand или Redux."
+  type: choose-tool
+  options:
+    - label: "Zustand: createStore в провайдере, стор в Context, чтение срезов через useStore(store, selector)"
+      why: Лучший вариант. Виджеты рендерятся только при изменении своего среза, а у каждого запроса свой экземпляр стора, инициализированный серверными данными.
+    - label: Один React Context с value в useMemo
+      why: "Годится для редких изменений: темы, локали, текущего пользователя. Здесь каждый drag создаёт новое value и перерисовывает все десятки виджетов."
+    - label: Разделить состояние на несколько контекстов
+      why: Помогает, когда срезов мало и они меняются с разной частотой, например данные отдельно от действий. Десятки полей с частыми изменениями так не разложить.
+    - label: Глобальный стор Zustand через create() на уровне модуля
+      why: "Нормально для чистого SPA. На сервере модуль общий для всех запросов: данные одного пользователя утекут к другому, а тесты делят один экземпляр."
+  answer: 0
+
+# context: принято из черновика 2026-10-11
+- id: context-main-problem
+  skill: context-rerenders
+  question: context
+  difficulty: 2
+  prompt: В чём главная проблема Context, из-за которой его не считают полноценным стейт-менеджером?
+  explanation: Context — это механизм передачи значения, а не стейт-менеджер. Подписка идёт на значение целиком, поэтому его стоит мемоизировать и разделять на части. Для часто меняющегося глобального состояния лучше стор с селекторами.
+  type: quiz
+  options:
+    - label: "При смене value перерисовываются все потребители контекста, даже если им нужна лишь часть данных: селекторов нет"
+      why: Верно. useContext подписывает компонент на значение целиком. Изменилось одно поле объекта — рендерятся все, кто читает этот контекст.
+    - label: При смене value перерисовывается всё поддерево провайдера, включая компоненты, которые контекст не читают
+      why: Нет. React точечно обновляет потребителей. Компоненты, которые не читают контекст и обёрнуты в memo или переданы как children, сами по себе не рендерятся.
+    - label: Значение копируется в каждого потребителя, поэтому большие объекты в контексте расходуют много памяти
+      why: "Ничего не копируется: все потребители получают ссылку на один и тот же объект. Проблема в рендерах, а не в памяти."
+    - label: Значение задаётся один раз в createContext и потом не обновляется без перезагрузки дерева
+      why: В createContext задаётся лишь значение по умолчанию. Value провайдера можно менять из state, и потребители получат новое значение.
+  answer: 0
+- id: context-nearest-provider
+  skill: context-provider-lookup
+  question: context
+  difficulty: 1
+  prompt: Что по порядку появится на экране?
+  explanation: useContext читает значение ближайшего провайдера выше по дереву. Внутренний провайдер перекрывает внешний. Последний Label стоит вне провайдеров и получает значение по умолчанию из createContext. Из-за этого правила часто кажется, что «контекст не работает».
+  type: predict-output
+  language: tsx
+  code: |-
+    const ThemeContext = createContext('light');
+    const Label = () => <b>{useContext(ThemeContext)} </b>;
+    export function App() {
+      return (
+        <>
+          <ThemeContext value="dark">
+            <Label />
+            <ThemeContext value="blue"><Label /></ThemeContext>
+          </ThemeContext>
+          <Label />
+        </>
+      );
+    }
+  options:
+    - dark blue light
+    - dark dark light
+    - dark blue undefined
+    - dark blue dark
+  answer: 0
+- id: context-inline-value-object
+  skill: context-value-memoization
+  question: context
+  difficulty: 2
+  prompt: "`UserMenu` обёрнут в `memo` и читает `AuthContext`, но перерисовывается на каждый символ в поле поиска. Найдите причину."
+  explanation: Каждый ввод перерисовывает App, и литерал `{ user, logout }` даёт новый объект. Context сравнивает value по ссылке, поэтому все потребители рендерятся, и memo не спасает. Исправление — useMemo(() => ({ user, logout }), [user, logout]) или вынести query в отдельный компонент. React Compiler мемоизирует такой объект автоматически.
+  type: find-bug
+  language: tsx
+  code: |-
+    function App() {
+      const [query, setQuery] = useState('');
+      const [user, setUser] = useState<User | null>(null);
+      const logout = useCallback(() => setUser(null), []);
+      return (
+        <AuthContext value={{ user, logout }}>
+          <input value={query}
+            onChange={(e) => setQuery(e.target.value)} />
+          <Dashboard query={query} />
+          <UserMenu />
+        </AuthContext>
+      );
+    }
+  bugLines:
+    - 6
+  causes:
+    - Объект value создаётся заново на каждом рендере App, и при вводе все потребители AuthContext получают новую ссылку
+    - useCallback для logout создаёт новую функцию на каждом рендере и тем самым ломает memo
+    - input находится внутри провайдера и при каждом изменении сам обновляет контекст
+    - В React 19 без AuthContext.Provider значение не передаётся, и UserMenu получает default
+  answer: 0
+- id: context-vs-store-selectors
+  skill: context-vs-store-choice
+  question: context
+  difficulty: 2
+  prompt: "Клиентский редактор таблицы: сотни ячеек, тулбар показывает выделение, панель — формулу активной ячейки. Состояние меняется на каждое нажатие клавиши, и каждому компоненту нужен свой маленький срез. Что выбрать?"
+  explanation: "Context подходит для редко меняющихся значений: темы, локали, пользователя, API-клиентов. Если глобальное состояние меняется часто и потребителям нужны разные срезы, берите стор с селекторами (Zustand, Redux, Jotai): компонент рендерится, только когда меняется его срез."
+  type: choose-tool
+  options:
+    - label: Zustand-стор с селекторами
+      why: Лучший выбор. Компонент подписан только на свой срез, например useStore(s => s.cells[id]). Смена одной ячейки не трогает остальные сотни.
+    - label: Один Context со всем состоянием и value в useMemo
+      why: useMemo спасает от лишних рендеров, только пока данные не меняются. Здесь они меняются на каждый ввод, и тогда рендерятся все потребители. Подходит для темы или локали.
+    - label: Разделить на StateContext и DispatchContext
+      why: "Хорошо, когда многим компонентам нужны только действия: они перестанут рендериться. Но всё, что читает state, по-прежнему рендерится целиком на каждый ввод."
+    - label: Хранить состояние в корне и передавать через props с memo
+      why: "Терпимо при малой глубине дерева. Здесь тулбар и ячейки далеко друг от друга: придётся протаскивать props через слои и стабилизировать каждый колбэк."
+  answer: 0
+
+# lifting-state-up: принято из черновика 2026-10-11
+- id: lifting-state-up-quiz
+  skill: lifting-state-up
+  question: lifting-state-up
+  difficulty: 1
+  prompt: Как в React передать данные от ребёнка к родителю и сделать общее состояние для двух соседних компонентов?
+  explanation: "Данные идут сверху вниз, а события — снизу вверх через колбэки. Общее состояние живёт у ближайшего общего предка, у него единственный источник правды. Не поднимайте его выше, чем нужно: изменение перерисует всё поддерево предка."
+  type: quiz
+  options:
+    - label: Родитель хранит state и передаёт ребёнку колбэк; общее для соседей состояние поднимают к ближайшему общему предку
+      why: Верно. Ребёнок сообщает о событии через колбэк, а предок передаёт вниз значение и функцию изменения. Так у состояния остаётся один владелец.
+    - label: Ребёнок записывает новое значение прямо в объект props, и родитель его увидит
+      why: Props доступны только для чтения. Мутация не вызовет ререндер родителя и нарушает однонаправленный поток данных.
+    - label: Каждый сосед держит свою копию state, а useEffect синхронизирует копии между собой
+      why: "Это антипаттерн: появляются лишние рендеры, копии могут рассинхронизироваться, а данные приходится дублировать. Хватит одного источника правды у общего предка."
+    - label: Родитель через ref и useImperativeHandle читает state ребёнка, когда он нужен
+      why: Это обходной путь для императивных действий вроде focus() или scroll. Чтение через ref не вызывает ререндер, поэтому соседи не узнают об изменении.
+  answer: 0
+- id: lifting-state-up-duplicated-state
+  skill: single-source-of-truth
+  question: lifting-state-up
+  difficulty: 2
+  prompt: Кнопка Reset очищает query, и список показывает все товары, но в поле ввода остаётся старый текст. Найдите причину.
+  explanation: "У Filters своя копия состояния, которая синхронизируется с родителем эффектом. Поток идёт только вверх, поэтому сброс у родителя до инпута не доходит. Решение — сделать Filters контролируемым: принимать value и onChange от родителя без собственного useState и эффекта."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Filters({ onChange }: FiltersProps) {
+      const [value, setValue] = useState('');
+      useEffect(() => onChange(value), [value]);
+      return <input value={value}
+        onChange={(e) => setValue(e.target.value)} />;
+    }
+    function ProductPage() {
+      const [query, setQuery] = useState('');
+      return <>
+        <button onClick={() => setQuery('')}>Reset</button>
+        <Filters onChange={setQuery} />
+        <ProductList query={query} />
+      </>;
+    }
+  bugLines:
+    - 2
+    - 3
+  causes:
+    - "Состояние продублировано: Filters держит свою копию и лишь шлёт её вверх эффектом, поэтому сброс query у родителя не доходит до инпута"
+    - В зависимостях эффекта нет onChange, поэтому он вызывает устаревший колбэк
+    - Функцию setQuery нельзя передавать в дочерний компонент как prop
+    - Фрагмент <> нельзя возвращать без круглых скобок вокруг JSX
+  answer: 0
+- id: lifting-state-up-siblings-fill
+  skill: lifting-state-up
+  question: lifting-state-up
+  difficulty: 1
+  prompt: Допишите код так, чтобы поле фильтра и список товаров использовали общее состояние из ProductPage.
+  explanation: "Filters — контролируемый компонент: он показывает value из props и сообщает об изменении через onChange. Состояние живёт у общего предка, который передаёт вниз setQuery одному соседу и query другому."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function Filters({ value, onChange }: FiltersProps) {
+      return <input value={___}
+        onChange={(e) => ___(e.target.value)} />;
+    }
+    function ProductPage() {
+      const [query, setQuery] = useState('');
+      return <>
+        <Filters value={query} onChange={___} />
+        <ProductList query={___} />
+      </>;
+    }
+  tokens:
+    - value
+    - onChange
+    - setQuery
+    - query
+  decoys:
+    - setValue
+    - useState
+    - e.target
+    - props.value
+- id: lifting-state-up-filters-in-url
+  skill: url-state-choice
+  question: lifting-state-up
+  difficulty: 2
+  prompt: Каталог с фильтрами и пагинацией. Нужно, чтобы фильтры сохранялись после перезагрузки, ссылкой с ними можно было поделиться, а кнопка «Назад» возвращала прошлый фильтр. Где хранить состояние?
+  explanation: "Правило: если состояние должно пережить перезагрузку, попадать в ссылку и историю браузера, его место в URL. Поднятый state и Context подходят для временного UI-состояния. Внешний стор — для клиентских данных, нужных многим частям приложения."
+  type: choose-tool
+  options:
+    - label: В search params URL (например, useSearchParams и router в Next.js)
+      why: "Лучший вариант: URL переживает перезагрузку, им можно поделиться, а каждое изменение попадает в историю браузера, так что «Назад» работает само."
+    - label: useState в общем предке фильтров и списка
+      why: Подходит, если фильтры временные. Но после перезагрузки они сбросятся, в ссылку не попадут, а «Назад» уведёт со страницы.
+    - label: React Context с фильтрами на уровне приложения
+      why: Решает prop drilling, если фильтры нужны глубоко в дереве. Но он не сохраняет данные между перезагрузками и не связан с историей браузера.
+    - label: Zustand с persist в localStorage
+      why: Переживёт перезагрузку, но ссылкой не поделиться и «Назад» не сработает. Удобен для настроек пользователя вроде темы или свёрнутого сайдбара.
+  answer: 0
+
+# realtime: принято из черновика 2026-10-11
+- id: realtime-architecture-quiz
+  skill: realtime-architecture
+  question: realtime
+  difficulty: 2
+  prompt: Как правильно организовать real-time данные (WebSocket, SSE) в React-приложении?
+  explanation: "Соединение — внешняя система, поэтому оно живёт вне компонентов. Компоненты только подписываются и отписываются в cleanup. Входящие события обновляют кэш серверного состояния (`setQueryData` или инвалидация). Обязательная обвязка: backoff при переподключении, догрузка пропущенного, ограничение частоты обновлений UI."
+  type: quiz
+  options:
+    - label: Одно соединение в модуле-клиенте или провайдере, компоненты подписываются в эффекте, события обновляют кэш серверного состояния
+      why: Верно. Одно соединение на приложение, отписка в cleanup, единый источник правды в кэше (TanStack Query или внешний стор), а не разрозненные useState.
+    - label: Открывать WebSocket в useEffect каждого компонента, которому нужны данные, — соединение живёт ровно столько, сколько компонент
+      why: N компонентов дадут N соединений, дублирующиеся сообщения и лишнюю нагрузку на сервер. Компонент должен подписываться на общий клиент, а не владеть соединением.
+    - label: Класть каждое сообщение в useState корневого компонента и раздавать данные вниз через Context
+      why: При частых сообщениях каждое изменение перерисует всех потребителей контекста. К тому же данные разойдутся с кэшем запросов, который грузил начальный снимок.
+    - label: "Хватит useQuery с refetchInterval: 1000 — частый polling и есть real-time, сокеты не нужны"
+      why: Polling годится для редко меняющихся данных, где задержка допустима. Но это задержка до интервала и пустые запросы, а не push-обновления.
+  answer: 0
+- id: realtime-transport-sse
+  skill: realtime-transport-choice
+  question: realtime
+  difficulty: 2
+  prompt: Лента уведомлений и статусы CI-сборок. Данные идут только от сервера к клиенту, всё должно работать через корпоративные HTTP-прокси, а переподключение хочется без своего кода. Что выбрать?
+  explanation: "SSE выбирают, когда поток однонаправленный (сервер → клиент). WebSocket нужен, когда клиент тоже часто шлёт сообщения: чат, игры, совместные курсоры. CRDT (Yjs, Automerge) работает поверх транспорта и нужен для слияния конкурентных правок. Polling подходит, когда допустима задержка."
+  type: choose-tool
+  options:
+    - label: Server-Sent Events (EventSource)
+      why: Однонаправленный поток по обычному HTTP. Браузер сам переподключается и передаёт Last-Event-ID, чтобы сервер дослал пропущенное.
+    - label: WebSocket
+      why: "Нужен для двустороннего обмена с низкой задержкой (чат, игры). Здесь он избыточен: переподключение и backoff придётся писать самому, а прокси иногда режут upgrade."
+    - label: Yjs (CRDT) поверх WebSocket
+      why: Решает слияние конкурентных правок при совместном редактировании документа. Для потока уведомлений конфликтов нет.
+    - label: TanStack Query с refetchInterval
+      why: Подходит, если задержка в десятки секунд не важна и событий мало. Для мгновенных уведомлений это лишние запросы и задержка до интервала.
+  answer: 0
+- id: realtime-connection-per-component
+  skill: realtime-shared-connection
+  question: realtime
+  difficulty: 2
+  prompt: OrderBadge рендерится в таблице на 200 строк. Найдите строку с архитектурной ошибкой.
+  explanation: "Каждый экземпляр открывает собственное соединение: 200 бейджей — 200 WebSocket, и каждый получает весь поток заказов. Соединение должно быть одно — в модуле-клиенте. Компонент подписывается через `realtime.subscribe` и отписывается в cleanup, а данные лучше брать из общего кэша."
+  type: find-bug
+  language: tsx
+  code: |-
+    function OrderBadge({ id }: { id: string }) {
+      const [order, setOrder] = useState<Order>();
+      useEffect(() => {
+        const ws = new WebSocket(ORDERS_URL);
+        ws.onmessage = (e) => {
+          const ev: OrderEvent = JSON.parse(e.data);
+          if (ev.order.id === id) setOrder(ev.order);
+        };
+        return () => ws.close();
+      }, [id]);
+      return <span>{order?.status}</span>;
+    }
+  bugLines:
+    - 4
+  causes:
+    - Каждый экземпляр компонента открывает своё соединение — вместо подписки на общий клиент получается 200 WebSocket
+    - ws.close() в cleanup закрывает соединение до того, как придут сообщения
+    - id в зависимостях эффекта вызывает бесконечный цикл переподключений
+    - setState внутри onmessage запрещён, потому что вызывается вне рендера React
+  answer: 0
+- id: realtime-reconnect-resync-recipe
+  skill: realtime-reconnect-resync
+  question: realtime
+  difficulty: 3
+  prompt: Соберите алгоритм переподключения, при котором не теряются и не дублируются события.
+  explanation: Буферизацию включают вместе с переподпиской, до догрузки. Иначе событие, пришедшее во время resync, потеряется или применится раньше снимка. Версия или id события решает и гонку «начальная загрузка vs события», и проблему дубликатов. Backoff с потолком не даёт тысячам клиентов одновременно атаковать упавший сервер.
+  type: order
+  kind: recipe
+  steps:
+    - На onclose запланировать переподключение с экспоненциальной задержкой и потолком
+    - На onopen сбросить счётчик попыток
+    - Включить буферизацию живых событий и переподписаться на каналы
+    - Догрузить пропущенное с последнего полученного id или инвалидировать запросы и перезагрузить снимок
+    - Применить буфер поверх, отбрасывая события с версией не новее уже применённой
+
+# redux-async: принято из черновика 2026-10-11
+- id: redux-async-where-side-effects-live
+  skill: redux-async-middleware
+  question: redux-async
+  difficulty: 2
+  prompt: Почему в Redux нельзя сделать запрос прямо в reducer и где тогда живёт асинхронная логика?
+  explanation: "Reducer — чистая синхронная функция (state, action) → state. Её можно повторить, протестировать и «отмотать» в DevTools. Всё асинхронное выносят в middleware: thunk, listener middleware или saga. Оно видит действия и диспатчит новые с результатом. Для загрузки и кэширования данных лучше сразу брать RTK Query."
+  type: quiz
+  options:
+    - label: Reducer обязан быть чистым и синхронным, поэтому эффекты выносят в middleware (thunk, listener, saga), а оно диспатчит результат
+      why: Верно. Middleware оборачивает dispatch и видит каждое действие до reducer. Там можно ждать, отменять и вызывать эффекты, а в reducer приходит уже готовый payload.
+    - label: "Можно, если reducer вернёт Promise: Redux дождётся его и запишет результат в стор"
+      why: Redux не ждёт промисы. Что вернул reducer, то и станет новым состоянием, поэтому в сторе окажется сам Promise.
+    - label: В createSlice можно, потому что Immer отследит изменения state и после await
+      why: Immer фиксирует черновик синхронно, в момент выхода из reducer. Изменения после await не станут результатом этого действия.
+    - label: Асинхронность пишут только в useEffect компонентов, а middleware нужен лишь для логирования
+      why: Логирование — лишь один из сценариев. Thunk и listener как раз и созданы, чтобы вынести асинхронную логику из компонентов в слой Redux.
+  answer: 0
+- id: redux-async-reducer-bug
+  skill: redux-async-middleware
+  question: redux-async
+  difficulty: 1
+  prompt: Коллега добавил загрузку пользователя в слайс. Найдите, что здесь принципиально не так.
+  explanation: Reducer должен синхронно вычислить новое состояние, без побочных эффектов. Async-функция возвращает Promise, а запись после await не станет результатом действия. Запрос переносят в createAsyncThunk, а в extraReducers обрабатывают pending/fulfilled/rejected. Для данных с сервера ещё удобнее RTK Query.
+  type: find-bug
+  language: tsx
+  code: |-
+    const userSlice = createSlice({
+      name: 'user',
+      initialState: { data: null as User | null },
+      reducers: {
+        loadUser: async (state, action) => {
+          const res = await fetch(`/api/u/${action.payload}`);
+          state.data = await res.json();
+        },
+      },
+    });
+  bugLines:
+    - 5
+    - 6
+  causes:
+    - "Reducer асинхронный и делает запрос: он должен быть синхронным и чистым, а эффекты нужно вынести в thunk или middleware"
+    - В reducer createSlice нельзя мутировать state — нужно вернуть новый объект
+    - Действие loadUser нужно обрабатывать в extraReducers, а не в reducers
+    - В fetch не передан signal, поэтому запрос нельзя отменить
+  answer: 0
+- id: redux-async-create-async-thunk
+  skill: create-async-thunk
+  question: redux-async
+  difficulty: 2
+  prompt: Допишите thunk с поддержкой отмены и обработку его жизненного цикла в слайсе.
+  explanation: "createAsyncThunk сам генерирует три действия: pending, fulfilled и rejected. Результат функции попадает в action.payload. Второй аргумент — thunkAPI с signal: если вызвать abort() у промиса из dispatch, запрос прервётся, а thunk завершится через rejected."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    export const fetchUser = createAsyncThunk(
+      'user/fetch',
+      async (id: string, { ___ }) => {
+        const res = await fetch(`/api/users/${id}`, { signal });
+        return (await res.json()) as User;
+      },
+    );
+    builder
+      .addCase(fetchUser.___, (s) => { s.status = 'loading'; })
+      .addCase(fetchUser.fulfilled, (s, a) => {
+        s.status = 'idle';
+        s.data = a.___;
+      })
+      .addCase(fetchUser.___, (s) => { s.status = 'failed'; });
+  tokens:
+    - signal
+    - pending
+    - payload
+    - rejected
+  decoys:
+    - abort
+    - loading
+    - data
+    - error
+- id: redux-async-autosave-orchestration
+  skill: redux-async-tool-choice
+  question: redux-async
+  difficulty: 3
+  prompt: Проект на Redux Toolkit. На каждое действие draft/changed нужно подождать 500 мс тишины, отменить предыдущую попытку и сохранить черновик на сервер. Что выбрать?
+  explanation: "Правило выбора: данные с сервера и их кэш — RTK Query; разовая асинхронная операция — createAsyncThunk; реакция на действия с отменой, задержками и гонками — listener middleware, а при сложной оркестрации в легаси-коде — saga."
+  type: choose-tool
+  options:
+    - label: "Listener middleware: startListening + cancelActiveListeners() и delay(500)"
+      why: Лучший вариант. Встроен в RTK и реагирует на действие. cancelActiveListeners() гасит прошлый запуск, а delay() даёт debounce без сторонних библиотек.
+    - label: createAsyncThunk, который диспатчится из onChange
+      why: Подходит для разовой операции. Debounce и отмену прошлой попытки пришлось бы писать вручную в компоненте.
+    - label: RTK Query mutation saveDraft
+      why: Удобна для самого запроса и инвалидации кэша, но не умеет реагировать на action с задержкой. Её можно вызвать уже из listener.
+    - label: Redux-Saga с takeLatest и delay
+      why: Решит задачу, но добавит зависимость и генераторы. Оправдано, если saga уже есть в проекте и логика сложнее.
+  answer: 0
+
+# redux-toolkit: принято из черновика 2026-10-11
+- id: redux-toolkit-create-slice-immer
+  skill: redux-toolkit-slices
+  question: redux-toolkit
+  difficulty: 2
+  prompt: Что делает `createSlice` и почему в его редьюсерах можно писать `state.items.push(...)`?
+  explanation: "Современный Redux пишут на RTK. `createSlice` по объекту `reducers` генерирует action creators и reducer, а Immer превращает мутации черновика в новое иммутабельное состояние. Правило: внутри slice-редьюсера либо мутируй draft, либо верни новое значение. Делать то и другое сразу нельзя."
+  type: quiz
+  options:
+    - label: Генерирует action creators и reducer; внутри Immer, и «мутации» черновика превращаются в новое иммутабельное состояние
+      why: Верно. state в редьюсере — это Proxy-черновик Immer. По записанным изменениям Immer строит новый объект и копирует только изменённые ветки (structural sharing).
+    - label: "RTK снимает требование иммутабельности: стор хранит изменяемый объект и уведомляет подписчиков через Proxy"
+      why: "Неверно. Состояние в сторе по-прежнему иммутабельно: после dispatch получается новый объект, иначе useSelector не заметил бы изменений по ===."
+    - label: Перед каждым редьюсером createSlice делает глубокую копию state, поэтому мутировать её безопасно
+      why: Неверно. Глубокое копирование было бы дорогим. Immer копирует только изменённые пути, а неизменённые ветки сохраняют прежние ссылки.
+    - label: Мутировать можно только массивы через push, а объекты всё равно нужно обновлять через spread
+      why: "Неверно. Через draft можно менять любые поля: state.user.name = 'x' тоже корректно. Spread внутри createSlice не нужен."
+  answer: 0
+- id: redux-toolkit-slice-and-store
+  skill: redux-toolkit-slices
+  question: redux-toolkit
+  difficulty: 1
+  prompt: Допишите слайс корзины и создание стора в современном стиле Redux Toolkit.
+  explanation: "`createSlice` возвращает `actions` (action creators) и `reducer`, а `PayloadAction<T>` типизирует payload. `configureStore` сразу подключает DevTools, thunk и dev-проверки иммутабельности. `createStore` — legacy API, а `createReducer` не генерирует action creators."
+  type: fill-tokens
+  language: ts
+  code: |-
+    const cartSlice = ___({
+      name: 'cart',
+      initialState: { items: [] as CartItem[] },
+      reducers: {
+        added(state, action: ___<CartItem>) {
+          state.items.push(action.payload);
+        },
+      },
+    });
+    export const { added } = cartSlice.___;
+
+    export const store = ___({
+      reducer: { cart: cartSlice.reducer },
+    });
+  tokens:
+    - createSlice
+    - PayloadAction
+    - actions
+    - configureStore
+  decoys:
+    - createReducer
+    - createStore
+    - AnyAction
+    - reducer
+- id: redux-toolkit-unstable-selector
+  skill: redux-selectors
+  question: redux-toolkit
+  difficulty: 2
+  prompt: Компонент перерисовывается при любом dispatch, даже когда меняется несвязанный слайс. Найдите причину.
+  explanation: "`useSelector` после каждого dispatch вызывает селектор и сравнивает результат с прошлым по `===`. `filter` каждый раз создаёт новый массив, поэтому компонент перерисовывается всегда. Варианты исправления: выбирать примитив (`.length`) или мемоизировать селектор через `createSelector`. В dev-режиме React-Redux предупреждает о таких нестабильных селекторах."
+  type: find-bug
+  language: tsx
+  code: |-
+    function DoneCount() {
+      const done = useAppSelector((s) =>
+        s.todos.items.filter((t) => t.done)
+      );
+      return <span>Готово: {done.length}</span>;
+    }
+  bugLines:
+    - 2
+    - 3
+  causes:
+    - Селектор каждый раз возвращает новый массив, и useSelector по === считает результат изменившимся после любого dispatch
+    - Внутри селектора нельзя вызывать методы массивов — можно только читать поля стора
+    - useAppSelector нельзя использовать без useDispatch в том же компоненте
+    - filter мутирует массив в сторе, и Redux перерисовывает всех подписчиков
+  answer: 0
+- id: redux-toolkit-server-data-choice
+  skill: server-state-choice
+  question: redux-toolkit
+  difficulty: 2
+  prompt: Проект уже на Redux Toolkit. Нужно загрузить список заказов, кешировать его между экранами, показывать статус загрузки и перезапрашивать после создания заказа. Что выбрать?
+  explanation: "Серверные данные — это кеш, а не обычное клиентское состояние. В проекте на RTK для них есть RTK Query: кеш, статусы, дедупликация запросов и инвалидация по тегам. Обычные слайсы оставь для клиентского состояния."
+  type: choose-tool
+  options:
+    - label: "RTK Query: createApi с query и mutation, invalidatesTags"
+      why: "Лучший выбор: RTK Query уже входит в RTK и живёт в том же сторе. Кеш, isLoading, дедупликация и refetch после мутации через теги есть из коробки."
+    - label: createAsyncThunk и слайс со status и items
+      why: "Рабочий, но ручной путь: кеш, устаревание, дедупликацию и перезапрос после мутации придётся писать самому. Подходит для разовой асинхронной логики, а не для кеша."
+    - label: useEffect с fetch и dispatch(setOrders(data))
+      why: "Худший вариант: гонки запросов, отсутствие кеша и дублирование логики в каждом компоненте. Это классическая ошибка «серверные данные вручную в Redux»."
+    - label: Добавить TanStack Query рядом с Redux
+      why: Отличный инструмент для серверного состояния. Его стоит брать, если Redux в проекте нет. Здесь же RTK уже подключён, и вторая библиотека кеша дублирует RTK Query.
+  answer: 0
+
+# state-machines: принято из черновика 2026-10-11
+- id: state-machines-when-to-use
+  skill: state-machine-when
+  question: state-machines
+  difficulty: 3
+  prompt: В каком случае стоит описывать логику UI как конечный автомат?
+  explanation: Главный сигнал — флаги начинают противоречить друг другу, а переходы зависят от текущего состояния. Автомат перечисляет состояния, события и допустимые переходы, поэтому невозможное состояние нельзя даже записать. Для простого случая хватит `useReducer` с discriminated union, для сложного подойдёт XState.
+  type: quiz
+  options:
+    - label: Много состояний и переходов, а булевы флаги допускают невозможные комбинации вроде isLoading && isError
+      why: Верно. Автомат делает такие комбинации непредставимыми, а переходы задаёт явно. Логику можно визуализировать и тестировать отдельно от UI.
+    - label: Компонент часто перерисовывается, а автомат сокращает число рендеров
+      why: Автомат — это про корректность логики, а не про производительность. Число рендеров зависит от того, как меняется state, а не от того, как он смоделирован.
+    - label: Как только в компоненте больше двух useState, их лучше заменить машиной XState
+      why: Это типичный перегиб. Для простых независимых флагов XState — лишняя церемония. Критерий — связанные состояния и переходы, а не количество хуков.
+    - label: Состояние нужно разделить между многими компонентами, и автомат заменяет глобальный стор
+      why: Шаринг состояния решают Context, Zustand или Redux. Автомат описывает допустимые переходы, а где он хранится — отдельный вопрос.
+  answer: 0
+- id: state-machines-switch-on-event
+  skill: state-dependent-transitions
+  question: state-machines
+  difficulty: 2
+  prompt: После успешной загрузки запоздалое событие PROGRESS возвращает UI в состояние uploading. Где корень проблемы?
+  explanation: Редьюсер ветвится только по событию, поэтому любое событие срабатывает в любом состоянии. В автомате переход определяется парой «текущее состояние + событие». Нужно делать switch по `state.status` и внутри разрешать только допустимые события, а остальные игнорировать, возвращая `state`.
+  type: find-bug
+  language: tsx
+  code: |-
+    function reducer(state: State, e: Event): State {
+      switch (e.type) {
+        case 'START':
+          return { status: 'uploading', progress: 0 };
+        case 'PROGRESS':
+          return { status: 'uploading', progress: e.value };
+        case 'SUCCESS':
+          return { status: 'done', url: e.url };
+        case 'FAIL':
+          return { status: 'error', message: e.message };
+        default:
+          return state;
+      }
+    }
+  bugLines:
+    - 2
+  causes:
+    - Переход выбирается только по событию без учёта текущего состояния, поэтому PROGRESS срабатывает и в done
+    - В ветке PROGRESS нужно спредить ...state, иначе теряются остальные поля
+    - В default нужно бросать ошибку, а не возвращать state
+    - Редьюсер должен мутировать state, чтобы React не создавал лишний объект
+  answer: 0
+- id: state-machines-ignored-events
+  skill: state-dependent-transitions
+  question: state-machines
+  difficulty: 2
+  prompt: "`reducer` — автомат загрузки. idle: START → uploading (progress 0). uploading: PROGRESS меняет progress, FAIL → error, SUCCESS → done. error: RETRY → uploading (progress 0). Любое другое событие в текущем состоянии игнорируется. Что выведет console.log?"
+  explanation: Разбор по шагам. В idle событие SUCCESS игнорируется. START переводит в uploading. FAIL переводит в error. PROGRESS в состоянии error игнорируется. RETRY снова даёт uploading с progress 0, затем PROGRESS выставляет 70. Лишние и запоздалые события не ломают состояние — это гарантируется самим построением автомата.
+  type: predict-output
+  language: ts
+  code: |-
+    const events: Event[] = [
+      { type: 'SUCCESS', url: '/a.png' },
+      { type: 'START' },
+      { type: 'FAIL', message: 'timeout' },
+      { type: 'PROGRESS', value: 40 },
+      { type: 'RETRY' },
+      { type: 'PROGRESS', value: 70 },
+    ];
+    const init: State = { status: 'idle' };
+    console.log(events.reduce(reducer, init));
+  options:
+    - "{ status: 'uploading', progress: 70 }"
+    - "{ status: 'done', url: '/a.png' }"
+    - "{ status: 'error', message: 'timeout' }"
+    - "{ status: 'uploading', progress: 40 }"
+  answer: 0
+- id: state-machines-video-call-tool
+  skill: state-machine-tool-choice
+  question: state-machines
+  difficulty: 3
+  prompt: "Видеозвонок: connecting → connected → reconnecting с повторами по таймеру, параллельно независимые состояния микрофона и камеры. Продукту нужна схема переходов, QA — тестовые сценарии. Что выбрать?"
+  explanation: Критерий выбора — сложность графа. Для плоского набора состояний хватит `useReducer` с discriminated union. Когда нужны вложенные или параллельные состояния, отложенные переходы, вызов промисов и визуализация, выигрывает XState. Набор булевых флагов годится только для независимых простых переключателей.
+  type: choose-tool
+  options:
+    - label: XState
+      why: "Лучший выбор: параллельные состояния, отложенные переходы (after), вызов акторов и промисов, визуализация в Stately и генерация тестовых путей из модели."
+    - label: useReducer с discriminated union
+      why: Отлично подходит для плоского автомата на 3–5 состояний, как загрузка файла. Здесь таймеры, параллельные регионы и схему пришлось бы делать вручную.
+    - label: "Несколько useState: isConnected, isReconnecting, isMuted"
+      why: Подходит для независимых простых флагов. Здесь флаги допускают невозможные комбинации, например isConnected && isReconnecting.
+    - label: Zustand-стор
+      why: Решает задачу шаринга состояния между компонентами, но переходы всё равно придётся описывать самому. Можно использовать вместе с автоматом, но не вместо него.
+  answer: 0
+
+# state-management-choice: принято из черновика 2026-10-11
+- id: state-management-choice-first-step
+  skill: state-classification
+  question: state-management-choice
+  difficulty: 2
+  prompt: Команда спорит, что взять в новое приложение — Redux Toolkit или Zustand. С чего правильно начать выбор?
+  explanation: "Большая часть «глобального состояния» на деле серверная, URL, формы или локальное UI, и у каждого класса есть свой инструмент. Глобального клиентского состояния остаётся мало, и выбирать стейт-менеджер нужно под него: Context для редких изменений, Zustand/Jotai для простых сторов, RTK для больших команд."
+  type: quiz
+  options:
+    - label: "Классифицировать состояние: серверное, URL, формы, локальное UI — и подбирать стор только для оставшегося глобального клиентского"
+      why: Верно. Серверные данные уходят в TanStack Query, фильтры — в search params, формы — в React Hook Form. Остаток обычно небольшой, и выбор под него становится очевидным.
+    - label: "Сразу взять Redux Toolkit: он масштабируется, и потом не придётся переезжать"
+      why: Это подводный камень «потому что так принято». Для трёх глобальных флагов RTK — лишний бойлерплейт. Он оправдан при большой команде и сложной логике.
+    - label: Положить всё в Context — он встроенный и не добавляет зависимостей
+      why: "Context — транспорт, а не стейт-менеджер: у него нет подписки на срез. Любое изменение значения перерисует всех потребителей, поэтому он годится только для редко меняющихся данных."
+    - label: Выбрать самую лёгкую библиотеку и хранить в ней всё, включая ответы API
+      why: Главная ошибка — тащить серверные данные в глобальный стор. Кэш, инвалидацию и гонки запросов придётся писать вручную, а это и так умеют TanStack Query и RTK Query.
+  answer: 0
+- id: state-management-zustand-no-selector
+  skill: zustand-selectors
+  question: state-management-choice
+  difficulty: 2
+  prompt: CartBadge перерисовывается при каждом открытии и закрытии панели корзины (toggle), хотя items не меняются. Найдите причину.
+  explanation: "Вызов `useCart()` без селектора подписывает компонент на весь стор: любое изменение (здесь isOpen) создаёт новый объект состояния и вызывает перерисовку. Правило: всегда выбирайте нужный срез — `useCart((s) => s.items.length)`. Для нескольких полей подойдёт `useShallow`."
+  type: find-bug
+  language: tsx
+  code: |-
+    const useCart = create<CartStore>()((set) => ({
+      items: [],
+      isOpen: false,
+      add: (item) =>
+        set((s) => ({ items: [...s.items, item] })),
+      toggle: () => set((s) => ({ isOpen: !s.isOpen })),
+    }));
+
+    function CartBadge() {
+      const { items } = useCart();
+      return <span>{items.length}</span>;
+    }
+  bugLines:
+    - 10
+  causes:
+    - "Стор вызван без селектора: компонент подписан на всё состояние и перерисовывается при любом его изменении"
+    - set должен возвращать полное состояние, иначе Zustand теряет items и пересоздаёт массив
+    - toggle мутирует состояние напрямую, поэтому Zustand не может сравнить старое и новое значение
+    - Стор не обёрнут в Provider, из-за чего каждый рендер получает новый экземпляр стора
+  answer: 0
+- id: state-management-zustand-store-api
+  skill: zustand-store-api
+  question: state-management-choice
+  difficulty: 2
+  prompt: "Допишите стор боковой панели: создание хука, обновление состояния, подписку на срез в компоненте и закрытие панели из кода вне React."
+  explanation: В Zustand `create` возвращает хук, `set` делает поверхностное слияние, а селектор подписывает компонент только на нужное поле. Стор живёт вне React, поэтому `getState()` позволяет читать его и вызывать действия из роутера, сокетов или горячих клавиш — в этом его преимущество перед Context.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    type Store = { open: boolean; toggle(): void; close(): void };
+
+    export const useSidebar = ___<Store>()((set) => ({
+      open: false,
+      toggle: () => ___((s) => ({ open: !s.open })),
+      close: () => set({ open: false }),
+    }));
+
+    function Burger() {
+      const open = useSidebar((s) => s.___);
+      return <Icon name={open ? 'close' : 'menu'} />;
+    }
+    // вне React: роутер, сокеты, горячие клавиши
+    onRouteChange(() => useSidebar.___().close());
+  tokens:
+    - create
+    - set
+    - open
+    - getState
+  decoys:
+    - createStore
+    - setState
+    - useStore
+    - getSnapshot
+- id: state-management-player-outside-react
+  skill: global-store-choice
+  question: state-management-choice
+  difficulty: 2
+  prompt: "Небольшая команда делает музыкальный сервис. Глобально нужно состояние плеера (трек, пауза, позиция): оно часто меняется, читается в разных частях UI и управляется из WebSocket-обработчика и горячих клавиш вне React. Хочется минимум бойлерплейта. Что выбрать?"
+  explanation: Для часто меняющегося глобального клиентского состояния нужна подписка на срез, а здесь ещё и доступ вне React. Zustand даёт и то и другое почти без кода. Context — транспорт для редких изменений, RTK — для больших команд и строгих соглашений, Jotai — для множества мелких независимых атомов.
+  type: choose-tool
+  options:
+    - label: Zustand
+      why: "Лучший выбор: селекторы перерисовывают только подписанные компоненты, а getState/setState работают из сокетов и обработчиков клавиш без бойлерплейта."
+    - label: React Context + useReducer
+      why: Подходит для редко меняющихся значений вроде темы или локали. Здесь каждое обновление позиции перерисует всех потребителей, а из кода вне React стор недоступен.
+    - label: Redux Toolkit
+      why: Тоже работает вне React и даёт лучшие DevTools. Оправдан в большой команде со сложной логикой и строгими соглашениями. Для одного плеера бойлерплейт избыточен.
+    - label: Jotai
+      why: Хорош, когда состояние — много мелких независимых и производных кусочков (атомов). Вне React понадобится явный store, а это меньше подходит под ТЗ.
+  answer: 0
+
+# tanstack-query: принято из черновика 2026-10-11
+- id: tanstack-query-server-vs-client-state
+  skill: server-state-choice
+  question: tanstack-query
+  difficulty: 2
+  prompt: Чем серверное состояние отличается от клиентского и зачем для него отдельный инструмент вроде TanStack Query?
+  explanation: Серверное состояние — асинхронная копия чужих данных, которая устаревает. Нужны кэш по ключу, дедупликация, фоновое обновление, повторы и инвалидация после мутаций. Когда эти данные уходят в TanStack Query, глобального клиентского состояния обычно остаётся мало.
+  type: quiz
+  options:
+    - label: "Серверное — копия чужих данных: асинхронна, может устареть, нужна многим. Ей нужны кэш, дедупликация, фоновое обновление"
+      why: Верно. Отсюда и набор задач — кэш по ключу, stale-while-revalidate, повторы, инвалидация. Писать это руками в useEffect долго и с багами.
+    - label: Серверное состояние — то, что хранится глобально, а клиентское — локально в компоненте
+      why: "Глобальность ни при чём: тема или открытый сайдбар могут быть глобальными, но остаются клиентскими. Важно, кому принадлежат данные и могут ли они устареть."
+    - label: TanStack Query — это глобальный стор вроде Redux, просто с меньшим количеством бойлерплейта
+      why: Это не стор для произвольного стейта, а кэш асинхронных данных. Класть туда состояние модалки или текста в поле — не по назначению.
+    - label: "Разницы нет: TanStack Query нужен только для того, чтобы не писать isLoading и error вручную"
+      why: Флаги загрузки — мелочь. Главное — общий кэш, дедупликация, отмена, обновление при фокусе и восстановлении сети, инвалидация после мутаций.
+  answer: 0
+- id: tanstack-query-key-missing-param
+  skill: query-keys
+  question: tanstack-query
+  difficulty: 2
+  prompt: При переключении страницы список не меняется, а на разных страницах иногда видны одни и те же задачи. Найдите ошибку.
+  explanation: "Ключ — адрес записи в кэше и сигнал для перезапроса. Если page не входит в ключ, все страницы пишут в одну запись, а смена page не запускает новый запрос. Правило: в queryKey должны попадать все параметры, от которых зависит queryFn."
+  type: find-bug
+  language: tsx
+  code: |-
+    function useTodos(filter: Filter, page: number) {
+      return useQuery({
+        queryKey: ['todos', filter],
+        queryFn: ({ signal }) =>
+          api.getTodos(filter, page, { signal }),
+        staleTime: 30_000,
+      });
+    }
+  bugLines:
+    - 3
+  causes:
+    - queryKey не включает page — все страницы делят одну запись кэша, и смена page не вызывает перезапрос
+    - staleTime в 30 секунд запрещает перезапрос при смене любых аргументов хука
+    - signal нельзя передавать в api-функцию — запрос отменяется сразу после старта
+    - queryFn должна быть объявлена через async, иначе useQuery не дождётся промиса
+  answer: 0
+- id: tanstack-query-mutation-invalidate
+  skill: mutation-invalidation
+  question: tanstack-query
+  difficulty: 2
+  prompt: Допишите мутацию так, чтобы после добавления задачи все списки задач (с любым фильтром) обновились.
+  explanation: useQueryClient даёт доступ к кэшу, invalidateQueries помечает записи устаревшими и перезапрашивает активные. Ключ ['todos'] работает как префикс и задевает ['todos', filter] для всех фильтров. Не копируйте данные в useState — инвалидация до них не дотянется.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function useAddTodo() {
+      const queryClient = ___();
+      return useMutation({
+        mutationFn: api.addTodo,
+        onSuccess: () =>
+          queryClient.___({
+            queryKey: [___],
+          }),
+      });
+    }
+  tokens:
+    - useQueryClient
+    - invalidateQueries
+    - "'todos'"
+  decoys:
+    - useQuery
+    - setQueryData
+    - "'addTodo'"
+    - useMutation
+- id: tanstack-query-rarely-changing-data
+  skill: stale-time-vs-gc-time
+  question: tanstack-query
+  difficulty: 3
+  prompt: Справочник стран меняется раз в месяц. Он уже в кэше TanStack Query, но при каждом монтировании селекта уходит новый запрос. Что настроить?
+  explanation: "staleTime отвечает, сколько данные считаются свежими: пока они свежие, монтирование и фокус не вызывают перезапрос. gcTime — сколько неиспользуемая запись живёт в кэше до удаления. Перезапросы убирает именно staleTime."
+  type: choose-tool
+  options:
+    - label: Увеличить staleTime (вплоть до Infinity) для этого запроса
+      why: "Лучший выбор: пока данные свежие, новые подписчики берут их из кэша без запроса. По умолчанию staleTime = 0, поэтому каждый mount запускает фоновый refetch."
+    - label: Увеличить gcTime до Infinity
+      why: gcTime лишь продлевает жизнь неактивной записи в кэше. Данные останутся, но будут stale, и при монтировании запрос всё равно уйдёт. Полезно вместе со staleTime.
+    - label: Отключить refetchOnWindowFocus
+      why: Уберёт только перезапросы при возврате на вкладку. Перезапрос при монтировании останется — за него отвечает свежесть данных.
+    - label: Один раз загрузить список и положить его в React Context
+      why: "Дублирует кэш вручную: теряются дедупликация, повторы и инвалидация. Уместно для клиентских значений, а не для серверных данных."
+  answer: 0
+
+# url-state: принято из черновика 2026-10-11
+- id: url-state-what-to-store
+  skill: url-state-choice
+  question: url-state
+  difficulty: 2
+  prompt: Какое состояние экрана стоит хранить в URL?
+  explanation: "Критерий простой: захочет ли пользователь поделиться этим состоянием или вернуться к нему через «Назад» или перезагрузку. Тогда это URL, и он же единственный источник истины. Временные UI-флаги, секреты и большие объёмы данных в адрес не кладут."
+  type: quiz
+  options:
+    - label: "То, чем пользователь захочет поделиться или к чему вернуться: фильтры, сортировка, поиск, страница, открытая вкладка"
+      why: Верно. Ссылка воспроизводит экран, работают «Назад/Вперёд», состояние переживает перезагрузку, и его не нужно дублировать в сторе.
+    - label: Всё состояние страницы, чтобы ничего не терялось при перезагрузке
+      why: Hover, открытый тултип или черновик модалки только засорят адрес и историю. Большие объёмы упрутся в длину URL. Для сохранения при перезагрузке есть localStorage.
+    - label: Только параметры, которые уходят на сервер в запросе, а UI-состояние вроде вкладки — в глобальный стор
+      why: Открытая вкладка или выбранный элемент тоже часть «экрана, которым делятся». Критерий — шаринг и навигация, а не то, уходит ли параметр на сервер.
+    - label: Данные пользователя и токен, чтобы по ссылке сразу открывался тот же экран
+      why: Секреты и персональные данные в URL утекают в историю браузера, логи серверов и Referer. Их в адрес не кладут никогда.
+  answer: 0
+- id: url-state-duplicated-source
+  skill: url-state-single-source
+  question: url-state
+  difficulty: 2
+  prompt: На странице поиска есть ссылки «Популярные запросы» (<Link to="?q=laptop">). После клика URL меняется, а поле поиска и результаты остаются старыми. Найдите строку с причиной.
+  explanation: "Строка поиска хранится дважды: в URL и в useState. Начальное значение useState читается только на первом рендере, поэтому навигация, которая не размонтирует компонент, его не обновит. Правило: читайте значение прямо из params на каждом рендере, а меняйте только через setParams."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Search() {
+      const [params, setParams] = useSearchParams();
+      const [q, setQ] = useState(params.get('q') ?? '');
+      const { data } = useQuery({
+        queryKey: ['products', q],
+        queryFn: () => fetchProducts(q),
+      });
+
+      function onChange(value: string) {
+        setQ(value);
+        setParams({ q: value }, { replace: true });
+      }
+      return <SearchView q={q} items={data} onChange={onChange} />;
+    }
+  bugLines:
+    - 3
+  causes:
+    - "q копируется из URL в useState: два источника истины, и при навигации без размонтирования локальное состояние не обновляется"
+    - "replace: true не даёт React Router обновить search params при клике по Link"
+    - queryKey должен содержать весь объект params, иначе запрос не перезапустится
+    - setParams нужно вызывать с функцией (prev) => ..., иначе обновление теряется
+  answer: 0
+- id: url-state-update-filter
+  skill: url-state-search-params
+  question: url-state
+  difficulty: 2
+  prompt: Допишите обновление фильтра. Остальные параметры должны сохраниться, пагинация сбрасывается, а история браузера не засоряется.
+  explanation: "Копия prev через new URLSearchParams сохраняет остальные параметры. Удаление page возвращает на первую страницу, ведь старый номер для нового фильтра бессмыслен. replace: true заменяет текущую запись истории вместо добавления новой. Это важно для частых изменений вроде ввода в поиск."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const [params, setParams] = useSearchParams();
+    const sort = params.___('sort') ?? 'popular';
+
+    function update(key: string, value: string) {
+      setParams((prev) => {
+        const next = new ___(prev);
+        next.set(key, value);
+        next.___('page');
+        return next;
+      }, { ___: true });
+    }
+  tokens:
+    - get
+    - URLSearchParams
+    - delete
+    - replace
+  decoys:
+    - getAll
+    - URL
+    - remove
+    - push
+- id: url-state-catalog-filters
+  skill: url-state-choice
+  question: url-state
+  difficulty: 1
+  prompt: "Каталог товаров: категория, сортировка и номер страницы. Менеджеры пересылают друг другу ссылки на подборки, а «Назад» должна возвращать предыдущий фильтр. Где хранить это состояние?"
+  explanation: Шаринг ссылкой и «Назад/Вперёд» — главные признаки URL-состояния. Параметры нужно валидировать как пользовательский ввод (Zod, nuqs, типизированные search в TanStack Router). Затем их можно положить в queryKey, чтобы кэш запросов следовал за адресом.
+  type: choose-tool
+  options:
+    - label: Search params в URL
+      why: "Лучший выбор: ссылка воспроизводит подборку, история браузера работает сама, состояние переживает перезагрузку, а значения естественно ложатся в queryKey."
+    - label: Zustand-стор
+      why: Подходит для клиентского состояния, которое нужно многим компонентам, но не шарится ссылкой. Здесь пришлось бы вручную синхронизировать стор с URL и историей.
+    - label: useState в компоненте каталога
+      why: Хватит для временного локального состояния вроде открытого дропдауна. Фильтры потеряются при перезагрузке, ими нельзя поделиться, «Назад» их не вернёт.
+    - label: localStorage
+      why: Уместен для персональных настроек «запомнить между сессиями» (тема, плотность таблицы). Он не передаётся ссылкой и не связан с историей навигации.
+  answer: 0
+
+# use-sync-external-store: принято из черновика 2026-10-11
+- id: use-sync-external-store-tearing-quiz
+  skill: external-store-tearing
+  question: use-sync-external-store
+  difficulty: 3
+  prompt: Что такое tearing и как useSyncExternalStore его предотвращает?
+  explanation: "Tearing возможен только при конкурентном рендеринге: рендер прерывается, а внешний стор тем временем меняется. useSyncExternalStore сверяет снимок перед commit и при расхождении рендерит синхронно. Цена согласованности в том, что обновления внешних сторов не могут быть неблокирующими transition."
+  type: quiz
+  options:
+    - label: Компоненты в одном прерванном рендере читают разные версии внешнего стора; хук сверяет снимок и при изменении рендерит синхронно
+      why: Верно. React сравнивает getSnapshot до и после прерывания. Если стор изменился, он перерендеривает дерево синхронно, и UI показывает одну версию данных.
+    - label: Мерцание, когда DOM обновился раньше paint; хук работает как useLayoutEffect и подписывается до отрисовки
+      why: Это путаница с layout-эффектами. Tearing — это рассогласование данных между компонентами в одном рендере, а не мерцание кадра.
+    - label: Утечка подписки после размонтирования; хук сам вызывает отписку, которую забывают в useEffect
+      why: Отписку хук действительно вызывает, но это побочный бонус. Tearing не связан с утечками, он про разные версии данных в одном рендере.
+    - label: Блокировка ввода частыми обновлениями стора; хук переводит их в transition, чтобы рендер прерывался
+      why: "Всё наоборот: обновления внешних сторов нельзя сделать transition. Если стор меняется во время transition, React откатывается к синхронному рендеру."
+  answer: 0
+- id: use-sync-external-store-unstable-snapshot
+  skill: external-store-snapshot-stability
+  question: use-sync-external-store
+  difficulty: 2
+  prompt: После монтирования ActiveList React зацикливается на рендерах. Найдите строку с ошибкой.
+  explanation: "React сравнивает снимки через Object.is. `filter` при каждом вызове создаёт новый массив, поэтому React считает, что стор изменился, и рендерит снова и снова (предупреждение «The result of getSnapshot should be cached»). Правило: getSnapshot возвращает данные стора как есть, а производные значения считаются в useMemo или в селекторе с кэшем по ссылке."
+  type: find-bug
+  language: tsx
+  code: |-
+    const todoStore = createStore<Todo[]>([]);
+
+    function useActiveTodos() {
+      return useSyncExternalStore(
+        todoStore.subscribe,
+        () => todoStore.get().filter((t) => !t.done),
+      );
+    }
+
+    function ActiveList() {
+      const todos = useActiveTodos();
+      return <List items={todos} />;
+    }
+  bugLines:
+    - 6
+  causes:
+    - "getSnapshot каждый раз возвращает новый массив: Object.is видит «изменение», и рендеры зацикливаются"
+    - "Не передан getServerSnapshot: без третьего аргумента хук падает и на клиенте"
+    - useSyncExternalStore нельзя вызывать из кастомного хука — только прямо в компоненте
+    - subscribe пересоздаётся на каждом рендере, поэтому React переподписывается бесконечно
+  answer: 0
+- id: use-sync-external-store-window-width
+  skill: external-store-subscribe
+  question: use-sync-external-store
+  difficulty: 2
+  prompt: Допишите хук, который подписывается на ширину окна без tearing и корректно работает при SSR.
+  explanation: subscribe объявлен вне компонента, поэтому ссылка на него стабильна и React не переподписывается на каждом рендере. Функция обязана вернуть отписку. `innerWidth` — примитив, так что снимок стабилен сам по себе. Третий аргумент — значение для сервера и гидрации, где window нет.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function subscribe(cb: () => void) {
+      window.addEventListener('resize', cb);
+      return () => window.___('resize', cb);
+    }
+
+    function useWindowWidth() {
+      return ___(
+        ___,
+        () => window.innerWidth,
+        () => 1024,
+      );
+    }
+  tokens:
+    - removeEventListener
+    - useSyncExternalStore
+    - subscribe
+  decoys:
+    - useEffect
+    - dispatchEvent
+    - useState
+    - cb
+- id: use-sync-external-store-price-feed
+  skill: external-store-integration-choice
+  question: use-sync-external-store
+  difficulty: 3
+  prompt: Класс PriceFeed вне React держит котировки из WebSocket и шлёт событие при изменении. Цену показывают несколько компонентов, в приложении есть startTransition и SSR. Все компоненты должны показывать одну версию данных. Что выбрать?
+  explanation: Внешний мутабельный источник плюс конкурентный рендеринг — это задача для useSyncExternalStore. Нужны стабильный subscribe и снимок, который меняет ссылку только при изменении данных. Так устроены Redux и Zustand. Самодельные подписки через эффекты не дают React способа проверить согласованность.
+  type: choose-tool
+  options:
+    - label: "useSyncExternalStore: subscribe к событиям PriceFeed, getSnapshot отдаёт неизменяемый снимок"
+      why: Лучший вариант. React сверяет снимок и при изменении во время рендера перерисовывает синхронно, поэтому tearing невозможен. getServerSnapshot закрывает SSR.
+    - label: "useEffect + useState в каждом компоненте: подписаться и класть цену в state"
+      why: Возможен tearing, и можно пропустить событие между рендером и подпиской. Первый кадр показывает устаревшее значение. Годится разве что для редких некритичных данных.
+    - label: Положить экземпляр PriceFeed в React Context
+      why: Context передаёт ссылку на объект, а мутации внутри него ререндер не вызывают. Подходит для внедрения зависимости, но не для подписки на изменения.
+    - label: Хранить цену в useRef и вызывать forceUpdate через useReducer на событие
+      why: Чтение мутабельного ref в рендере даёт тот же tearing, и SSR не поддерживается. Это хак времён до появления официального API.
+  answer: 0

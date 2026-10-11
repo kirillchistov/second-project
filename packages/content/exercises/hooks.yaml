@@ -112,3 +112,1125 @@
   explanation: >-
     Правило вытекает из устройства: React хранит хуки компонента по порядку вызова. Исключение — хук use из React 19:
     он не хранит состояние в этом списке, поэтому его можно вызывать условно.
+
+# custom-hooks: принято из черновика 2026-10-11
+- id: custom-hooks-state-isolation
+  skill: custom-hooks-state-isolation
+  question: custom-hooks
+  difficulty: 1
+  prompt: Хедер и сайдбар вызывают один и тот же кастомный хук `useToggle()`. В хедере переключили значение. Что произойдёт в сайдбаре?
+  explanation: Кастомный хук — обычная функция. Внутри неё хуки привязаны к компоненту, который её вызвал. Поэтому хуки делятся логикой, а не состоянием. Если нужно общее состояние, его поднимают в общего родителя, Context или внешний стор, а хук остаётся удобной обёрткой над ним.
+  type: quiz
+  options:
+    - label: "Ничего: каждый вызов хука получает своё независимое состояние, общим остаётся только код логики"
+      why: Верно. useState внутри хука принадлежит Fiber-узлу вызвавшего компонента, поэтому хедер и сайдбар хранят по своей копии.
+    - label: Сайдбар тоже переключится, потому что оба компонента используют один хук
+      why: "Это главное заблуждение. Хук не синглтон: каждый вызов создаёт своё состояние. Для общего состояния нужен Context или стор."
+    - label: Сайдбар переключится, только если хук объявлен в отдельном модуле и экспортирован
+      why: Место объявления функции ни на что не влияет. Состояние создаётся при вызове useState внутри конкретного компонента.
+    - label: "React выдаст предупреждение: один хук нельзя вызывать в двух компонентах одновременно"
+      why: "Никаких ограничений нет: переиспользование в разных компонентах — смысл кастомных хуков."
+  answer: 0
+- id: custom-hooks-unstable-refetch
+  skill: custom-hooks-stable-api
+  question: custom-hooks
+  difficulty: 2
+  prompt: После монтирования Profile запросы к API идут бесконечно. Найдите строки, где причина.
+  explanation: "refetch создаётся заново на каждом рендере. Цикл такой: эффект вызывает refetch → setUser → рендер → новый refetch → эффект снова срабатывает. Исправление — `useCallback(() => ..., [id])`. Функции и объекты, которые возвращает хук, должны быть стабильными: потребители кладут их в зависимости. React Compiler мемоизирует это сам, но API лучше делать стабильным явно."
+  type: find-bug
+  language: tsx
+  code: |-
+    function useUser(id: string) {
+      const [user, setUser] = useState<User | null>(null);
+      const refetch = () =>
+        fetchUser(id).then(setUser);
+      return { user, refetch };
+    }
+
+    function Profile({ id }: { id: string }) {
+      const { user, refetch } = useUser(id);
+      useEffect(() => {
+        refetch();
+      }, [refetch]);
+      return <Card user={user} />;
+    }
+  bugLines:
+    - 3
+    - 4
+  causes:
+    - "refetch — новая функция на каждом рендере: эффект с [refetch] перезапускается после каждого setUser"
+    - setUser нельзя передавать в then — нужно обернуть в стрелочную функцию
+    - Кастомный хук не может возвращать объект, только кортеж, как useState
+    - Хук обязан сам вызывать fetchUser в своём useEffect, иначе запрос не выполнится
+  answer: 0
+- id: custom-hooks-online-status
+  skill: custom-hooks-external-store
+  question: custom-hooks
+  difficulty: 2
+  prompt: Допишите хук, который подписывается на статус сети браузера и корректно отписывается.
+  explanation: Для подписки на внешний источник (события браузера, сторонний стор) подходит useSyncExternalStore, а не useEffect с useState. Он не даёт рассинхрона при конкурентном рендере. subscribe вынесен из компонента, поэтому он стабилен и React не переподписывается на каждом рендере. Третий аргумент — снапшот для SSR.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function subscribe(cb: () => void) {
+      window.addEventListener('online', cb);
+      window.addEventListener('offline', cb);
+      return () => {
+        window.___('online', cb);
+        window.removeEventListener('offline', cb);
+      };
+    }
+
+    export function useOnlineStatus() {
+      return ___(subscribe,
+        () => navigator.___, () => true);
+    }
+  tokens:
+    - removeEventListener
+    - useSyncExternalStore
+    - onLine
+  decoys:
+    - dispatchEvent
+    - useEffect
+    - online
+    - isOnline
+- id: custom-hooks-reuse-media-query
+  skill: logic-reuse-choice
+  question: custom-hooks
+  difficulty: 2
+  prompt: "В пяти разных компонентах нужно знать, совпадает ли `(max-width: 768px)`, и перерисовываться при ресайзе. Компоненты в разных частях дерева. Как переиспользовать логику?"
+  explanation: "Логику с состоянием и подписками переиспользуют через кастомный хук. HOC и render props остались из эпохи до хуков и усложняют дерево. Context нужен, когда значение надо переопределять для поддерева или менять из разных мест. Для подписки на браузерное API достаточно хука: каждый компонент вызывает его там, где нужно."
+  type: choose-tool
+  options:
+    - label: Кастомный хук useMediaQuery(query) на useSyncExternalStore с matchMedia
+      why: "Лучший выбор: логика в одном месте, каждый компонент вызывает хук там, где он нужен, без обёрток в дереве и с корректной подпиской."
+    - label: HOC withMediaQuery, который пробрасывает isMobile в props
+      why: "Работает, но это подход до React 16.8: лишние обёртки, неявные props, возможные коллизии имён. Уместен разве что в старой кодовой базе с классами."
+    - label: Компонент <MediaQuery> с render props
+      why: Тоже рабочий, но даёт вложенность JSX и не позволяет использовать значение в логике до return. Сейчас его выбирают в основном для совместимости с библиотеками.
+    - label: Context с провайдером в корне, который слушает matchMedia
+      why: Оправдан, если значение нужно переопределять для поддерева, например в тестах. Для простой подписки это лишний провайдер и связность, которых хук не требует.
+  answer: 0
+
+# effect-race-conditions: принято из черновика 2026-10-11
+- id: effect-race-conditions-why-stale
+  skill: effect-race-conditions
+  question: effect-race-conditions
+  difficulty: 2
+  prompt: Эффект грузит профиль по userId без cleanup. Пользователь быстро переключил A → B, а на экране остался профиль A. Почему?
+  explanation: "Порядок ответов сети не гарантирован, а каждый `.then(setUser)` срабатывает независимо. Побеждает тот, кто пришёл последним, а не тот, кто актуален. Правило: в cleanup отменяйте запрос (`AbortController`) или игнорируйте его результат флагом. В проекте это делают TanStack Query, SWR и загрузчики роутера."
+  type: quiz
+  options:
+    - label: "Ответ для A пришёл позже ответа для B, и его setUser перезаписал актуальные данные: эффект A никто не отменил"
+      why: Верно. Запросы живут независимо от рендеров. Без cleanup результат устаревшего запроса всё равно попадёт в состояние, если придёт последним.
+    - label: React запускает эффекты для A и B параллельно и применяет только результат первого эффекта
+      why: Эффекты выполняются по очереди после коммитов. Решающим оказывается порядок ответов сети, а не порядок запуска эффектов.
+    - label: setUser асинхронный и батчится, поэтому React применяет первое значение и отбрасывает второе
+      why: "Батчинг объединяет обновления, но применяет их по порядку: последнее значение побеждает. Проблема в том, что последним пришёл старый ответ."
+    - label: Браузер закешировал ответ для A и вернул его на запрос B
+      why: URL у запросов разный, поэтому HTTP-кэш не подменит ответ. Это заблуждение уводит от настоящей причины — отсутствия отмены в cleanup.
+  answer: 0
+- id: effect-race-async-callback
+  skill: effect-race-conditions
+  question: effect-race-conditions
+  difficulty: 2
+  prompt: Автор хотел отменять старый запрос при смене userId, но гонка осталась. Найдите строку с ошибкой.
+  explanation: "Async-функция всегда возвращает промис, поэтому React не получает cleanup, а `abort()` не вызывается. Правильно: синхронный эффект, а внутри — async-функция, которую сразу вызывают. Cleanup возвращается синхронно. После исправления не забудьте `catch` с проверкой `AbortError`: иначе каждая отмена покажет ложную ошибку."
+  type: find-bug
+  language: tsx
+  code: |-
+    function UserCard({ userId }: { userId: string }) {
+      const [user, setUser] = useState<User | null>(null);
+
+      useEffect(async () => {
+        const controller = new AbortController();
+        const r = await fetch(`/api/users/${userId}`, {
+          signal: controller.signal,
+        });
+        setUser(await r.json());
+        return () => controller.abort();
+      }, [userId]);
+
+      return <Card user={user} />;
+    }
+  bugLines:
+    - 4
+  causes:
+    - "Колбэк эффекта объявлен как async: он возвращает промис, а не cleanup, поэтому abort() никогда не вызовется"
+    - AbortController нужно хранить в useRef, иначе он пересоздаётся на каждом рендере
+    - await внутри эффекта блокирует рендер до ответа сервера
+    - fetch нужно обернуть в useCallback, иначе запросы дублируются
+  answer: 0
+- id: effect-race-ignore-flag
+  skill: effect-race-conditions
+  question: effect-race-conditions
+  difficulty: 2
+  prompt: Функцию fetchUser нельзя отменить. Соберите эффект, который игнорирует ответ устаревшего запроса с помощью флага.
+  explanation: Каждый запуск эффекта получает свой `ignore` в замыкании. При смене userId cleanup прошлого запуска ставит `ignore = true`, и поздний ответ уже не попадёт в состояние. Флаг не отменяет сам запрос, сеть всё равно тратится. Поэтому, если API принимает `signal`, лучше `AbortController`.
+  type: parsons
+  language: tsx
+  lines:
+    - useEffect(() => {
+    - "  let ignore = false;"
+    - "  fetchUser(userId).then((data) => {"
+    - "    if (!ignore) setUser(data);"
+    - "  });"
+    - "  return () => {"
+    - "    ignore = true;"
+    - "  };"
+    - "}, [userId]);"
+  distractors:
+    - "    ignore = false;"
+    - "}, []);"
+- id: effect-race-waterfall-fix
+  skill: data-fetching-waterfalls
+  question: effect-race-conditions
+  difficulty: 2
+  prompt: Приложение на React Router, маршрут /users/:id. ProfilePage грузит пользователя в useEffect, а потом рендерит Posts, который грузит посты в своём useEffect. Обоим запросам нужен только id из URL. В Network запросы идут строго друг за другом. Как это исправить?
+  explanation: "Это водопад: ребёнок начинает загрузку только после того, как родитель загрузил данные и отрендерил его. Лечится тем, что загрузку запускают раньше рендера: loaders, prefetch, Server Components. AbortController решает другую проблему — гонки, а не последовательность запросов."
+  type: choose-tool
+  options:
+    - label: Loader маршрута, который запускает оба запроса параллельно до рендера
+      why: "Лучший вариант: оба запроса зависят только от id из URL, поэтому loader стартует их сразу при навигации, не дожидаясь рендера."
+    - label: Добавить AbortController в эффекты обоих компонентов
+      why: Это защищает от гонок при быстрой смене id, но Posts всё равно монтируется после загрузки пользователя, так что водопад останется.
+    - label: Обернуть Posts в Suspense
+      why: Suspense показывает fallback, пока данные грузятся, но не начинает загрузку раньше. Если Posts грузит данные в эффекте, Suspense вообще ни на что не влияет.
+    - label: Перенести загрузку в useLayoutEffect
+      why: Эффект сработает чуть раньше paint, но всё равно после рендера. Posts по-прежнему ждёт данных родителя, к тому же блокируется отрисовка.
+  answer: 0
+
+# rules-of-hooks: принято из черновика 2026-10-11
+- id: rules-of-hooks-hook-in-handler
+  skill: rules-of-hooks
+  question: rules-of-hooks
+  difficulty: 1
+  prompt: Найдите строку, которая нарушает правила хуков.
+  explanation: "Хуки вызываются только во время рендера, на верхнем уровне компонента. Обработчик срабатывает позже, вне рендера, и React не знает, к какому компоненту относится вызов. Решение: вызвать `useContext(AuthContext)` рядом с useState, а в обработчике использовать уже полученный token. То же правило действует для useEffect, useMemo и колбэков."
+  type: find-bug
+  language: tsx
+  code: |-
+    function LikeButton({ postId }: Props) {
+      const [liked, setLiked] = useState(false);
+
+      async function handleClick() {
+        const { token } = useContext(AuthContext);
+        await likePost(postId, token);
+        setLiked(true);
+      }
+
+      return (
+        <button onClick={handleClick}>{liked ? '♥' : '♡'}</button>
+      );
+    }
+  bugLines:
+    - 5
+  causes:
+    - useContext вызывается в обработчике события, а не на верхнем уровне компонента во время рендера
+    - useState нужно объявлять после всех функций-обработчиков
+    - Обработчик события не может быть async-функцией
+    - "setLiked после await не сработает: обновление вне батча теряется"
+  answer: 0
+- id: rules-of-hooks-extract-list-item
+  skill: rules-of-hooks
+  question: rules-of-hooks
+  difficulty: 2
+  prompt: Раньше useState вызывался прямо внутри items.map. Допишите рефакторинг так, чтобы у каждого вопроса было своё состояние «открыт/закрыт».
+  explanation: "Хук в цикле или в map нарушает правила: число вызовов зависит от длины списка. Стандартный приём — вынести элемент в отдельный компонент, где хук стоит на верхнем уровне. Стабильный key={item.id} привязывает состояние к данным, а не к позиции в списке."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function FaqList({ items }: { items: Faq[] }) {
+      return items.map((item) => (
+        <___ key={item.___} item={item} />
+      ));
+    }
+
+    function FaqItem({ item }: { item: Faq }) {
+      const [open, setOpen] = ___(false);
+      return (
+        <div onClick={() => setOpen(!open)}>
+          {item.q} {open && item.a}
+        </div>
+      );
+    }
+  tokens:
+    - FaqItem
+    - id
+    - useState
+  decoys:
+    - FaqList
+    - index
+    - useRef
+    - use
+- id: rules-of-hooks-conditional-use
+  skill: use-hook-conditional
+  question: rules-of-hooks
+  difficulty: 3
+  prompt: Клиентский компонент Post получает пропсом commentsPromise (создан в серверном компоненте) и флаг expanded. Комментарии нужны только при expanded=true, и прочитать их хочется прямо в этой ветке if. Над Post есть Suspense. Что выбрать?
+  explanation: "`use` — исключение из правил хуков: он не хранит состояние в списке хуков, поэтому его можно вызывать в условиях и циклах. Пока промис не разрешился, компонент приостанавливается до ближайшего Suspense. Остальные хуки по-прежнему вызываются только на верхнем уровне."
+  type: choose-tool
+  options:
+    - label: "`use(commentsPromise)` внутри `if (expanded)`"
+      why: "Лучший выбор: use разрешено вызывать условно, он интегрирован с Suspense, лишнего состояния и эффекта не нужно."
+    - label: useState + useEffect с `commentsPromise.then(setComments)` на верхнем уровне
+      why: Работает, но это лишний рендер, ручная обработка загрузки и никакой интеграции с Suspense. Подходит для стека без Suspense.
+    - label: Сделать Post async-компонентом и написать `await commentsPromise` в ветке if
+      why: Async-компоненты поддерживаются только на сервере. В серверном компоненте await был бы уместен, а клиентский так делать нельзя.
+    - label: Обернуть `useState` и `useEffect` в `if (expanded)`
+      why: "Нарушает правила хуков: при переключении expanded число хуков меняется, и React падает с ошибкой."
+  answer: 0
+
+# stale-closure: принято из черновика 2026-10-11
+- id: stale-closure-interval-quiz
+  skill: stale-closure
+  question: stale-closure
+  difficulty: 2
+  prompt: "Таймер: `useEffect` с `[]` запускает `setInterval(() => setCount(count + 1), 1000)`. Почему счётчик навсегда застывает на 1?"
+  explanation: "Каждый рендер — отдельный вызов функции со своими константами. Колбэк из первого рендера видит только его значения. Это обычные замыкания JS. Лечится так: апдейтер `setCount(c => c + 1)`, если нужно прошлое состояние; `useEffectEvent`, если нужно читать свежие props/state без перезапуска эффекта."
+  type: quiz
+  options:
+    - label: Колбэк интервала создан в первом рендере и замкнул count = 0, поэтому каждую секунду вызывает setCount(0 + 1)
+      why: Верно. Интервал тикает, но аргумент всегда 1. React видит то же значение и не меняет экран, хотя setCount вызывается каждую секунду.
+    - label: Эффект с [] выполняется один раз, значит и setInterval срабатывает только один раз
+      why: Эффект действительно запускается один раз, но созданный им интервал тикает каждую секунду. Проблема не в числе вызовов, а в значении count, которое видит колбэк.
+    - label: count обновляется асинхронно, и интервал успевает прочитать значение до того, как React его обновит
+      why: "count не «обновляется»: это константа конкретного рендера. Новый рендер создаёт новую константу, а старое замыкание продолжает видеть свою."
+    - label: React батчит обновления из setInterval и отбрасывает все, кроме первого
+      why: Батчинг объединяет обновления внутри одного тика. Здесь тики разные, и каждое обновление обрабатывается. Просто значение всегда одно и то же — 1.
+  answer: 0
+- id: stale-closure-keydown-listener
+  skill: stale-closure
+  question: stale-closure
+  difficulty: 2
+  prompt: Пользователь вводит текст и жмёт Enter, но `search` всегда получает пустую строку. Найдите ошибку.
+  explanation: "`onKey` создаётся в первом рендере и навсегда видит `query = ''`. Из-за `[]` эффект не пересоздаёт слушатель. Исправить можно двумя способами. Первый — обернуть обработчик в `useEffectEvent`: подписка остаётся одна, а значение всегда свежее. Второй — добавить `query` в зависимости, но тогда слушатель будет переподписываться на каждый символ. Тот же баг часто встречается в подписках и обработчиках WebSocket."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Search() {
+      const [query, setQuery] = useState('');
+      useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+          if (e.key === 'Enter') search(query);
+        };
+        window.addEventListener('keydown', onKey);
+        return () =>
+          window.removeEventListener('keydown', onKey);
+      }, []);
+      return <input value={query}
+        onChange={(e) => setQuery(e.target.value)} />;
+    }
+  bugLines:
+    - 5
+    - 10
+  causes:
+    - onKey замкнул query из первого рендера, а пустой массив зависимостей не даёт пересоздать слушатель — search всегда получает ''
+    - removeEventListener получает другую функцию, поэтому слушатели копятся и срабатывает самый первый
+    - setQuery асинхронный, поэтому в момент нажатия Enter query ещё не успел обновиться
+    - Слушатель на window не получает keydown, пока фокус находится внутри input
+  answer: 0
+- id: stale-closure-use-effect-event-timer
+  skill: use-effect-event
+  question: stale-closure
+  difficulty: 2
+  prompt: "Допишите таймер (React 19.2): он прибавляет актуальный `step` и не перезапускает интервал при смене `step`."
+  explanation: "`useEffectEvent` возвращает функцию, которая при вызове всегда видит свежие props и state. Её не указывают в зависимостях. Поэтому эффект с `[]` создаёт интервал один раз, а апдейтер `c => c + step` берёт и прошлое состояние, и актуальный шаг. С `[step]` интервал пересоздавался бы при каждой смене шага и сбивался."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function Timer({ step }: { step: number }) {
+      const [count, setCount] = useState(0);
+      const onTick = ___(() => {
+        setCount((c) => c + ___);
+      });
+      useEffect(() => {
+        const id = setInterval(___, 1000);
+        return () => clearInterval(id);
+      }, ___);
+      return <p>{count}</p>;
+    }
+  tokens:
+    - useEffectEvent
+    - step
+    - onTick
+    - "[]"
+  decoys:
+    - useCallback
+    - count
+    - "[step]"
+    - "[onTick]"
+- id: stale-closure-websocket-latest-value
+  skill: effect-latest-values-choice
+  question: stale-closure
+  difficulty: 3
+  prompt: "Чат (React 19.2): эффект подключается к WebSocket по `roomId`. В обработчике сообщения нужно играть звук, если не включён `muted`. Переключение `muted` не должно переподключать сокет. Что выбрать?"
+  explanation: "Правило: если значение влияет на то, что синхронизирует эффект (`roomId`), — это зависимость. Если значение только читается в реакции на событие (`muted`), — это логика события, ей место в `useEffectEvent`. Отключать `exhaustive-deps` вместо этого — путь к stale closure."
+  type: choose-tool
+  options:
+    - label: Обернуть onMessage в useEffectEvent, а в зависимостях эффекта оставить только roomId
+      why: Лучший вариант. Обработчик всегда видит свежий muted, а сокет переподключается только при смене roomId. Так в 19.2 и разделяют «реактивную» и «событийную» логику.
+    - label: Добавить muted в массив зависимостей эффекта
+      why: Замыкание станет свежим, но каждое переключение звука будет рвать и заново открывать соединение. Подходит, только если изменение значения действительно должно перезапускать синхронизацию.
+    - label: Использовать функциональный апдейтер setState внутри обработчика
+      why: Апдейтер помогает, когда новое состояние считается из предыдущего, как в счётчике. Прочитать через него актуальный проп muted нельзя.
+    - label: Хранить muted в useRef и синхронизировать ref в отдельном эффекте
+      why: "Рабочий паттерн до React 19.2 и для колбэков сторонних библиотек. Но это ручная работа: легко забыть синхронизацию или прочитать ref во время рендера. В 19.2 то же декларативно делает useEffectEvent."
+  answer: 0
+
+# use-effect-basics: принято из черновика 2026-10-11
+- id: use-effect-purpose-quiz
+  skill: effect-purpose
+  question: use-effect-basics
+  difficulty: 1
+  prompt: Для какой задачи `useEffect` — действительно подходящий инструмент?
+  explanation: "Главный вопрос перед эффектом: «с какой внешней системой я синхронизируюсь?» Если ответа нет, эффект, скорее всего, не нужен. Данные для рендера считают в теле компонента, реакции на действия пишут в обработчиках, а состояние сбрасывают через `key`."
+  type: quiz
+  options:
+    - label: "Синхронизировать компонент с внешней системой: сетью, подпиской, таймером, DOM-API, сторонним виджетом"
+      why: Верно. Эффект запускается после коммита, повторяется при смене зависимостей, а cleanup «откатывает» синхронизацию перед следующим запуском и при размонтировании.
+    - label: Вычислять производные данные из props и state, чтобы не пересчитывать их на каждом рендере
+      why: Эффект с setState даёт лишний рендер и кадр с устаревшими данными. Считайте прямо в рендере, а если это дорого — используйте useMemo или React Compiler.
+    - label: Реагировать на действия пользователя, например отправлять форму после клика
+      why: Действие уже произошло в конкретном событии, поэтому его место — обработчик. Через эффект с флагом логика размазывается, а при повторном рендере возможны лишние запуски.
+    - label: Выполнить код до отрисовки, чтобы пользователь не увидел промежуточное состояние
+      why: "Это задача useLayoutEffect: он блокирует paint. useEffect обычно срабатывает уже после отрисовки кадра."
+  answer: 0
+- id: use-effect-deps-variants
+  skill: effect-dependencies
+  question: use-effect-basics
+  difficulty: 1
+  prompt: Компонент смонтировали (без StrictMode), затем один раз нажали кнопку. Что будет в консоли?
+  explanation: Без массива зависимостей эффект запускается после каждого рендера. С `[]` — только после монтирования. С `[n]` — после монтирования и при каждом изменении n (сравнение через Object.is). Эффекты выполняются в порядке объявления.
+  type: predict-output
+  language: tsx
+  code: |-
+    function App() {
+      const [n, setN] = useState(0);
+
+      useEffect(() => { console.log('A'); });
+      useEffect(() => { console.log('B'); }, []);
+      useEffect(() => { console.log('C', n); }, [n]);
+
+      return (
+        <button onClick={() => setN(n + 1)}>+</button>
+      );
+    }
+  options:
+    - A → B → C 0 → A → C 1
+    - A → B → C 0 → A → B → C 1
+    - A → B → C 0 → C 1
+    - A → B → C 0 → A
+  answer: 0
+- id: use-effect-object-dependency
+  skill: effect-dependencies
+  question: use-effect-basics
+  difficulty: 2
+  prompt: Чат переподключается при каждом нажатии клавиши в поле ввода. Найдите причину.
+  explanation: Объект `options` создаётся заново на каждом рендере. Для Object.is это всегда новая зависимость, поэтому каждый ввод вызывает cleanup и новое подключение. Решение — создать объект внутри эффекта и зависеть от примитива `[roomId]`. serverUrl — константа модуля, и в зависимостях она не нужна.
+  type: find-bug
+  language: tsx
+  code: |-
+    function ChatRoom({ roomId }: { roomId: string }) {
+      const [text, setText] = useState('');
+      const options = { serverUrl, roomId };
+
+      useEffect(() => {
+        const conn = createConnection(options);
+        conn.connect();
+        return () => conn.disconnect();
+      }, [options]);
+      return (
+        <input value={text}
+          onChange={(e) => setText(e.target.value)} />
+      );
+    }
+  bugLines:
+    - 3
+    - 9
+  causes:
+    - Объект options создаётся в каждом рендере — новая ссылка в зависимостях перезапускает эффект
+    - Cleanup должен вызывать connect, а не disconnect
+    - Контролируемый input нельзя использовать в компоненте с эффектом
+    - Эффекту нужен пустой массив зависимостей, иначе он не сработает при монтировании
+  answer: 0
+- id: use-effect-reset-state-choice
+  skill: reset-state-with-key
+  question: use-effect-basics
+  difficulty: 2
+  prompt: ProfilePage({ userId }) хранит в useState черновик комментария и несколько полей формы. При переходе к другому пользователю всё это нужно сбросить. Что выбрать?
+  explanation: "Сбрасывать состояние при смене props через эффект — антипаттерн: появляются лишний рендер и кадр со старыми данными. Правило: «другая сущность — другой экземпляр компонента», то есть `key`."
+  type: choose-tool
+  options:
+    - label: Передать key={userId} компоненту с формой
+      why: "Лучший вариант. Новый key — новый экземпляр: React размонтирует старый и создаст новый со свежим state, без лишнего рендера и ручного сброса каждого поля."
+    - label: useEffect, который при смене userId вызывает setDraft('') и сбрасывает поля
+      why: Сначала отрисуется кадр со старым черновиком, потом пройдёт лишний рендер, а каждое новое поле придётся сбрасывать вручную. Эффекты нужны для синхронизации с внешней системой.
+    - label: Хранить черновик в useRef и очищать его вручную
+      why: "Ref не вызывает рендер, поэтому UI разойдётся с данными. Ref подходит для значений, не влияющих на вывод: id таймера, DOM-узел."
+    - label: Хранить prevUserId в state и сбрасывать поля прямо во время рендера
+      why: Допустимый приём, когда нужно сбросить лишь часть состояния. Для полного сброса он громоздкий, и key проще.
+  answer: 0
+
+# use-effect-event: принято из черновика 2026-10-11
+- id: use-effect-event-purpose
+  skill: effect-event-reactive-split
+  question: use-effect-event
+  difficulty: 3
+  prompt: Какую проблему решает useEffectEvent?
+  explanation: "Эффект перезапускается от реактивных значений (roomId), а событие эффекта лишь читает свежие (theme) и в зависимости не входит. Это разделение логики, а не обход линтера. До React 19.2 то же делали через useRef с «latest value»: ref обновляли в эффекте и читали ref.current."
+  type: quiz
+  options:
+    - label: Позволяет эффекту читать актуальные props и state, не делая их зависимостями, чтобы он не перезапускался от их изменений
+      why: "Верно. Функция-событие всегда видит последние значения, но не реактивна: эффект синхронизируется только с тем, что реально требует переподключения."
+    - label: Делает ссылку на колбэк стабильной, чтобы безопасно передавать его в дочерние компоненты, как useCallback без зависимостей
+      why: Событие эффекта нельзя передавать в другие компоненты и хуки. Для стабильного колбэка в props нужен useCallback (или React Compiler).
+    - label: Разрешает убрать из массива зависимостей любое значение, чтобы линтер перестал ругаться
+      why: Это не обход линтера. Если обернуть реактивную логику, эффект перестанет реагировать на реальные изменения. Сначала проверьте, нужна ли зависимость вообще.
+    - label: Переносит логику эффекта в обработчик событий, чтобы она запускалась по действию пользователя, а не после рендера
+      why: Событие эффекта вызывается только из эффектов, а не из обработчиков. Для логики «по клику» достаточно обычного обработчика, эффект там не нужен.
+  answer: 0
+- id: use-effect-event-chat-room
+  skill: effect-event-reactive-split
+  question: use-effect-event
+  difficulty: 2
+  prompt: "Допишите код: чат переподключается при смене roomId, а уведомление показывается с актуальной theme без переподключения при смене темы."
+  explanation: "theme читается внутри события эффекта, поэтому в зависимостях только roomId. Само событие в массив зависимостей не добавляют: оно не реактивно, и линтер это знает. С useCallback пришлось бы указать theme — и смена темы снова переподключала бы чат."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function ChatRoom({ roomId, theme }: Props) {
+      const onConnected = ___(() => {
+        showNotification('Подключено!', theme);
+      });
+      useEffect(() => {
+        const conn = createConnection(roomId);
+        conn.on('connected', () => ___());
+        conn.connect();
+        return () => conn.disconnect();
+      }, [___]);
+    }
+  tokens:
+    - useEffectEvent
+    - onConnected
+    - roomId
+  decoys:
+    - useCallback
+    - theme
+    - useRef
+- id: use-effect-event-wraps-everything
+  skill: effect-event-misuse
+  question: use-effect-event
+  difficulty: 3
+  prompt: Пользователь переходит в другую комнату, но чат остаётся подключён к старой. Найдите ошибку.
+  explanation: "roomId — реактивное значение, от него зависит, к чему подключаться. Его спрятали в событие эффекта и опустошили зависимости, поэтому эффект отработал один раз. Правило: в useEffectEvent — только то, что нужно прочитать, а не то, с чем надо синхронизироваться. Исправление: createConnection(roomId) в эффекте и [roomId] в зависимостях."
+  type: find-bug
+  language: tsx
+  code: |-
+    function ChatRoom({ roomId, theme }: Props) {
+      const connect = useEffectEvent(() => {
+        const conn = createConnection(roomId);
+        conn.on('connected', () => {
+          showNotification('Подключено!', theme);
+        });
+        conn.connect();
+        return conn;
+      });
+      useEffect(() => {
+        const conn = connect();
+        return () => conn.disconnect();
+      }, []);
+    }
+  bugLines:
+    - 3
+    - 13
+  causes:
+    - Реактивный roomId читается внутри события эффекта, а зависимости пусты — эффект не перезапускается при смене комнаты
+    - Событие эффекта нельзя вызывать внутри useEffect, только в обработчиках
+    - connect нужно добавить в массив зависимостей, иначе эффект видит устаревшую функцию
+    - Функция из useEffectEvent не может возвращать значение, поэтому cleanup не работает
+  answer: 0
+- id: use-effect-event-analytics-visit
+  skill: effect-event-reactive-split
+  question: use-effect-event
+  difficulty: 2
+  prompt: Нужно логировать визит при каждой смене url и передавать в лог текущее число товаров в корзине. Изменение корзины не должно создавать новый визит. React 19.2. Что выбрать?
+  explanation: "Задача типовая: эффект должен реагировать на url, но лишь читать cartCount. useEffectEvent — штатный способ это разделить: logVisit читает cartCount, а в зависимостях только [url]. До 19.2 использовали ref с последним значением. Подавление линтера опасно: оно скрывает и настоящие пропущенные зависимости."
+  type: choose-tool
+  options:
+    - label: useEffectEvent для логирования, в зависимостях эффекта только url
+      why: Событие эффекта видит актуальный cartCount, но не реактивно — визит логируется только при смене url.
+    - label: Добавить cartCount в зависимости эффекта
+      why: Честно для линтера, но каждое изменение корзины даст лишний визит. Подходит, если эффект действительно должен реагировать на это значение.
+    - label: useRef с последним cartCount, обновляемым в эффекте
+      why: Рабочий паттерн до React 19.2. Сейчас это больше ручного кода с тем же смыслом — уместно, если версия React старше.
+    - label: eslint-disable для строки с зависимостями
+      why: Сегодня может работать, но нереактивное чтение остаётся неявным, а линтер перестанет ловить настоящие пропущенные зависимости при будущих правках эффекта.
+  answer: 0
+
+# use-id: принято из черновика 2026-10-11
+- id: use-id-why-quiz
+  skill: use-id-purpose
+  question: use-id
+  difficulty: 2
+  prompt: Зачем нужен `useId`, если можно сгенерировать id через `Math.random()` или глобальный счётчик?
+  explanation: "`useId` даёт id, уникальный в пределах приложения и совпадающий на сервере и клиенте: он выводится из пути компонента в дереве. Главное применение — связи доступности: `htmlFor`/`id`, `aria-describedby`, `aria-labelledby`. Для ключей списков он не нужен."
+  type: quiz
+  options:
+    - label: Он строит id из положения компонента в дереве, поэтому id совпадает при SSR и гидрации и уникален для каждого экземпляра
+      why: Верно. Порядок выполнения кода на сервере и клиенте может отличаться, а путь в дереве совпадает. Поэтому разметка совпадает и гидрация проходит без ошибок.
+    - label: Он быстрее `Math.random()`, поэтому меньше нагружает рендер
+      why: Производительность тут ни при чём. `Math.random()` плох тем, что на сервере и клиенте даст разные значения, а на каждом рендере — новое.
+    - label: Он генерирует стабильные ключи для элементов списка
+      why: Это типичное заблуждение. Ключи должны выводиться из данных, например `item.id`. К тому же хук нельзя вызывать внутри `map`.
+    - label: Он гарантирует уникальность id во всём документе, включая разметку вне React
+      why: "React не знает про чужую разметку: захардкоженный `id` в HTML-шаблоне может совпасть. Уникальность гарантируется только среди id, выданных `useId` одного React-корня."
+  answer: 0
+- id: use-id-global-counter-hydration
+  skill: use-id-ssr-stability
+  question: use-id
+  difficulty: 2
+  prompt: Страница рендерится на сервере. После загрузки в консоли появляется ошибка гидрации о несовпадении атрибутов `id`. Найдите причину.
+  explanation: "Переменная модуля на сервере живёт между запросами и продолжает расти. На клиенте она стартует с нуля и зависит от порядка рендера, поэтому id расходятся. Решение — `const id = useId();`: id выводится из пути в дереве и совпадает на сервере и клиенте."
+  type: find-bug
+  language: tsx
+  code: |-
+    let nextId = 0;
+
+    function EmailField() {
+      const id = `email-${nextId++}`;
+      return (
+        <>
+          <label htmlFor={id}>Email</label>
+          <input id={id} type="email" />
+        </>
+      );
+    }
+  bugLines:
+    - 1
+    - 4
+  causes:
+    - "Глобальный счётчик даёт на сервере и клиенте разные значения: он зависит от числа запросов и порядка рендера"
+    - В JSX нужно писать `for`, а не `htmlFor`, иначе атрибут не попадёт в HTML
+    - Фрагмент `<>` нельзя гидрировать, нужна обёртка `div`
+    - Шаблонная строка в `id` вычисляется только на клиенте
+  answer: 0
+- id: use-id-aria-describedby
+  skill: use-id-a11y-linking
+  question: use-id
+  difficulty: 1
+  prompt: Допишите поле так, чтобы `label` был связан с input, а подсказка зачитывалась скринридером как описание поля. Компонент может встречаться на странице несколько раз.
+  explanation: Один вызов `useId` на компонент, производные id получаются суффиксами (`${id}-hint`). `htmlFor` связывает label с полем, `aria-describedby` добавляет описание. `aria-labelledby` заменил бы имя поля, а это другая роль.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function NewsletterField() {
+      const id = ___();
+      const hintId = `${id}-hint`;
+      return (
+        <>
+          <label ___={id}>Email</label>
+          <input id={id} ___={hintId} />
+          <p id={hintId}>Без спама</p>
+        </>
+      );
+    }
+  tokens:
+    - useId
+    - htmlFor
+    - aria-describedby
+  decoys:
+    - useRef
+    - for
+    - aria-labelledby
+    - useMemo
+- id: use-id-not-for-list-keys
+  skill: use-id-vs-keys
+  question: use-id
+  difficulty: 2
+  prompt: Рендерите список комментариев из API. Комментарии можно удалять и сортировать, у каждого есть локальное состояние «развёрнут». Что взять в качестве `key`?
+  explanation: "`key` описывает идентичность данных, поэтому его берут из данных. `useId` решает другую задачу: уникальные id для DOM-атрибутов внутри компонента. Если id из данных нет, его генерируют один раз при получении данных, а не во время рендера."
+  type: choose-tool
+  options:
+    - label: "`comment.id` из данных"
+      why: "Лучший выбор: ключ стабилен между рендерами и привязан к сущности. Состояние «развёрнут» не съедет при сортировке и удалении."
+    - label: "`useId()` для каждого элемента"
+      why: Хук нельзя вызвать внутри `map`. Даже в дочернем компоненте его id появится уже после выбора ключа, и идентичность данных он не описывает. Он нужен для `htmlFor` и `aria-*`.
+    - label: Индекс элемента в массиве
+      why: Годится только для статичного списка без сортировки, удаления и локального состояния. Здесь при удалении состояние уедет к соседу.
+    - label: "`crypto.randomUUID()` прямо в JSX"
+      why: "На каждом рендере ключ новый: React размонтирует и пересоздаёт все элементы, и состояние теряется. Уместно только один раз при создании записи."
+  answer: 0
+
+# use-layout-effect: принято из черновика 2026-10-11
+- id: use-layout-effect-vs-use-effect
+  skill: layout-effect-timing
+  question: use-layout-effect
+  difficulty: 2
+  prompt: Чем useLayoutEffect отличается от useEffect и когда его стоит выбирать?
+  explanation: "Порядок: render → commit (DOM обновлён) → useLayoutEffect → paint → useEffect. Layout-эффект блокирует кадр, поэтому по умолчанию берите useEffect. useLayoutEffect нужен, только если измерение DOM и правка позиции иначе дают видимое мерцание."
+  type: quiz
+  options:
+    - label: useLayoutEffect выполняется синхронно после обновления DOM, но до отрисовки кадра. Он нужен для измерений без мерцания
+      why: Верно. Браузер не нарисует кадр, пока layout-эффект не завершится, поэтому поправленная позиция попадёт уже в первый кадр.
+    - label: useLayoutEffect выполняется до обновления DOM, поэтому в нём можно подготовить разметку заранее
+      why: Неверно. Когда запускается layout-эффект, DOM уже обновлён, иначе в нём нечего было бы измерять. До мутаций DOM работает только useInsertionEffect.
+    - label: useLayoutEffect — более быстрая версия useEffect, в него выгодно переносить загрузку данных
+      why: Это заблуждение. Запрос от этого не ускорится, а синхронная работа в эффекте задержит отрисовку кадра.
+    - label: "Разница только в SSR: useLayoutEffect работает на сервере, а useEffect — только в браузере"
+      why: "Наоборот: на сервере не выполняется ни один из них. Раньше useLayoutEffect при SSR выдавал предупреждение именно потому, что на сервере он не запускается."
+  answer: 0
+- id: use-layout-effect-mount-order
+  skill: effect-execution-order
+  question: use-layout-effect
+  difficulty: 2
+  prompt: App монтируется впервые, StrictMode нет. Что будет в консоли?
+  explanation: "Сначала выполняется render. Затем после commit React запускает layout-эффекты всего дерева: сначала дочерние, потом родительские. Только после этого идут обычные эффекты, в том же порядке от детей к родителю. Порядок вызова хуков внутри компонента не меняет того, что все layout-эффекты выполняются раньше всех useEffect."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Child() {
+      useEffect(() => console.log('child effect'));
+      useLayoutEffect(() => console.log('child layout'));
+      return null;
+    }
+
+    function App() {
+      useEffect(() => console.log('app effect'));
+      useLayoutEffect(() => console.log('app layout'));
+      console.log('app render');
+      return <Child />;
+    }
+  options:
+    - app render → child layout → app layout → child effect → app effect
+    - app render → app layout → child layout → app effect → child effect
+    - app render → child effect → child layout → app effect → app layout
+    - app render → child layout → child effect → app layout → app effect
+  answer: 0
+- id: use-layout-effect-tooltip-flicker
+  skill: layout-effect-measure-dom
+  question: use-layout-effect
+  difficulty: 2
+  prompt: Тултип при появлении на мгновение мелькает в неправильном месте, а потом «прыгает» на нужное. Найдите причину.
+  explanation: "useEffect обычно выполняется после paint. Поэтому первый кадр рисуется с top = 0, а после setTop тултип перерисовывается уже на новом месте. Если нужно измерить DOM и сразу поправить позицию, используйте useLayoutEffect: тогда исправленная позиция попадёт в тот же кадр."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Tooltip({ anchor, children }: Props) {
+      const ref = useRef<HTMLDivElement>(null);
+      const [top, setTop] = useState(0);
+
+      useEffect(() => {
+        const h = ref.current!.offsetHeight;
+        setTop(anchor.top - h);
+      }, [anchor.top]);
+
+      return <div ref={ref} style={{ position: 'absolute', top }}>{children}</div>;
+    }
+  bugLines:
+    - 5
+  causes:
+    - "Измерение выполняется в useEffect, то есть после отрисовки: первый кадр показывает top = 0, а затем позиция меняется"
+    - В useEffect ref.current ещё не привязан к DOM, поэтому offsetHeight равен 0
+    - setTop внутри эффекта вызывает бесконечный цикл рендеров
+    - В зависимостях не хватает ref, поэтому эффект не видит актуальный элемент
+  answer: 0
+- id: use-layout-effect-not-for-side-work
+  skill: effect-hook-choice
+  question: use-layout-effect
+  difficulty: 2
+  prompt: При открытии экрана нужно отправить событие аналитики и подписаться на resize окна. На вёрстку это не влияет. Коллега предлагает useLayoutEffect, «чтобы сработало раньше». Что выбрать?
+  explanation: По умолчанию берите useEffect. useLayoutEffect нужен только для измерений DOM, без которых в кадре видно мерцание. useInsertionEffect предназначен для CSS-in-JS библиотек. Побочные эффекты в теле рендера ломают чистоту компонента.
+  type: choose-tool
+  options:
+    - label: useEffect
+      why: "Лучший выбор: работа не связана с вёрсткой, поэтому её можно выполнить после отрисовки, не блокируя кадр. Cleanup снимет подписку на resize."
+    - label: useLayoutEffect
+      why: Подошёл бы, если бы нужно было измерить DOM и поправить его до отрисовки. Здесь он лишь задержит кадр, а аналитика от этого не станет полезнее.
+    - label: useInsertionEffect
+      why: Нужен авторам CSS-in-JS библиотек, чтобы вставлять стили до layout-эффектов. Для подписок и аналитики он не предназначен, и ref в нём ещё недоступны.
+    - label: Вызвать прямо в теле компонента
+      why: "Рендер должен быть чистым: он может выполниться несколько раз или быть прерван. Тогда событие отправится повторно, а подписки начнут утекать."
+  answer: 0
+
+# use-reducer: принято из черновика 2026-10-11
+- id: use-reducer-vs-use-state-quiz
+  skill: use-reducer-basics
+  question: use-reducer
+  difficulty: 2
+  prompt: Что такое reducer и когда `useReducer` удобнее, чем `useState`?
+  explanation: "Reducer собирает все переходы состояния в одном месте и легко тестируется отдельно от компонента. Выбирайте `useReducer`, когда поля связаны и одно действие меняет несколько из них. Для независимых простых значений достаточно `useState`. Reducer должен быть чистым: без запросов, случайных значений и мутаций."
+  type: quiz
+  options:
+    - label: Чистая функция (state, action) => newState; `useReducer` удобен, когда переходы связаны и одно действие меняет несколько полей
+      why: Верно. Все переходы описаны в одном месте. Компонент только сообщает, что произошло, через dispatch, а reducer решает, каким станет новое состояние.
+    - label: "`useReducer` быстрее `useState`: он батчит обновления, а `useState` перерисовывает компонент на каждый вызов"
+      why: Неверно. Обновления батчатся одинаково, ведь `useState` построен на том же механизме, что и `useReducer`. Выбор зависит от сложности логики, а не от скорости.
+    - label: Reducer — подходящее место для запросов и подписок, чтобы вынести побочные эффекты из компонента
+      why: "Неверно. Reducer обязан быть чистым: в Strict Mode он вызывается дважды. Побочным эффектам место в обработчиках событий или в `useEffect`."
+    - label: "`useReducer` создаёт глобальное состояние, доступное любому компоненту без Context"
+      why: Неверно. Состояние `useReducer` локально, как и у `useState`. Чтобы сделать его общим, нужно передать state и dispatch через Context или взять стор.
+  answer: 0
+- id: use-reducer-mutation-no-rerender
+  skill: reducer-immutability
+  question: use-reducer
+  difficulty: 2
+  prompt: "После dispatch({ type: 'add', item }) список на экране не обновляется. Найдите ошибку."
+  explanation: "React сравнивает старое и новое состояние через Object.is. Если вернуть ту же ссылку, React решает, что ничего не изменилось, и пропускает рендер. Правильно вернуть новый объект: `{ ...state, items: [...state.items, action.item] }`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function reducer(state: State, action: Action) {
+      switch (action.type) {
+        case 'add':
+          state.items.push(action.item);
+          return state;
+        case 'clear':
+          return { ...state, items: [] };
+        default:
+          return state;
+      }
+    }
+  bugLines:
+    - 4
+    - 5
+  causes:
+    - state мутируется и возвращается тот же объект — Object.is видит прежнюю ссылку, и React пропускает рендер
+    - В reducer нельзя использовать switch — нужен объект с обработчиками для каждого action
+    - Ветка default должна бросать ошибку, иначе React не применит изменения
+    - Если ничего не изменилось, reducer должен возвращать undefined, а не state
+  answer: 0
+- id: use-reducer-dispatch-queue
+  skill: reducer-update-queue
+  question: use-reducer
+  difficulty: 2
+  prompt: Компонент без StrictMode. Кнопку нажали один раз. Что выведется в консоль и что будет на кнопке после рендера?
+  explanation: "dispatch не меняет state сразу: в обработчике state остаётся снимком текущего рендера, поэтому в консоли 0. Оба action встают в очередь. На следующем рендере reducer применяет их по цепочке, и каждый получает результат предыдущего: 0 → 1 → 2."
+  type: predict-output
+  language: tsx
+  code: |-
+    function reducer(s: { n: number }, a: { type: 'inc' }) {
+      return { n: s.n + 1 };
+    }
+
+    function Counter() {
+      const [state, dispatch] = useReducer(reducer, { n: 0 });
+      function handleClick() {
+        dispatch({ type: 'inc' });
+        dispatch({ type: 'inc' });
+        console.log(state.n);
+      }
+      return <button onClick={handleClick}>{state.n}</button>;
+    }
+  options:
+    - "Консоль: 0, на кнопке: 2"
+    - "Консоль: 2, на кнопке: 2"
+    - "Консоль: 0, на кнопке: 1"
+    - "Консоль: 1, на кнопке: 2"
+  answer: 0
+- id: use-reducer-checkout-wizard
+  skill: reducer-vs-state-choice
+  question: use-reducer
+  difficulty: 2
+  prompt: "Мастер оформления заказа живёт в одном компоненте: шаг, поля, ошибки валидации, статус отправки. «Назад» меняет шаг и сбрасывает ошибки, «submit» меняет статус и ошибки. Логику нужно покрыть юнит-тестами. Что выбрать?"
+  explanation: "Признаки для `useReducer`: поля связаны, одно событие меняет несколько из них, нужны тесты логики. Состояние локально, поэтому глобальный стор избыточен. Discriminated union для action и status исключает невозможные состояния."
+  type: choose-tool
+  options:
+    - label: "`useReducer` с union-типом action"
+      why: Лучший выбор. Связанные переходы собраны в чистой функции, которую легко тестировать без рендера. dispatch стабилен, его можно передавать в шаги мастера без useCallback.
+    - label: Несколько `useState` на каждое поле
+      why: Подходит для независимых простых значений. Здесь одно событие меняет 2–3 поля, и легко забыть один из сеттеров и получить рассинхрон.
+    - label: Глобальный стор Zustand
+      why: Оправдан, если состояние нужно разным частям приложения. Для формы внутри одного компонента это лишняя зависимость и глобальность.
+    - label: Один `useState` с объектом и ручным setState в обработчиках
+      why: Работает, но логика переходов размазана по обработчикам, и её не протестировать отдельно. По сути это недоделанный reducer.
+  answer: 0
+
+# use-ref: принято из черновика 2026-10-11
+- id: use-ref-core-idea
+  skill: use-ref-semantics
+  question: use-ref
+  difficulty: 1
+  prompt: Что такое `useRef` и чем ref отличается от состояния?
+  explanation: "Ref — «карман» компонента вне рендера. Он нужен для DOM-узлов и значений, которые не показываются на экране: id таймера, предыдущее значение, экземпляр библиотеки. Если значение влияет на UI, нужен state."
+  type: quiz
+  options:
+    - label: Изменяемый объект `{ current }`, живущий всё время жизни компонента; запись в `current` не вызывает рендер
+      why: Верно. React возвращает один и тот же объект на каждом рендере и не следит за изменениями `current`.
+    - label: "Это useState без сеттера: присваивание `ref.current` планирует новый рендер"
+      why: Неверно. React не отслеживает запись в `current`, поэтому рендера не будет и UI не обновится.
+    - label: Новый объект на каждом рендере, поэтому значение между рендерами не сохраняется
+      why: Так ведёт себя `createRef` в функциональном компоненте. `useRef` возвращает один и тот же объект, пока компонент смонтирован.
+    - label: Ref нужен только для DOM-узлов, а прочие значения между рендерами хранят в обычных переменных
+      why: Локальные переменные пересоздаются на каждом рендере. Хранить в ref id таймера или предыдущее значение — штатное применение.
+  answer: 0
+- id: use-ref-displayed-value-bug
+  skill: ref-vs-state
+  question: use-ref
+  difficulty: 1
+  prompt: Счётчик на кнопке не меняется при кликах. Найдите ошибку.
+  explanation: "Изменение `ref.current` не запускает рендер, поэтому JSX показывает устаревшее значение. Вдобавок чтение ref во время рендера ненадёжно. Правило: если данные видны на экране, это state (`useState`/`useReducer`), а ref — для значений вне рендера. Исправление: `const [likes, setLikes] = useState(0)`, `setLikes(l => l + 1)` и `{likes}` в JSX."
+  type: find-bug
+  language: tsx
+  code: |-
+    function LikeButton() {
+      const likes = useRef(0);
+      function handleClick() {
+        likes.current += 1;
+      }
+      return (
+        <button onClick={handleClick}>
+          ♥ {likes.current}
+        </button>
+      );
+    }
+  bugLines:
+    - 2
+    - 4
+    - 8
+  causes:
+    - "Отображаемое значение хранится в ref: запись в `current` не вызывает рендер"
+    - Обработчик нужно обернуть в useCallback, иначе клик теряется
+    - "`useRef` нельзя инициализировать числом, только null"
+    - Вместо `+= 1` нужно использовать `likes.current++`
+  answer: 0
+- id: use-ref-focus-input
+  skill: dom-ref-access
+  question: use-ref
+  difficulty: 1
+  prompt: Допишите код, чтобы поле email получало фокус сразу после монтирования.
+  explanation: "`useRef<HTMLInputElement>(null)` создаёт ref, а атрибут `ref` связывает его с узлом. После commit React записывает DOM-элемент в `current`, поэтому в эффекте узел уже доступен. Опциональная цепочка `?.` страхует от null."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function LoginForm() {
+      const emailRef = ___<HTMLInputElement>(null);
+      useEffect(() => {
+        emailRef.___?.focus();
+      }, []);
+      return <input ___={emailRef} type="email" />;
+    }
+  tokens:
+    - useRef
+    - current
+    - ref
+  decoys:
+    - createRef
+    - value
+    - forwardRef
+    - key
+- id: use-ref-debounce-timer-id
+  skill: ref-for-mutable-values
+  question: use-ref
+  difficulty: 2
+  prompt: "Поле поиска: в onChange нужно сбрасывать и заново запускать таймер debounce. Id таймера нужен только в обработчике и в cleanup при размонтировании, на экране он не показывается. Где его хранить?"
+  explanation: Значение, которое должно пережить рендеры, но не влияет на UI, — классический случай для ref. State дал бы лишние рендеры. Локальная переменная и `createRef` теряют значение между рендерами.
+  type: choose-tool
+  options:
+    - label: "`useRef<number | null>(null)`"
+      why: "Лучший вариант: объект живёт всё время жизни компонента, запись id не вызывает рендер, cleanup видит актуальный таймер."
+    - label: "`useState<number | null>(null)`"
+      why: Значение сохранится, но каждая запись id вызовет лишний рендер. State нужен, когда значение отображается на экране.
+    - label: "`let timerId` в теле компонента"
+      why: Переменная пересоздаётся на каждом рендере, и id прошлого таймера потеряется. Подошла бы только переменная модуля, но она общая для всех экземпляров.
+    - label: "`createRef()` в теле компонента"
+      why: Возвращает новый объект на каждом рендере. Это инструмент классовых компонентов, где ref создают один раз в конструкторе.
+  answer: 0
+
+# use-state: принято из черновика 2026-10-11
+- id: use-state-snapshot-quiz
+  skill: state-snapshot
+  question: use-state
+  difficulty: 1
+  prompt: Почему `console.log(count)` сразу после `setCount(count + 1)` выводит старое значение?
+  explanation: "Каждый рендер — снимок: `count` в нём константа. `setCount` ставит обновление в очередь и планирует новый рендер, где `useState` вернёт новое значение. Чтобы считать от актуального состояния, передают апдейтер `setCount(c => c + 1)`. Чтобы использовать новое значение сразу, сохраняют его в локальную переменную."
+  type: quiz
+  options:
+    - label: "`setCount` не меняет переменную текущего рендера: он ставит обновление в очередь, а новое значение увидит следующий рендер"
+      why: Верно. `count` — константа в замыкании этого рендера. Новое значение React отдаст при следующем вызове компонента.
+    - label: "setState работает как промис: если написать `await setCount(...)`, следующая строка увидит новое значение"
+      why: "`setCount` возвращает undefined, ждать нечего. Даже после await переменная `count` в замыкании остаётся прежней константой."
+    - label: "Виноват батчинг: если обернуть вызов во `flushSync`, `count` обновится прямо в обработчике"
+      why: "`flushSync` синхронно применит рендер и DOM, но локальная `count` в текущем замыкании всё равно останется старой: это значение прошлого снимка."
+    - label: Деструктуризация копирует значение; если читать `state[0]` из массива, значение будет свежим
+      why: Массив, который вернул `useState`, — тоже снимок текущего рендера. Ни одно чтение не даст значение из будущего рендера.
+  answer: 0
+- id: use-state-mixed-updates-output
+  skill: state-snapshot
+  question: use-state
+  difficulty: 2
+  prompt: Кнопку нажали один раз. Что будет в консоли и что отобразится на кнопке?
+  explanation: Очередь обновлений обрабатывается по порядку. Значение `n + 5` = 5 заменяет состояние, затем апдейтер получает 5 и возвращает 6. Лог показывает снимок текущего рендера, то есть 0. Апдейтер работает с результатом предыдущих обновлений в очереди, а значение — с замыканием.
+  type: predict-output
+  language: tsx
+  code: |-
+    function Counter() {
+      const [n, setN] = useState(0);
+
+      function handleClick() {
+        setN(n + 5);
+        setN((c) => c + 1);
+        console.log('click', n);
+      }
+
+      return <button onClick={handleClick}>{n}</button>;
+    }
+  options:
+    - click 0, на кнопке 6
+    - click 6, на кнопке 6
+    - click 0, на кнопке 1
+    - click 0, на кнопке 5
+  answer: 0
+- id: use-state-mutation-no-rerender
+  skill: state-immutable-updates
+  question: use-state
+  difficulty: 1
+  prompt: После вызова addTodo список на экране не обновляется. Найдите ошибку.
+  explanation: "`push` мутирует тот же массив, и в `setTodos` уходит та же ссылка. `Object.is(old, new)` возвращает true, поэтому React пропускает рендер. Правило: состояние не мутируют, а создают новый объект или массив: `setTodos(prev => [...prev, todo])`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function TodoList() {
+      const [todos, setTodos] = useState<Todo[]>([]);
+
+      function addTodo(text: string) {
+        todos.push({ id: crypto.randomUUID(), text });
+        setTodos(todos);
+      }
+
+      return <List items={todos} onAdd={addTodo} />;
+    }
+  bugLines:
+    - 5
+    - 6
+  causes:
+    - Массив мутируется и передаётся та же ссылка — `Object.is` считает состояние неизменным, и рендера нет
+    - "`setTodos` асинхронный, и без `await` обновление теряется"
+    - "Массив в `useState` нужно инициализировать лениво: `useState(() => [])`"
+    - "`crypto.randomUUID()` нельзя вызывать внутри обработчика событий"
+  answer: 0
+- id: use-state-lazy-init-merge
+  skill: state-object-updates
+  question: use-state
+  difficulty: 2
+  prompt: Черновик формы должен читаться из localStorage только при первом рендере. Каждое поле должно обновляться, не теряя остальные. Заполните пропуски.
+  explanation: Если передать `loadDraft` без вызова, React вызовет функцию только при первом рендере. Вариант `loadDraft()` выполнялся бы на каждом рендере. Сеттер хука заменяет объект целиком, поэтому остальные поля копируют через `...prev`, а изменяемое поле задают вычисляемым ключом `[name]`.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function DraftForm() {
+      const [form, setForm] = useState(___);
+
+      function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+        const { name, value } = e.target;
+        setForm((prev) => ({ ___prev, [___]: value }));
+      }
+      // ...
+    }
+  tokens:
+    - loadDraft
+    - ...
+    - name
+  decoys:
+    - loadDraft()
+    - "'name'"
+    - form
+
+# you-might-not-need-an-effect: принято из черновика 2026-10-11
+- id: effect-necessity-quiz
+  skill: effect-necessity
+  question: you-might-not-need-an-effect
+  difficulty: 2
+  prompt: Как решить, должен ли кусок кода жить в useEffect или в другом месте?
+  explanation: "Эффект нужен только для синхронизации с внешней системой: подписки, DOM-виджеты, сеть, аналитика «при показе». Производные данные считаются в рендере. Реакции на действия пользователя пишутся в обработчике. Новое значение state вычисляется прямо в обработчике."
+  type: quiz
+  options:
+    - label: "Спросить, почему код должен выполниться: из-за действия пользователя — обработчик, из-за показа и синхронизации с внешним — эффект"
+      why: "Верно. Причина запуска определяет место: событие связано с конкретным действием, а эффект — с фактом, что компонент сейчас на экране."
+    - label: Если код зависит от props или state — нужен эффект, иначе он не узнает об их изменениях
+      why: Компонент и так перерендеривается при смене props и state. Производные данные считаются прямо в рендере, при необходимости через useMemo.
+    - label: Если в коде есть побочное действие (запрос, уведомление) — всегда эффект, ведь рендер должен быть чистым
+      why: Обработчики событий не обязаны быть чистыми. Побочное действие, вызванное кликом или отправкой формы, пишется в обработчике.
+    - label: Если код должен выполниться после обновления state — нужен эффект, иначе в обработчике state ещё старый
+      why: Следующее значение можно вычислить в обработчике (const next = …) и использовать сразу. Эффект лишь добавит рендер со старым значением.
+  answer: 0
+- id: effect-notification-on-mount
+  skill: effect-vs-event-handler
+  question: you-might-not-need-an-effect
+  difficulty: 2
+  prompt: "Жалоба: уведомление «в корзине» появляется при каждом открытии страницы товара, который уже лежит в корзине. Где ошибка?"
+  explanation: Уведомление должно появиться, потому что пользователь нажал «Купить». Это событие, а не синхронизация. Эффект же срабатывает при каждом показе страницы, если товар уже в корзине. Решение — вызвать showNotification в handleBuy рядом с addToCart.
+  type: find-bug
+  language: tsx
+  code: |-
+    function ProductPage({ product, addToCart }: Props) {
+      useEffect(() => {
+        if (product.isInCart) {
+          showNotification(`${product.name} в корзине`);
+        }
+      }, [product]);
+
+      function handleBuy() {
+        addToCart(product);
+      }
+
+      return <button onClick={handleBuy}>Купить</button>;
+    }
+  bugLines:
+    - 2
+    - 3
+  causes:
+    - Уведомление привязано к состоянию isInCart, а не к событию покупки, поэтому эффект срабатывает при каждом показе страницы
+    - В зависимостях нужен product.isInCart вместо product, тогда лишних уведомлений не будет
+    - showNotification меняет UI, поэтому его нужно вызывать в useLayoutEffect
+    - addToCart мутирует product, и эффект видит устаревший объект
+  answer: 0
+- id: effect-reset-draft-on-post-change
+  skill: reset-state-with-key
+  question: you-might-not-need-an-effect
+  difficulty: 2
+  prompt: "Компонент Comments со своей формой: черновик, раскрытые ветки, состояние у вложенных компонентов. При переходе на другой пост всё это должно очищаться. Как сделать?"
+  explanation: "Состояние в React привязано к позиции и ключу. Новый key означает новый экземпляр: всё дерево состояния сбрасывается без лишнего рендера со старыми данными. Сброс через эффект — классический анти-паттерн: сначала мелькает старый черновик, и легко забыть часть состояния."
+  type: choose-tool
+  options:
+    - label: Рендерить <Comments key={postId} postId={postId} />
+      why: "Лучший вариант: смена key пересоздаёт компонент и всех потомков, сбрасывая всё состояние сразу и без промежуточного рендера."
+    - label: useEffect с [postId], который вызывает setDraft('') и другие сеттеры
+      why: Один рендер пройдёт со старым черновиком, будет мерцание. Каждый state придётся сбрасывать вручную, а state вложенных компонентов отсюда не достать.
+    - label: Хранить prevPostId в state и сбрасывать часть state прямо во время рендера
+      why: Допустимо, когда нужно сбросить или поправить лишь часть состояния, а остальное сохранить. Для полного сброса это сложнее и хрупче, чем key.
+    - label: Поднять черновики в родителя и хранить Map по postId
+      why: Подходит, если черновик каждого поста нужно сохранять при переключении. Здесь нужен именно сброс, так что это лишняя сложность.
+  answer: 0
+- id: effect-notify-parent-in-handler
+  skill: notify-parent-in-handler
+  question: you-might-not-need-an-effect
+  difficulty: 1
+  prompt: Допишите переключатель так, чтобы родитель узнавал о новом значении без useEffect.
+  explanation: Следующее значение вычисляется один раз и сразу уходит и в свой state, и родителю. Оба обновления попадают в один батч. Если звать onChange из эффекта по isOn, родитель обновится на рендер позже, а onChange лишний раз сработает при монтировании.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function Toggle({ onChange }: ToggleProps) {
+      const [isOn, setIsOn] = useState(false);
+      function handleClick() {
+        const ___ = !isOn;
+        setIsOn(next);
+        ___(next);
+      }
+
+      return (
+        <button onClick={___}>
+          {isOn ? 'On' : 'Off'}
+        </button>
+      );
+    }
+  tokens:
+    - next
+    - onChange
+    - handleClick
+  decoys:
+    - useEffect
+    - setIsOn
+    - isOn
+    - prev

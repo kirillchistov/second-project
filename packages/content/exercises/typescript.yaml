@@ -1,0 +1,396 @@
+# typescript-advanced: принято из черновика 2026-10-11
+- id: ts-polymorphic-omit-conflicts
+  skill: polymorphic-component-typing
+  question: typescript-advanced
+  difficulty: 3
+  prompt: Зачем в типе полиморфного компонента пишут `Omit<React.ComponentPropsWithoutRef<C>, keyof P | 'as'>`, а не просто пересекают `P & ComponentPropsWithoutRef<C>`?
+  explanation: "Пересечение не переопределяет ключи, а сужает их: конфликтующий prop превращается в `never` или в смесь типов. Поэтому из props элемента сначала убирают собственные ключи компонента и `as`, а потом пересекают со своими. Правило: свои props главнее нативных, и это нужно выразить явно через Omit."
+  type: quiz
+  options:
+    - label: Чтобы собственные props (например, `size`) заменили нативные одноимённые, а не пересеклись с ними в `never` или кашу
+      why: "Верно. У `input` есть `size: number`, и `('sm' | 'md' | 'lg') & number` даёт `never`. Omit убирает нативный ключ, остаётся тип компонента."
+    - label: Omit убирает `ref`, который полиморфный компонент не может принять
+      why: Неверно. `ref` убирает сам `ComponentPropsWithoutRef`, а Omit удаляет только `keyof P` и `'as'`. Если ref нужен, берут `ComponentPropsWithRef`.
+    - label: Omit ускоряет проверку TypeScript, потому что уменьшает число props элемента
+      why: "Наоборот: Omit над дженериком — дополнительное вычисление типа. Из-за таких конструкций полиморфные типы и тормозят тайпчек в больших кодовых базах."
+    - label: Без Omit все props элемента стали бы обязательными
+      why: Неверно. Опциональность задаётся в самом `ComponentPropsWithoutRef<C>`, а Omit её не меняет. Проблема в конфликте одноимённых ключей.
+  answer: 0
+- id: ts-polymorphic-props-type
+  skill: polymorphic-component-typing
+  question: typescript-advanced
+  difficulty: 2
+  prompt: Допишите тип так, чтобы `<Text as="a" href="/docs" />` компилировался, а `<Text as="button" href="/x" />` давал ошибку.
+  explanation: "`ElementType` охватывает и строки-теги (`'a'`, `'button'`), и компоненты, а `ComponentType` — только компоненты. `ComponentPropsWithoutRef<C>` выводит props выбранного элемента. Prop `as` типизирован тем же `C`: так TypeScript выводит C из переданного значения и подбирает допустимые props."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    type PolymorphicProps<
+      C extends React.___,
+      P = object,
+    > = P &
+      Omit<React.___<C>, keyof P | 'as'> & {
+        as?: ___;
+      };
+
+    function Text<C extends React.ElementType = 'span'>(
+      { as, ...rest }: PolymorphicProps<C>,
+    ) {
+      const Component = as ?? 'span';
+      return <Component {...rest} />;
+    }
+  tokens:
+    - ElementType
+    - ComponentPropsWithoutRef
+    - C
+  decoys:
+    - ComponentType
+    - HTMLAttributes
+    - ReactElement
+- id: ts-satisfies-vs-annotation
+  skill: ts-satisfies
+  question: typescript-advanced
+  difficulty: 2
+  prompt: Опечатка `navigate('hom')` компилируется без ошибки. Найдите строку, из-за которой типобезопасность потерялась.
+  explanation: "Аннотация заменяет выведенный тип объявленным: тип `routes` становится `Record<string, …>`, и `keyof` даёт `string`. `satisfies` только проверяет форму и сохраняет выведенный тип. Если убрать аннотацию и дописать `satisfies Record<string, …>` после литерала объекта, `RouteName` станет `'home' | 'product'`, и опечатка даст ошибку."
+  type: find-bug
+  language: ts
+  code: |-
+    const routes: Record<string, `/${string}`> = {
+      home: '/',
+      product: '/products/:id',
+    };
+
+    type RouteName = keyof typeof routes;
+
+    function navigate(name: RouteName) {
+      return routes[name];
+    }
+
+    navigate('hom');
+  bugLines:
+    - 1
+  causes:
+    - Аннотация типа расширяет `routes` до `Record<string, …>`, поэтому `keyof typeof routes` — это `string`
+    - Шаблонный тип `/${string}` не принимает строку `'/'`, и проверка значений отключается
+    - Без `as const` оператор `keyof typeof` всегда возвращает `string`
+    - Параметр `navigate` нужно типизировать через `typeof routes[number]`
+  answer: 0
+- id: ts-button-as-next-link
+  skill: polymorphism-vs-aschild
+  question: typescript-advanced
+  difficulty: 3
+  prompt: "`Button` дизайн-системы иногда должен становиться `<Link>` из Next.js с его props (`prefetch`, `replace`) и сохранять стили и поведение. Тайпчек монорепо уже медленный. Какой подход выбрать?"
+  explanation: "Когда компонент должен «надеть» стили и поведение на чужой элемент, `asChild` (Slot) решает задачу без тяжёлых дженериков: props ребёнка типизирует сам ребёнок. Полиморфный `as` оправдан, когда список элементов небольшой и важен единый API. Union с `href?: never` подходит для простого выбора «ссылка или кнопка»."
+  type: choose-tool
+  options:
+    - label: '`asChild` + Slot: `<Button asChild><Link href="/" prefetch /></Button>`'
+      why: Лучший выбор. Props и поведение передаются единственному ребёнку, его props типизирует сам Link, а дженериков нет, поэтому тайпчек не тормозит.
+    - label: Полиморфный `as` с дженериком `C extends React.ElementType`
+      why: Тоже сработает и выведет props Link, но дженерик с Omit на каждом использовании утяжелит и без того медленный тайпчек. Хорош для небольших примитивов вроде Text.
+    - label: "Union: `{ href: string } & ComponentProps<'a'>` или `{ href?: never } & ComponentProps<'button'>`"
+      why: Подходит для выбора «нативная ссылка или кнопка». Props Next.js Link (`prefetch`) этот union не покрывает.
+    - label: "Принимать `component?: any` и прокидывать `...rest: any`"
+      why: "Работает быстро, но ломает типобезопасность у всех потребителей дизайн-системы: опечатки в props и неверные атрибуты пройдут молча."
+  answer: 0
+
+# typescript-generics: принято из черновика 2026-10-11
+- id: typescript-generics-why-generic
+  skill: generic-components
+  question: typescript-generics
+  difficulty: 2
+  prompt: "Зачем объявлять компонент списка как `function List<T>(props: ListProps<T>)`, а не принимать `items: any[]`?"
+  explanation: Параметр типа связывает части props. `T` выводится из `items` и подставляется в `renderItem`, `getKey` и `onSelect`, поэтому колбэки получают точный тип элемента. Опечатки ловятся при компиляции. Типы стираются при сборке, так что на рантайм дженерик не влияет. Это основа переиспользуемых таблиц, селектов и автокомплитов.
+  type: quiz
+  options:
+    - label: "TypeScript выводит T из items и подставляет его в колбэки: renderItem и onSelect получают точный тип элемента"
+      why: "Верно. Дженерик связывает типы между props: передали User[] — и `u.name` в renderItem проверяется компилятором."
+    - label: TypeScript создаёт отдельную версию компонента под каждый тип, и рендер становится быстрее
+      why: Неверно. Типы стираются при компиляции, в JS остаётся одна функция. Дженерик влияет только на проверку типов.
+    - label: "Разницы почти нет: с any[] автодополнение и проверки работают так же, просто запись короче"
+      why: "Неверно. any отключает проверку: в renderItem `item` тоже станет any, и опечатка `u.nmae` пройдёт молча."
+    - label: "Без явного `<List<User> ...>` компонент не скомпилируется: T обязательно указывать вручную"
+      why: Неверно. Обычно T выводится из переданных props. Явный аргумент типа нужен редко, например когда items пустой литерал.
+  answer: 0
+- id: typescript-generics-arrow-in-tsx
+  skill: generic-arrow-syntax-tsx
+  question: typescript-generics
+  difficulty: 2
+  prompt: "Файл Options.tsx не компилируется: TypeScript ругается на незакрытый JSX-тег. Найдите строку с ошибкой."
+  explanation: "В .tsx запись `<T>` перед стрелочной функцией парсер читает как открывающий JSX-тег. Исправить можно двумя способами: `<T,>` с запятой или `<T extends unknown>`. У обычного `function Options<T>()` такой проблемы нет."
+  type: find-bug
+  language: tsx
+  code: |-
+    type SelectProps<T> = {
+      options: T[];
+      getLabel: (option: T) => string;
+    };
+    export const Options = <T>({
+      options,
+      getLabel,
+    }: SelectProps<T>) => (
+      <ul>
+        {options.map((o) => (
+          <li key={getLabel(o)}>{getLabel(o)}</li>
+        ))}
+      </ul>
+    );
+  bugLines:
+    - 5
+  causes:
+    - В .tsx `<T>` перед стрелочной функцией парсится как JSX-тег — нужно `<T,>` или `<T extends unknown>`
+    - Стрелочные функции не могут быть дженериками — только объявления через function
+    - key нельзя вычислять функцией, он должен быть полем объекта
+    - В props-типе нужно писать `Array<T>`, а не `T[]`, иначе T не выведется
+  answer: 0
+- id: typescript-generics-table-keyof
+  skill: generic-keyof-columns
+  question: typescript-generics
+  difficulty: 3
+  prompt: "Допишите типизацию таблицы: колонка может ссылаться только на существующее поле строки, а ключ строки берётся из её id."
+  explanation: "`K extends keyof T` ограничивает key колонки реальными полями T: опечатка в `{ key: 'emial' }` станет ошибкой компиляции. Ограничение `T extends { id: string }` гарантирует наличие id, поэтому отдельный getKey не нужен."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    type Column<T, K extends ___ T> = { key: K; title: string };
+    function Rows<T extends { id: string }, K extends keyof T>(
+      { rows, columns }: { rows: T[]; columns: Column<T, ___>[] },
+    ) {
+      return rows.map((row) => (
+        <tr key={row.___}>
+          {columns.map((c) => (
+            <td key={String(c.key)}>{String(row[c.key])}</td>
+          ))}
+        </tr>
+      ));
+    }
+  tokens:
+    - keyof
+    - K
+    - id
+  decoys:
+    - typeof
+    - in
+    - T
+    - key
+- id: typescript-generics-constrained-list
+  skill: generic-constraints
+  question: typescript-generics
+  difficulty: 2
+  prompt: "Соберите дженерик-список, которому не нужен getKey: у каждого элемента гарантированно есть id."
+  explanation: "Ограничение `T extends { id: string }` разрешает обращаться к `item.id` и при этом сохраняет точный тип элемента в renderItem. Без ограничения `item.id` не скомпилируется. С `ListProps<any>` дженерик теряет смысл: renderItem получит any."
+  type: parsons
+  language: tsx
+  lines:
+    - type ListProps<T> = {
+    - "  items: T[];"
+    - "  renderItem: (item: T) => React.ReactNode;"
+    - "};"
+    - "function List<T extends { id: string }>("
+    - "  { items, renderItem }: ListProps<T>,"
+    - ) {
+    - "  const list = items.map((item) => ("
+    - "    <li key={item.id}>{renderItem(item)}</li>"
+    - "  ));"
+    - "  return <ul>{list}</ul>;"
+    - "}"
+  distractors:
+    - function List<T>(
+    - "  { items, renderItem }: ListProps<any>,"
+
+# typescript-hooks: принято из черновика 2026-10-11
+- id: typescript-hooks-union-vs-flags
+  skill: discriminated-union-state
+  question: typescript-hooks
+  difficulty: 2
+  prompt: "Почему асинхронное состояние лучше описать discriminated union по полю status, а не тремя useState: isLoading, error, data?"
+  explanation: "Независимые флаги допускают 2×2×2 комбинаций, и многие из них бессмысленны. Union по status оставляет только допустимые состояния, а сужение типа даёт доступ к data или error только в нужной ветке. Правило: «невозможные состояния — непредставимые»."
+  type: quiz
+  options:
+    - label: Невозможные комбинации (loading и error одновременно) становятся непредставимыми, а поля доступны только в своей ветке
+      why: "Верно. Каждая ветка union несёт только свои поля, и после проверки status TypeScript сужает тип: state.data есть лишь при status === 'success'."
+    - label: Один useState вместо трёх заметно уменьшает число ререндеров
+      why: React 18+ батчит обновления в обработчиках и промисах, так что три setState обычно дают один рендер. Выигрыш union — в типобезопасности, а не в производительности.
+    - label: TypeScript не умеет выводить тип для useState(null), поэтому флаги типизировать нельзя
+      why: "Можно: useState<string | null>(null). Проблема флагов не в выводе типов, а в том, что тип разрешает противоречивые комбинации."
+    - label: Union можно хранить только в useReducer, и это делает переходы между состояниями явными
+      why: Union прекрасно хранится и в useState<State>. useReducer полезен для сложных переходов, но к сути discriminated union он не обязателен.
+  answer: 0
+- id: typescript-hooks-exhaustive-switch
+  skill: ts-exhaustive-check
+  question: typescript-hooks
+  difficulty: 2
+  prompt: Допишите компонент так, чтобы при добавлении нового status без своей ветки возникала ошибка компиляции.
+  explanation: switch по дискриминанту status сужает тип в каждом case, поэтому state.data доступно только в 'success'. В default остаётся то, что не обработано; если обработано всё — это never. Новый статус без case не присвоится never, и компилятор укажет на пропуск.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    type State =
+      | { status: 'loading' }
+      | { status: 'success'; data: User[] }
+      | { status: 'error'; error: string };
+
+    function View({ state }: { state: State }) {
+      switch (state.___) {
+        case 'loading': return <Spinner />;
+        case 'success': return <List data={state.___} />;
+        case 'error': return <p>{state.error}</p>;
+        default: { const n: ___ = state; return n; }
+      }
+    }
+  tokens:
+    - status
+    - data
+    - never
+  decoys:
+    - type
+    - error
+    - unknown
+    - any
+- id: typescript-hooks-tuple-as-const
+  skill: ts-tuple-as-const
+  question: typescript-hooks
+  difficulty: 2
+  prompt: TypeScript ругается на onClick={toggle} в Menu. Найдите строку с причиной.
+  explanation: Литерал [on, toggle] без подсказки выводится как массив (boolean | (() => void))[], и при деструктуризации каждый элемент получает объединённый тип. `return [on, toggle] as const` даёт кортеж readonly [boolean, () => void]. Альтернатива — явный тип возврата хука.
+  type: find-bug
+  language: tsx
+  code: |-
+    function useToggle(initial = false) {
+      const [on, setOn] = useState(initial);
+      const toggle = useCallback(
+        () => setOn((v) => !v),
+        []
+      );
+      return [on, toggle];
+    }
+
+    function Menu() {
+      const [open, toggle] = useToggle();
+      return <button onClick={toggle}>Menu</button>;
+    }
+  bugLines:
+    - 7
+  causes:
+    - Без as const возвращается массив объединённых типов, и toggle имеет тип boolean | (() => void)
+    - useCallback с пустыми зависимостями возвращает устаревший toggle
+    - useState(initial) выводит тип literal false, поэтому setOn не принимает true
+    - Кастомный хук обязан возвращать объект, а не массив
+  answer: 0
+- id: typescript-hooks-typed-context
+  skill: ts-typed-context
+  question: typescript-hooks
+  difficulty: 2
+  prompt: Соберите типизированный контекст без значения по умолчанию и хук, который возвращает гарантированно непустое значение.
+  explanation: "createContext<AuthValue | null>(null) честно отражает, что вне провайдера значения нет. Проверка на null в useAuth сужает тип до AuthValue и даёт понятную ошибку, а не тихий null, который упадёт позже. Проверка на undefined не сработала бы: дефолт — null, тип не сузится, и return ctx не скомпилируется."
+  type: parsons
+  language: tsx
+  lines:
+    - "type AuthValue = { user: User; logout: () => void };"
+    - const AuthContext = createContext<AuthValue | null>(null);
+    - "function useAuth(): AuthValue {"
+    - "  const ctx = useContext(AuthContext);"
+    - "  if (!ctx) throw new Error('useAuth outside AuthProvider');"
+    - "  return ctx;"
+    - "}"
+  distractors:
+    - const AuthContext = createContext<AuthValue>(null);
+    - "  if (ctx === undefined) throw new Error('No provider');"
+
+# typescript-props: принято из черновика 2026-10-11
+- id: typescript-props-children-type
+  skill: ts-children-type
+  question: typescript-props
+  difficulty: 1
+  prompt: Компонент `Card` принимает в children текст, разметку, список или ничего, например `{isEmpty && <Empty />}`. Какой тип children выбрать?
+  explanation: "`React.ReactNode` описывает всё, что React умеет отрендерить: строки, числа, элементы, массивы, `null`, `undefined`, `boolean`. `JSX.Element` и `ReactElement` подходят, только когда нужен именно один JSX-элемент, например для слота, который клонируют. Для обычных children берите `ReactNode`."
+  type: quiz
+  options:
+    - label: "`children: React.ReactNode`"
+      why: Верно. ReactNode включает строки, числа, элементы, массивы, null, undefined и boolean. Значит, подходят и `{cond && <X />}`, и просто текст.
+    - label: "`children: React.JSX.Element`"
+      why: Это только один JSX-элемент. Строка «Нет заказов», `null` или `false` из условного рендера не пройдут проверку типов. Это частая ошибка.
+    - label: "`children: string | React.ReactElement`"
+      why: Покрывает два частых случая, но не пропускает `null`, `false`, числа и массивы. Условный рендер и `map` сломают компиляцию.
+    - label: "`children: React.ReactElement[]`"
+      why: Требует именно массив элементов. Один элемент или текст уже не подойдут, а для обычного контента такое ограничение ничего не даёт.
+  answer: 0
+- id: typescript-props-event-target-vs-current
+  skill: ts-event-types
+  question: typescript-props
+  difficulty: 3
+  prompt: TypeScript не компилирует этот компонент. В какой строке ошибка?
+  explanation: "В типах React у `SyntheticEvent` поле `target` имеет тип `EventTarget`: событие может всплыть от вложенного элемента. Тип элемента `T` получает `currentTarget`, то есть элемент, на котором висит обработчик. `ChangeEvent` отдельно уточняет `target`, поэтому `e.target.value` работает. Исправление: `e.currentTarget.blur()`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Search({ onSearch }: { onSearch: (q: string) => void }) {
+      const onChange = (
+        e: React.ChangeEvent<HTMLInputElement>,
+      ) => onSearch(e.target.value);
+      const onKeyDown = (
+        e: React.KeyboardEvent<HTMLInputElement>,
+      ) => {
+        if (e.key === 'Escape') e.target.blur();
+      };
+      return (
+        <input onChange={onChange}
+          onKeyDown={onKeyDown} />
+      );
+    }
+  bugLines:
+    - 8
+  causes:
+    - У `KeyboardEvent` поле `target` типизировано как `EventTarget` без `blur()`. Типизированный элемент лежит в `currentTarget`
+    - "`e.key` в React не типизирован, нужно сравнивать `e.code` или `e.keyCode`"
+    - У `ChangeEvent` поле `target` тоже `EventTarget`, поэтому ошибка в `e.target.value`
+    - "`KeyboardEvent` нужно параметризовать `HTMLElement`, а не `HTMLInputElement`"
+  answer: 0
+- id: typescript-props-extend-native-button
+  skill: ts-extend-native-props
+  question: typescript-props
+  difficulty: 2
+  prompt: "Допишите типы: Button принимает все атрибуты нативного `<button>`, а иконкой может быть что угодно отрисовываемое, включая строку. В конце возьмите props готового компонента."
+  explanation: "`React.ComponentProps<'button'>` даёт все атрибуты нативного элемента: `type`, `disabled`, `onClick`, aria-* и children. Поэтому `...rest` можно спокойно прокинуть в `<button>`. Для произвольного контента нужен `ReactNode`. `ComponentProps<typeof Button>` достаёт props существующего компонента: это удобно для обёрток."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    type ButtonProps = React.___<'button'> & {
+      variant?: 'primary' | 'ghost';
+      icon?: React.___;
+    };
+    function Button({
+      variant = 'primary', icon, children, ...rest
+    }: ButtonProps) {
+      return (
+        <button className={variant} {...rest}>
+          {icon}{children}
+        </button>
+      );
+    }
+    type Props = React.ComponentProps<___ Button>;
+  tokens:
+    - ComponentProps
+    - ReactNode
+    - typeof
+  decoys:
+    - PropsWithChildren
+    - ReactElement
+    - keyof
+- id: typescript-props-runtime-validation
+  skill: runtime-validation-boundaries
+  question: typescript-props
+  difficulty: 2
+  prompt: Экран профиля получает JSON от внешнего API. Бэкенд иногда присылает `age` строкой или вовсе без `email`. Нужно поймать это до рендера, показать ошибку и получить типизированный объект. Что выбрать?
+  explanation: Типы TypeScript стираются при компиляции и ничего не проверяют в рантайме. На границах системы (API, формы, URL) данные валидируют схемой, например Zod или Valibot. Тип выводят из схемы через `z.infer`, а внутри приложения уже доверяют TypeScript. PropTypes в React 19 больше не проверяются.
+  type: choose-tool
+  options:
+    - label: Zod-схема и `safeParse` ответа в слое загрузки данных
+      why: Проверяет данные в рантайме, возвращает понятную ошибку и выводит тип через `z.infer`. Схема и тип не расходятся. Valibot подошёл бы так же, если важен размер бандла.
+    - label: PropTypes на компоненте Profile
+      why: В React 19 проверка PropTypes удалена. Раньше они только писали предупреждение в dev-режиме и не давали ни типа, ни обработки ошибки.
+    - label: "`interface User` и `res.json() as User`"
+      why: Это утверждение для компилятора, а не проверка. Битые данные пройдут и упадут позже в глубине UI. Подходит только для полностью доверенного и типизированного источника.
+    - label: Ручные проверки `typeof` прямо в компоненте
+      why: Сработает для одного-двух полей, но логика размазывается по UI, тип приходится сужать вручную, а проверки быстро расходятся с интерфейсом.
+  answer: 0

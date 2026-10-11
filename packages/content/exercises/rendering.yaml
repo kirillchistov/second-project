@@ -34,3 +34,1020 @@
   explanation: >-
     Ключ должен быть стабильным и уникальным, обычно это id из данных. Индекс допустим только для статичного списка
     без сортировки, фильтрации и собственного состояния элементов.
+
+# batching: принято из черновика 2026-10-11
+- id: batching-updater-vs-value
+  skill: state-updater-function
+  question: batching
+  difficulty: 2
+  prompt: Почему при нескольких обновлениях подряд `setCount((c) => c + 1)` надёжнее, чем `setCount(count + 1)`?
+  explanation: "С React 18 обновления батчатся везде: в обработчиках, промисах и таймаутах. React копит их в очередь и применяет за один рендер. Апдейтер получает результат предыдущего элемента очереди. Выражение `count + 1` считается из снимка рендера. Правило: если новое значение зависит от старого, используйте апдейтер."
+  type: quiz
+  options:
+    - label: Апдейтер получает актуальное значение из очереди обновлений, а count — значение из снимка текущего рендера
+      why: Верно. count — константа этого рендера. Сколько раз ни вызови setCount(count + 1), каждый вызов даст одно и то же число. Апдейтеры выполняются по цепочке.
+    - label: setCount(count + 1) сразу запускает рендер, а апдейтер дожидается батчинга
+      why: Неверно. Оба варианта ставят обновление в одну и ту же очередь и батчатся одинаково. Разница только в том, откуда берётся исходное значение.
+    - label: Апдейтер отключает батчинг и применяет обновление синхронно
+      why: Неверно. Синхронно применяет обновление flushSync. Апдейтер батчится как обычно, он просто вычисляет значение на основе предыдущего.
+    - label: После setCount переменная count уже содержит новое значение, но апдейтер читает его быстрее
+      why: "Неверно. count не меняется до следующего рендера: это const из замыкания. В этом и состоит проблема варианта со значением."
+  answer: 0
+- id: batching-mixed-updates-output
+  skill: state-updater-function
+  question: batching
+  difficulty: 2
+  prompt: Компонент смонтировали (без StrictMode), затем один раз нажали кнопку. Что будет в консоли?
+  explanation: "Все три вызова попадают в один батч, поэтому рендер будет один. Очередь обрабатывается так: «заменить на 1» → «заменить на 1» → c => c + 1, то есть 1 + 1 = 2. Первые два вызова читают count = 0 из снимка, и только апдейтер берёт результат из очереди."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Counter() {
+      const [count, setCount] = useState(0);
+      console.log('render', count);
+
+      function handleClick() {
+        setCount(count + 1);
+        setCount(count + 1);
+        setCount((c) => c + 1);
+      }
+
+      return <button onClick={handleClick}>+</button>;
+    }
+  options:
+    - render 0 → render 2
+    - render 0 → render 3
+    - render 0 → render 1
+    - render 0 → render 1 → render 1 → render 2
+  answer: 0
+- id: batching-interval-stale-closure
+  skill: stale-closure-updater
+  question: batching
+  difficulty: 2
+  prompt: Таймер показывает 1 и дальше не растёт. Найдите строку с ошибкой.
+  explanation: "Эффект с [] запускается один раз, и колбэк интервала навсегда видит seconds = 0. Каждую секунду он вызывает setSeconds(1). Исправление — апдейтер `setSeconds((s) => s + 1)`: он берёт актуальное значение из очереди. Добавлять seconds в зависимости хуже, потому что интервал будет пересоздаваться каждую секунду."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Timer() {
+      const [seconds, setSeconds] = useState(0);
+
+      useEffect(() => {
+        const id = setInterval(() => {
+          setSeconds(seconds + 1);
+        }, 1000);
+        return () => clearInterval(id);
+      }, []);
+
+      return <p>{seconds}</p>;
+    }
+  bugLines:
+    - 6
+  causes:
+    - Колбэк интервала захватил seconds из первого рендера (stale closure) — нужен апдейтер s => s + 1
+    - clearInterval в cleanup останавливает таймер сразу после первого тика
+    - Интервалы нужно запускать в useLayoutEffect, иначе обновления теряются
+    - Обновления из setInterval не батчатся, и React отбрасывает их
+  answer: 0
+- id: batching-scroll-after-add
+  skill: flush-sync-usage
+  question: batching
+  difficulty: 3
+  prompt: "Чат: по нажатию «Отправить» сообщение добавляется в список. Сразу в том же обработчике нужно прокрутить к новому DOM-элементу. При загрузке истории прокручивать не нужно. Что выбрать?"
+  explanation: "Состояние обновляется не сразу: после setItems DOM ещё старый. flushSync заставляет React синхронно выполнить рендер и commit, и следующая строка уже видит новый элемент. Это редкий инструмент: он ломает батчинг и замедляет работу, поэтому применяйте его точечно, когда DOM нужен немедленно и именно из обработчика."
+  type: choose-tool
+  options:
+    - label: flushSync(() => setItems(...)), затем scrollIntoView
+      why: Лучший вариант. DOM обновляется синхронно прямо в обработчике, а прокрутка случается только при отправке, а не при любом изменении списка.
+    - label: useLayoutEffect с зависимостью [items] и прокруткой
+      why: Подходит, если прокручивать нужно при любом изменении списка. Здесь он сработает и на загрузку истории, и понадобится дополнительный флаг «это моя отправка».
+    - label: setTimeout(scrollIntoView, 0) после setItems
+      why: Часто срабатывает, но держится на внутреннем тайминге планировщика, а не на гарантии React. Это хрупкий хак.
+    - label: Сразу после setItems прочитать lastElementChild
+      why: "Не сработает: из-за батчинга DOM ещё не обновлён, и прокрутка уйдёт к предыдущему сообщению."
+  answer: 0
+
+# fiber: принято из черновика 2026-10-11
+- id: fiber-why-it-appeared
+  skill: fiber-architecture
+  question: fiber
+  difficulty: 3
+  prompt: Зачем в React 16 появилась архитектура Fiber и чем она отличается от старого stack reconciler?
+  explanation: Fiber — это про **прерываемость**, а не про скорость. Каждый компонент стал единицей работы. Дерево обходится циклом по ссылкам `child`/`sibling`/`return`, поэтому React может отдать поток браузеру, сменить приоритет или выбросить незавершённую работу. На этом стоят transitions, Suspense и выборочная гидрация.
+  type: quiz
+  options:
+    - label: Рендер разбит на единицы работы, его можно прервать, приоритизировать и выбросить — в отличие от синхронной рекурсии
+      why: Верно. Старый reconciler рекурсивно обходил всё дерево за один проход и блокировал поток. Fiber обходит дерево циклом и может уступать браузеру между узлами.
+    - label: "Fiber ускоряет рендер: он сравнивает деревья за меньшее число операций"
+      why: "Типичное заблуждение. Сырой объём работы почти не изменился. Выигрыш — в отзывчивости: срочный ввод не ждёт тяжёлый рендер."
+    - label: Fiber ввёл виртуальный DOM, чтобы не трогать реальный DOM при каждом изменении
+      why: Виртуальный DOM и diffing были в React с самого начала. Fiber переписал reconciler — способ, которым React обходит дерево и планирует работу.
+    - label: Fiber переносит рендер компонентов в отдельный поток, чтобы не блокировать UI
+      why: "Рендер по-прежнему идёт в главном потоке. Отзывчивость даёт time slicing: React работает порциями примерно по 5 мс и между ними отдаёт управление браузеру."
+  answer: 0
+- id: fiber-transition-interrupted
+  skill: fiber-interruptible-render
+  question: fiber
+  difficulty: 3
+  prompt: Идёт тяжёлый рендер внутри startTransition, и пользователь нажимает клавишу в поле ввода. Расставьте события по порядку.
+  explanation: "Рендер строит `workInProgress`, не трогая экран, поэтому недостроенное дерево можно выбросить без следов. Срочное обновление (более приоритетный lane) проходит первым. В commit React применяет к DOM изменения, отмеченные во `flags`, и переключает указатель: `workInProgress` становится `current`. Отложенный transition затем рендерится заново."
+  type: order
+  kind: timeline
+  steps:
+    - React начинает строить workInProgress-дерево для transition, узел за узлом
+    - Между единицами работы React отдаёт управление браузеру (time slicing)
+    - Ввод создаёт срочное обновление с более приоритетным lane
+    - React выбрасывает недостроенное workInProgress и рендерит срочное обновление
+    - "Commit: новое дерево становится current, поле ввода обновлено на экране"
+    - React заново рендерит отложенный transition и коммитит его
+- id: fiber-side-effect-in-render
+  skill: render-purity
+  question: fiber
+  difficulty: 2
+  prompt: Аналитика показывает дубли события и события для результатов, которые пользователь так и не увидел. Найдите причину.
+  explanation: В конкурентном React работу фазы render можно прервать, выбросить и повторить, поэтому тело компонента может выполниться несколько раз до commit, а может не дойти до него вовсе. Побочные эффекты из render — только в эффекты или обработчики. Здесь — `useEffect(() => track(...), [query])`.
+  type: find-bug
+  language: tsx
+  code: |-
+    function SearchResults({ query }: Props) {
+      const results = useResults(query);
+      analytics.track('results_shown', { query });
+      return <List items={results} />;
+    }
+  bugLines:
+    - 3
+  causes:
+    - "Побочный эффект в теле рендера: React может прервать, выбросить или повторить render, и событие уйдёт без commit на экран"
+    - analytics.track асинхронный, без await события перемешиваются
+    - Вызов track нужно обернуть в useMemo с зависимостью query, тогда он выполнится один раз
+    - Хук useResults вызывается до track и меняет порядок хуков между рендерами
+  answer: 0
+- id: fiber-heavy-list-input-lag
+  skill: deferred-value-for-heavy-render
+  question: fiber
+  difficulty: 2
+  prompt: "Поле поиска фильтрует список, и рендер результатов занимает ~150 мс: ввод «залипает». Нужно, чтобы буквы появлялись сразу, а список обновлялся, как только успеет, без искусственной задержки. Что выбрать?"
+  explanation: "Класс задачи: срочное обновление конкурирует с тяжёлым рендером. Решение — понизить приоритет тяжёлой части (`useDeferredValue` или `startTransition`). Fiber позволит прервать её рендер ради ввода. Список стоит обернуть в `memo`, иначе срочный рендер перерисует его со старым значением. Мемоизация вычислений и debounce лечат другие симптомы."
+  type: choose-tool
+  options:
+    - label: useDeferredValue(query) для списка в memo, поле ввода — на обычном query
+      why: Лучший вариант. memo пропускает список в срочном рендере, а фоновый рендер с новым значением прерывается нажатиями. Задержки нет на быстром устройстве.
+    - label: Debounce ввода на 300 мс
+      why: Подходит, чтобы реже слать запросы к серверу. Но задержка искусственная даже на быстром устройстве, а сам рендер, когда наступит, всё равно заблокирует поток.
+    - label: useMemo вокруг фильтрации массива
+      why: Помогает, если дорогое именно вычисление и его можно переиспользовать. Здесь дорог рендер списка, и при новом query мемо всё равно пересчитается.
+    - label: flushSync при обновлении query
+      why: "Обратный эффект: flushSync заставляет React синхронно закоммитить обновление без прерываний. Нужен для редких случаев, например чтобы прочитать DOM сразу после setState."
+  answer: 0
+
+# keys: принято из черновика 2026-10-11
+- id: keys-random-key-in-render
+  skill: list-keys
+  question: keys
+  difficulty: 1
+  prompt: Пользователь печатает в любом поле, и после каждого символа поле теряет фокус. Найдите строку с ошибкой.
+  explanation: "При каждом вводе родитель перерендеривается. `crypto.randomUUID()` в рендере даёт новый key, поэтому React считает каждый `li` новым элементом: старый DOM удаляется, создаётся новый, и фокус теряется. Ключ должен быть стабильным: здесь подходит `tag.id`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function TagEditor({ tags, onRename }: Props) {
+      return tags.map((tag) => (
+        <li key={crypto.randomUUID()}>
+          <input
+            value={tag.label}
+            onChange={(e) =>
+              onRename(tag.id, e.target.value)
+            }
+          />
+        </li>
+      ));
+    }
+  bugLines:
+    - 3
+  causes:
+    - Ключ генерируется заново на каждом рендере, поэтому React пересоздаёт `li` и `input`, и фокус теряется
+    - Управляемый input теряет фокус, если value приходит из props. Нужен defaultValue
+    - Ключ нужно ставить на `input`, а не на `li`, иначе React не сопоставит поля
+    - Инлайн-функция в onChange пересоздаётся на каждом рендере, и из-за этого React перемонтирует input
+  answer: 0
+- id: keys-reset-state-by-key
+  skill: reset-state-with-key
+  question: keys
+  difficulty: 2
+  prompt: Приложение отрендерили (без StrictMode), затем один раз нажали next. Что будет на экране в двух абзацах?
+  explanation: Начальное значение useState читается только при монтировании. Первый Note остаётся тем же компонентом на той же позиции и сохраняет «note 1». У второго Note сменился key, поэтому React размонтирует его и создаёт заново со свежим состоянием. Так состояние сбрасывают без эффекта.
+  type: predict-output
+  language: tsx
+  code: |-
+    function Note({ id }: { id: number }) {
+      const [text] = useState(`note ${id}`);
+      return <p>{text}</p>;
+    }
+    function App() {
+      const [id, setId] = useState(1);
+      return (
+        <>
+          <Note id={id} />
+          <Note key={id} id={id} />
+          <button onClick={() => setId(2)}>next</button>
+        </>
+      );
+    }
+  options:
+    - note 1, note 2
+    - note 2, note 2
+    - note 1, note 1
+    - note 2, note 1
+  answer: 0
+- id: keys-no-id-in-data
+  skill: list-keys
+  question: keys
+  difficulty: 2
+  prompt: Редактируемый список пунктов чек-листа хранится как массив строк, id у пунктов нет. Пункты можно добавлять, удалять и перетаскивать. У каждой строки есть локальный флаг «редактируется». Какой key выбрать?
+  explanation: Если в данных нет id, его нужно создать один раз в момент появления элемента (при добавлении или загрузке) и хранить вместе с данными. Генерировать ключ в рендере нельзя. Индекс подходит только для статичного списка, текст — только если он гарантированно уникален и не меняется.
+  type: choose-tool
+  options:
+    - label: Хранить пункты как объекты и присваивать id через crypto.randomUUID() в обработчике добавления
+      why: "Лучший вариант: id создаётся один раз и остаётся с пунктом, поэтому флаг «редактируется» не переезжает к соседу."
+    - label: key={index}
+      why: Подходит только для статичного списка. При удалении или перетаскивании флаг останется на позиции и окажется у другого пункта.
+    - label: key={text} — текст пункта
+      why: Годится, если текст уникален и неизменен. Здесь он редактируется (строка пересоздаётся) и может повторяться (дубли ключей).
+    - label: key={crypto.randomUUID()} прямо в map
+      why: "Не подходит никогда: на каждом рендере ключ новый, все строки пересоздаются, состояние и фокус теряются."
+  answer: 0
+
+# lanes-priorities: принято из черновика 2026-10-11
+- id: lanes-priorities-why
+  skill: update-priorities
+  question: lanes-priorities
+  difficulty: 3
+  prompt: Зачем React присваивает каждому обновлению приоритет (lane) и что это даёт на практике?
+  explanation: "Главная идея lanes: срочный ввод не должен ждать тяжёлый рендер. Высокоприоритетные lanes обрабатываются первыми, transition-рендер прерываемый. Защита от starvation: если lane слишком долго откладывается, он помечается просроченным и выполняется синхронно."
+  type: quiz
+  options:
+    - label: Срочные обновления (ввод, клик) обрабатываются первыми, а низкоприоритетный рендер можно прервать и потом начать заново
+      why: Верно. Планировщик берёт самые приоритетные lanes, прерывает transition-рендер ради срочного обновления и затем повторяет его с актуальными данными.
+    - label: Приоритет задаёт лишь порядок коммитов в DOM, а каждый начатый рендер всегда доводится до конца
+      why: "Неверно. Конкурентный рендер в transition lane прерываемый: незавершённую работу React отбрасывает и начинает заново."
+    - label: Transition-обновления рендерятся параллельно в отдельном потоке, поэтому не блокируют ввод
+      why: "Неверно. Рендер идёт в основном потоке, просто нарезан на кусочки: примерно каждые 5 мс Scheduler отдаёт управление браузеру."
+    - label: Низкоприоритетные обновления откладываются бесконечно, пока есть хотя бы одно срочное
+      why: "Неверно. Есть защита от starvation: просроченный lane выполняется синхронно, чтобы обновление не голодало вечно."
+  answer: 0
+- id: lanes-controlled-input-transition
+  skill: transition-urgent-split
+  question: lanes-priorities
+  difficulty: 2
+  prompt: При быстром наборе текст в поле отстаёт и «догоняет» рывками. Найдите строку с ошибкой.
+  explanation: "Значение контролируемого инпута — срочное обновление, оно должно идти в SyncLane. Через startTransition оно попадает в прерываемый lane, и value отстаёт от ввода. Правило: setQuery вызывать синхронно, а в transition (или через useDeferredValue) отправлять только тяжёлую часть — фильтрацию результатов."
+  type: find-bug
+  language: tsx
+  code: |-
+    function SearchPage() {
+      const [query, setQuery] = useState('');
+      const [, startTransition] = useTransition();
+      function update(value: string) {
+        startTransition(() => setQuery(value));
+      }
+      return (
+        <div>
+          <input value={query}
+            onChange={(e) => update(e.target.value)} />
+          <Results query={query} />
+        </div>
+      );
+    }
+  bugLines:
+    - 5
+  causes:
+    - "Состояние контролируемого инпута обновляется в transition lane: рендер прерывается, и value отстаёт от ввода"
+    - useTransition нельзя использовать, не забрав из него isPending
+    - startTransition можно вызывать только прямо в JSX-обработчике, а не во вложенной функции
+    - Results не обёрнут в memo, поэтому transition не может прервать его рендер
+  answer: 0
+- id: lanes-interrupt-transition-timeline
+  skill: update-priorities
+  question: lanes-priorities
+  difficulty: 3
+  prompt: Идёт тяжёлый рендер из startTransition, и пользователь вводит символ. Расставьте события по порядку.
+  explanation: Transition-рендер нарезан на части, и между ними Scheduler отдаёт управление браузеру, поэтому событие ввода успевает обработаться. Срочный lane важнее, поэтому незавершённый transition-рендер отбрасывается. После коммита ввода React заново рендерит transition, уже с последними данными.
+  type: order
+  kind: timeline
+  steps:
+    - setResults внутри startTransition получает transition lane
+    - React начинает прерываемый рендер и примерно каждые 5 мс отдаёт управление браузеру
+    - "Браузер обрабатывает ввод: setQuery получает срочный SyncLane"
+    - React отбрасывает незавершённый transition-рендер
+    - "Срочное обновление рендерится и коммитится: поле сразу показывает символ"
+    - Transition-рендер начинается заново с актуальными данными
+- id: lanes-deferred-heavy-list
+  skill: deferred-value-for-heavy-render
+  question: lanes-priorities
+  difficulty: 2
+  prompt: Компонент получает query через props от чужого инпута, доступа к setQuery нет. По query синхронно фильтруется огромный локальный список, и на слабых устройствах лагает ввод. Запросов к серверу нет. Что выбрать?
+  explanation: Если тяжёлая работа локальная, а setter недоступен, подходит useDeferredValue. Срочный рендер проходит со старым значением и пропускает мемоизированный список. Затем React рендерит список по новому значению в низкоприоритетном lane и прерывает этот рендер ради ввода. Без memo или useMemo выигрыша не будет. Debounce нужен, когда надо сократить само число операций, например запросов к API.
+  type: choose-tool
+  options:
+    - label: useDeferredValue(query) и список в memo-компоненте (или useMemo), который зависит от отложенного значения
+      why: "Лучший вариант: срочный рендер пропускает мемоизированный список, а новый список рендерится в прерываемом lane без фиксированной задержки."
+    - label: Debounce query на 300 мс
+      why: Задержка будет фиксированной даже на быстрых устройствах, а итоговый рендер всё равно блокирующий. Debounce уместен, чтобы реже слать запросы к API.
+    - label: Обернуть setQuery в startTransition
+      why: Setter недоступен. А если бы был, controlled input в transition стал бы «ленивым». startTransition хорош, когда вы сами владеете тяжёлым setState.
+    - label: Только useMemo для результата фильтрации по query
+      why: query меняется на каждый символ, поэтому фильтрация всё равно пересчитывается синхронно. Сам по себе useMemo не делает рендер прерываемым.
+  answer: 0
+
+# lifecycle: принято из черновика 2026-10-11
+- id: lifecycle-effect-mental-model
+  skill: effect-as-synchronization
+  question: lifecycle
+  difficulty: 1
+  prompt: Как правильно описать роль useEffect в жизненном цикле функционального компонента?
+  explanation: Методов жизненного цикла в функциональных компонентах нет. Есть рендеры и эффекты, которые синхронизируют компонент с внешней системой. Эффект запускается после коммита, очищается перед повторным запуском и при размонтировании. Код должен выдерживать лишний цикл «запуск → очистка → запуск», который Strict Mode делает намеренно.
+  type: quiz
+  options:
+    - label: "Это синхронизация с внешней системой: запуск после коммита, очистка и перезапуск при смене зависимостей, очистка при размонтировании"
+      why: Верно. Эффект может запускаться и останавливаться много раз за жизнь компонента, поэтому думать о нём нужно как о подписке, а не как о разовом событии.
+    - label: "useEffect(fn, []) — точный аналог componentDidMount: гарантированно выполнится ровно один раз за жизнь компонента"
+      why: Неверно. В Strict Mode в разработке эффект выполнится дважды, с очисткой между запусками. Код, рассчитанный на один запуск, сломается.
+    - label: Функция компонента вызывается один раз при монтировании, а обновления выполняются через эффекты
+      why: "Неверно. Функция компонента вызывается при каждом рендере: при изменении state, props или контекста. Эффекты — лишь реакция на результат рендера."
+    - label: Эффекты выполняются во время рендера, до обновления DOM, как componentWillMount
+      why: "Неверно. Рендер должен быть чистым. Эффекты запускаются после коммита: useLayoutEffect — до отрисовки кадра, useEffect — обычно после неё."
+  answer: 0
+- id: lifecycle-parent-child-effect-order
+  skill: effect-execution-order
+  question: lifecycle
+  difficulty: 3
+  prompt: Parent монтируется впервые, без StrictMode. Что будет в консоли?
+  explanation: "Рендер идёт сверху вниз: сначала родитель, потом ребёнок. Эффекты выполняются снизу вверх: эффект ребёнка раньше, чем эффект родителя. Все useLayoutEffect выполняются синхронно в фазе commit. Только после них, обычно уже после отрисовки кадра, запускаются useEffect, и тоже начиная с ребёнка."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Child() {
+      console.log('child render');
+      useLayoutEffect(() => console.log('child layout'));
+      useEffect(() => console.log('child effect'));
+      return null;
+    }
+    function Parent() {
+      console.log('parent render');
+      useLayoutEffect(() => console.log('parent layout'));
+      useEffect(() => console.log('parent effect'));
+      return <Child />;
+    }
+  options:
+    - parent render → child render → child layout → parent layout → child effect → parent effect
+    - parent render → child render → parent layout → child layout → parent effect → child effect
+    - parent render → child render → child layout → child effect → parent layout → parent effect
+    - parent render → parent layout → parent effect → child render → child layout → child effect
+  answer: 0
+- id: lifecycle-cleanup-wrong-listener
+  skill: effect-cleanup
+  question: lifecycle
+  difficulty: 2
+  prompt: После многократного монтирования и размонтирования WindowWidth число обработчиков resize на window продолжает расти. Где ошибка?
+  explanation: "removeEventListener снимает обработчик, только если получает ту же ссылку на функцию. Здесь в подписку и в очистку переданы две разные стрелочные функции, поэтому обработчик не снимается и копится. Решение: вынести handler в переменную внутри эффекта и передать её в обе функции. Cleanup должен точно отменять то, что сделал эффект: при размонтировании и перед каждым перезапуском."
+  type: find-bug
+  language: tsx
+  code: |-
+    function WindowWidth() {
+      const [w, setW] = useState(window.innerWidth);
+      useEffect(() => {
+        window.addEventListener('resize', () =>
+          setW(window.innerWidth));
+        return () =>
+          window.removeEventListener('resize', () =>
+            setW(window.innerWidth));
+      }, []);
+      return <p>{w}px</p>;
+    }
+  bugLines:
+    - 4
+    - 7
+  causes:
+    - В addEventListener и removeEventListener переданы разные функции, поэтому обработчик не снимается
+    - "Пустой массив зависимостей: эффект нужно перезапускать при изменении w"
+    - window.innerWidth нельзя читать в инициализаторе useState
+    - Cleanup выполняется до эффекта, поэтому снимать ещё нечего
+  answer: 0
+- id: lifecycle-migrate-derived-state
+  skill: reset-state-with-key
+  question: lifecycle
+  difficulty: 2
+  prompt: Классовый EditProfile в getDerivedStateFromProps сбрасывает весь черновик формы, когда меняется props.userId. Как перенести это поведение на хуки?
+  explanation: "Аналог getDerivedStateFromProps — вычисление в рендере или key. Если при смене сущности нужно сбросить всё состояние, проще всего дать компоненту key: React размонтирует старый экземпляр и смонтирует новый с чистым state. Эффект для сброса — лишний рендер со старыми данными."
+  type: choose-tool
+  options:
+    - label: Рендерить <EditProfile key={userId} />
+      why: "Лучший вариант: смена key создаёт новый экземпляр, и всё состояние сбрасывается без эффектов и промежуточных рендеров со старым черновиком."
+    - label: useEffect, который при смене userId вызывает setDraft(initial)
+      why: Сработает, но сначала отрисуется устаревший черновик, а потом пройдёт ещё один рендер. Для частичного сброса лучше обновить state прямо в рендере, сравнив с prevUserId.
+    - label: useState(props.user) в качестве начального значения черновика
+      why: Начальное значение читается только при монтировании. При смене userId черновик останется прежним — это классический баг копирования props в state.
+    - label: Обернуть компонент в React.memo
+      why: "memo — аналог shouldComponentUpdate: он пропускает лишние рендеры при тех же props. К сбросу состояния он отношения не имеет."
+  answer: 0
+
+# portals: принято из черновика 2026-10-11
+- id: portals-events-context-quiz
+  skill: portal-event-bubbling
+  question: portals
+  difficulty: 2
+  prompt: Модалка рендерится через `createPortal(..., document.body)` внутри `<Page>`. Как внутри неё работают события и контекст?
+  explanation: "Портал меняет только место в DOM, а в React-дереве компонент остаётся там, где написан в JSX. Поэтому контекст, всплытие синтетических событий и порядок рендера идут по React-дереву. Отсюда типичные сюрпризы: клик в модалке доходит до onClick родителя, а проверка «клик снаружи» через DOM ошибается."
+  type: quiz
+  options:
+    - label: "Оба работают по React-дереву: события всплывают до родителей в JSX, контекст провайдеров выше доступен"
+      why: Верно. Портал меняет только DOM-узел-контейнер, а в React-дереве позиция компонента сохраняется.
+    - label: "События всплывают по DOM: до body и document, поэтому onClick родительского компонента не сработает"
+      why: Так ведут себя нативные addEventListener. Синтетические события React всплывают по дереву компонентов, поэтому onClick родителя сработает.
+    - label: "Контекст теряется: портал — отдельный корень, провайдеры нужно оборачивать заново"
+      why: Так ведёт себя отдельный createRoot. Портал остаётся частью того же дерева, и тема, роутер и стор доступны без настройки.
+    - label: "Контекст доступен, но портал изолирует события: из него они никуда не всплывают"
+      why: "Изоляции нет: событие из портала всплывает к React-предкам. Остановить всплытие можно только явно, через e.stopPropagation()."
+  answer: 0
+- id: portals-click-bubbles-to-parent
+  skill: portal-event-bubbling
+  question: portals
+  difficulty: 2
+  prompt: Кнопка рендерится порталом в document.body. По ней кликнули один раз. Что будет в консоли?
+  explanation: Сначала срабатывает обработчик кнопки, затем событие всплывает по React-дереву к div-родителю, хотя в DOM кнопка лежит в body, а не внутри этого div. Если такое всплытие не нужно, вызовите e.stopPropagation() в портале.
+  type: predict-output
+  language: tsx
+  code: |-
+    function App() {
+      return (
+        <div onClick={() => console.log('parent')}>
+          {createPortal(
+            <button onClick={() => console.log('button')}>
+              Open
+            </button>,
+            document.body,
+          )}
+        </div>
+      );
+    }
+  options:
+    - button → parent
+    - button
+    - parent → button
+    - "Ничего: кнопка вне div в DOM"
+  answer: 0
+- id: portals-click-outside-nested
+  skill: portal-click-outside
+  question: portals
+  difficulty: 3
+  prompt: Внутри модалки есть Select, который рендерит выпадающий список своим порталом в body. Клик по пункту списка закрывает модалку. Найдите строку с ошибкой.
+  explanation: "Список Select в DOM лежит в body, а не внутри ref, поэтому `contains()` считает клик внешним. Для вложенных порталов опирайтесь на React-дерево: например, onMouseDownCapture на корне модалки ставит флаг «клик внутри», а он всплывёт и из вложенного портала. Другой путь — headless-библиотека, где это уже решено."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Modal({ onClose, children }: Props) {
+      const ref = useRef<HTMLDivElement>(null);
+      useEffect(() => {
+        const onDown = (e: MouseEvent) => {
+          const t = e.target as Node;
+          if (!ref.current?.contains(t)) onClose();
+        };
+        document.addEventListener('mousedown', onDown);
+        return () =>
+          document.removeEventListener('mousedown', onDown);
+      }, [onClose]);
+      const box = <div ref={ref}>{children}</div>;
+      return createPortal(box, document.body);
+    }
+  bugLines:
+    - 6
+  causes:
+    - "Проверка по DOM через contains() не видит вложенный портал: его узлы лежат в body вне ref, хотя в React-дереве они внутри модалки"
+    - Нужно слушать click, а не mousedown, — иначе событие приходит раньше, чем выбирается пункт
+    - onClose в зависимостях пересоздаёт подписку, и на время рендера модалка «теряет» обработчик
+    - e.target нельзя приводить к Node — у MouseEvent там всегда HTMLElement, и contains() возвращает false
+  answer: 0
+- id: portals-accessible-confirm-dialog
+  skill: accessible-modal-choice
+  question: portals
+  difficulty: 2
+  prompt: "Нужна простая модалка подтверждения без новых зависимостей. Требования: окно поверх любых overflow и z-index, фокус не уходит на страницу, закрытие по Escape. Что выбрать?"
+  explanation: Нативный `<dialog>` с `showModal()` выводит окно в top layer, делает остальную страницу inert и обрабатывает Escape. Это закрывает большую часть требований к доступности без кода. Портал решает только проблему вёрстки, а фокус и клавиатуру с ним придётся делать самому.
+  type: choose-tool
+  options:
+    - label: Нативный <dialog> и showModal()
+      why: "Лучший выбор здесь: top layer без порталов и z-index, страница становится inert, Escape и aria-modal-семантика есть из коробки."
+    - label: createPortal в body и div с role="dialog"
+      why: Решает обрезку и перекрытие, но focus trap, Escape и возврат фокуса придётся писать вручную. Оправдан, если нужна полная кастомизация.
+    - label: Radix Dialog или React Aria
+      why: Отличный вариант для дизайн-системы и сложных сценариев вроде вложенных слоёв. Но по условию новые зависимости не нужны.
+    - label: "position: fixed и z-index: 9999 прямо в компоненте"
+      why: Не спасает от stacking context и transform у предков и не решает фокус и Escape. Годится разве что для прототипа.
+  answer: 0
+
+# preserve-reset-state: принято из черновика 2026-10-11
+- id: preserve-reset-state-position-quiz
+  skill: state-position-identity
+  question: preserve-reset-state
+  difficulty: 2
+  prompt: От чего зависит, сохранит ли React состояние компонента после очередного рендера родителя?
+  explanation: Для React идентичность компонента — это позиция в дереве JSX, тип и key. Совпали все три — state сохраняется. Изменилось что-то одно — старое поддерево размонтируется вместе со всем состоянием. Поэтому key — штатный способ сбросить state, а Activity или CSS-скрытие — способы его сохранить.
+  type: quiz
+  options:
+    - label: "От позиции в дереве рендера, типа компонента и key: если всё совпадает, state сохраняется, иначе поддерево монтируется заново"
+      why: Верно. React сравнивает элементы на одной позиции по типу и key. Смена любого из них означает для него новый компонент.
+    - label: "От того, изменились ли props: новые props сбрасывают state, чтобы он не рассинхронизировался"
+      why: Неверно. Props можно менять сколько угодно, state при этом живёт. Классический баг — useState(props.x) не обновляется при смене x.
+    - label: "От положения в реальном DOM: пока DOM-узел на месте, React сохраняет связанный с ним state"
+      why: Важен не DOM, а дерево элементов JSX. Даже false в {cond && <A />} занимает позицию, хотя DOM-узла не создаёт.
+    - label: State хранится в замыкании функции компонента, поэтому живёт, пока эта функция существует
+      why: State хранится в Fiber-узле дерева, а не в замыкании. Функция вызывается заново на каждом рендере.
+  answer: 0
+- id: preserve-reset-state-position-predict
+  skill: state-position-identity
+  question: preserve-reset-state
+  difficulty: 3
+  prompt: Counter — обычный компонент с useState(0) и кнопкой, которая показывает и увеличивает счётчик. Каждый из двух Counter нажали 3 раза, затем нажали «wide». Что покажут счётчики (сверху вниз)?
+  explanation: "Первый Counter остаётся на той же позиции: false от {wide && ...} тоже занимает место, а Banner появляется в своём слоте. Поэтому его state сохранится. На месте второго Counter появился section — это другой тип, поэтому поддерево перемонтируется и счётчик вернётся к 0."
+  type: predict-output
+  language: tsx
+  code: |-
+    function App() {
+      const [wide, setWide] = useState(false);
+      return (
+        <>
+          {wide && <Banner />}
+          <Counter />
+          {wide ? <section><Counter /></section> : <Counter />}
+          <button onClick={() => setWide(true)}>wide</button>
+        </>
+      );
+    }
+  options:
+    - 3 и 0
+    - 3 и 3
+    - 0 и 0
+    - 0 и 3
+  answer: 0
+- id: preserve-reset-state-hidden-tab
+  skill: preserve-hidden-state
+  question: preserve-reset-state
+  difficulty: 2
+  prompt: Вкладки в React 19.2. Во вкладке «Черновик» есть несохранённый текст в неконтролируемом поле и подписка на WebSocket. При переключении текст и state должны сохраниться, а подписка в скрытой вкладке — не работать. Что выбрать?
+  explanation: "Сохранить state скрытого UI можно тремя путями: не размонтировать его (Activity или CSS), поднять state выше или хранить его вне React. Сбросить state — сменить key или тип. Activity в режиме hidden сохраняет state и DOM, но очищает эффекты и запускает их снова при показе."
+  type: choose-tool
+  options:
+    - label: "<Activity mode={active ? 'visible' : 'hidden'}>"
+      why: Лучший выбор. State и DOM сохраняются, эффекты скрытой вкладки очищаются и снова запускаются при показе.
+    - label: "Всегда рендерить вкладку и скрывать её через display: none"
+      why: State сохранится, но эффекты продолжат работать, и подписка останется активной. Подходит, когда эффектов нет.
+    - label: Поднять весь state вкладки в родителя
+      why: Сработает для явного state, но значение неконтролируемого поля потеряется при размонтировании. Хорошо, когда state нужен родителю.
+    - label: Условный рендер {active && <Draft />}
+      why: При скрытии компонент размонтируется, и черновик пропадёт. Подходит, когда как раз нужно начинать с чистого состояния.
+  answer: 0
+
+# purity-strict-mode: принято из черновика 2026-10-11
+- id: purity-render-meaning-quiz
+  skill: render-purity
+  question: purity-strict-mode
+  difficulty: 1
+  prompt: Что означает требование «рендер должен быть чистым»?
+  explanation: Компонент — функция от props, state и контекста. React может вызвать рендер несколько раз, прервать его или выбросить результат, а React Compiler мемоизирует, полагаясь на чистоту. Эффекты — в обработчиках и useEffect. StrictMode в dev вызывает рендер дважды, чтобы выявить нарушения.
+  type: quiz
+  options:
+    - label: При тех же props, state и контексте компонент возвращает тот же JSX и ничего не меняет снаружи во время рендера
+      why: Верно. Результат зависит только от входов, а запросы, мутации внешних данных и работа с DOM происходят вне рендера.
+    - label: Компонент не должен иметь своего state и хуков — только props, как у чистой функции
+      why: State и контекст — такие же входы рендера, как props. Чистота не запрещает хуки, она запрещает побочные эффекты.
+    - label: Во время рендера нельзя создавать и изменять никакие переменные и массивы
+      why: "Локальные мутации допустимы: заполнить массив, созданный в этом же рендере, можно. Нельзя менять то, что существовало до рендера."
+    - label: Побочные эффекты запрещены во всём компоненте, включая обработчики событий и useEffect
+      why: "Наоборот: обработчики и эффекты — правильное место для запросов, подписок и записи в storage. Чистым должно быть только тело рендера."
+  answer: 0
+- id: purity-sort-mutates-props
+  skill: render-purity
+  question: purity-strict-mode
+  difficulty: 2
+  prompt: Родитель передаёт users и сам рендерит его в исходном порядке. После появления TopUsers порядок у родителя «сам» поменялся. Где ошибка?
+  explanation: "Array.prototype.sort сортирует на месте: рендер мутирует массив из props, то есть чужие данные. Исправление — копия: users.toSorted(...) или [...users].sort(...). Правило: в рендере менять можно только то, что создано в этом же рендере."
+  type: find-bug
+  language: tsx
+  code: |-
+    function TopUsers({ users }: { users: User[] }) {
+      const top = users.sort((a, b) => b.score - a.score);
+      return (
+        <ol>
+          {top.slice(0, 3).map((u) => (
+            <li key={u.id}>{u.name}</li>
+          ))}
+        </ol>
+      );
+    }
+  bugLines:
+    - 2
+  causes:
+    - sort сортирует массив на месте — рендер мутирует props, и порядок меняется у родителя
+    - slice(0, 3) удаляет элементы из исходного массива
+    - key={u.id} нужно заменить на индекс, иначе порядок собьётся
+    - sort асинхронный, поэтому top на момент map ещё не отсортирован
+  answer: 0
+- id: purity-strict-mode-effect-double
+  skill: strict-mode-double-invoke
+  question: purity-strict-mode
+  difficulty: 2
+  prompt: Dev-сборка, компонент смонтировали один раз внутри StrictMode. Что будет в консоли, считая приглушённые логи?
+  explanation: "В dev StrictMode вызывает функцию компонента дважды, а после коммита прогоняет лишний цикл эффекта: setup → cleanup → setup. Если без cleanup что-то ломается (двойное подключение), это баг, а не вина StrictMode. В production ничего не дублируется."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Chat() {
+      console.log('render');
+      useEffect(() => {
+        console.log('connect');
+        return () => console.log('disconnect');
+      }, []);
+      return <p>Chat</p>;
+    }
+
+    root.render(
+      <StrictMode><Chat /></StrictMode>
+    );
+  options:
+    - render → render → connect → disconnect → connect
+    - render → connect
+    - render → connect → render → disconnect → connect
+    - render → render → connect → connect
+  answer: 0
+- id: purity-move-storage-to-effect
+  skill: render-side-effects
+  question: purity-strict-mode
+  difficulty: 1
+  prompt: Запись в localStorage вынесли из тела рендера. Допишите, чтобы она выполнялась после коммита при каждой смене темы.
+  explanation: "localStorage.setItem — побочный эффект, в рендере ему не место: рендер может повториться или быть отброшен. useEffect запускается после коммита, а зависимость theme перезапускает его только при смене темы. useMemo для эффектов не подходит — это кэш вычислений."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function ThemeToggle() {
+      const [theme, setTheme] = useState('light');
+      ___(() => {
+        localStorage.setItem('theme', theme);
+      }, [___]);
+      const next = theme === 'light' ? 'dark' : 'light';
+      return (
+        <button onClick={() => setTheme(next)}>
+          {theme}
+        </button>
+      );
+    }
+  tokens:
+    - useEffect
+    - theme
+  decoys:
+    - useMemo
+    - setTheme
+    - next
+    - useState
+
+# reconciliation: принято из черновика 2026-10-11
+- id: reconciliation-heuristics-quiz
+  skill: reconciliation-heuristics
+  question: reconciliation
+  difficulty: 3
+  prompt: На каких эвристиках React сравнивает деревья за O(n) вместо O(n³)?
+  explanation: "Две эвристики: разный тип элемента — новое поддерево, одинаковый тип — обновление атрибутов и рекурсия в детей; дети списка сопоставляются по key, без него — по индексу. React сравнивает результат рендера, а не входные props. Пропустить компонент можно через memo или bailout."
+  type: quiz
+  options:
+    - label: Элементы разных типов дают разные деревья, а дети списка сопоставляются по key (без key — по индексу)
+      why: Верно. Смена типа сносит поддерево целиком без сравнения детей. Для одного типа обновляются атрибуты, а дети сравниваются рекурсивно.
+    - label: React глубоко сравнивает props и вызывает только те компоненты, у которых props изменились
+      why: "Нет: без memo React просто вызывает компонент и сравнивает возвращённый результат. Bailout проверяет props по ссылке, а не глубоко."
+    - label: React ищет минимальный набор правок, поэтому Counter внутри новой обёртки сохранит state
+      why: Минимальная правка — задача O(n³), от неё отказались. При смене типа обёртки Counter размонтируется и потеряет state.
+    - label: "key нужен, только чтобы убрать предупреждение: React и так сопоставит детей по типу и содержимому"
+      why: Содержимое React не сравнивает. Без key дети сопоставляются по позиции, и при вставке в начало обновится каждый элемент.
+  answer: 0
+- id: reconciliation-wrapper-type-switch
+  skill: reconciliation-type-change
+  question: reconciliation
+  difficulty: 2
+  prompt: При повороте телефона (isMobile меняется) форма поиска теряет введённый текст и заново грузит подсказки. Где причина?
+  explanation: "Тип родителя сменился с div на section, и React снёс поддерево целиком: SearchForm размонтировался вместе со state. Обёртка должна быть одного типа, а различия лучше выразить через className: `<div className={isMobile ? 'stack' : 'grid'}>`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Layout({ isMobile }: Props) {
+      return isMobile ? (
+        <div className="stack">
+          <SearchForm />
+        </div>
+      ) : (
+        <section className="grid">
+          <SearchForm />
+        </section>
+      );
+    }
+  bugLines:
+    - 3
+    - 7
+  causes:
+    - Тип обёртки меняется (div ↔ section) — React размонтирует поддерево вместе с SearchForm и его state
+    - У SearchForm нет key, поэтому React не может сопоставить его между рендерами
+    - Тернарный оператор в JSX всегда пересоздаёт компоненты — нужен if с ранним return
+    - Смена className заставляет React пересоздать DOM-узел и его детей
+  answer: 0
+- id: reconciliation-dynamic-tag-remount
+  skill: reconciliation-type-change
+  question: reconciliation
+  difficulty: 2
+  prompt: App смонтировали (без StrictMode), затем дважды кликнули по контейнеру. Что будет в консоли?
+  explanation: "Динамический тег — это тоже смена типа: div → section → div. Каждый раз React уничтожает старое поддерево (cleanup → unmount) и монтирует Probe заново. Неважно, что сам Probe на том же месте и того же типа: сравнение до его детей просто не доходит."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Probe() {
+      useEffect(() => {
+        console.log('mount');
+        return () => console.log('unmount');
+      }, []);
+      return null;
+    }
+    function App() {
+      const [wide, setWide] = useState(false);
+      const Box = wide ? 'section' : 'div';
+      const toggle = () => setWide(!wide);
+      return <Box onClick={toggle}><Probe /></Box>;
+    }
+  options:
+    - mount → unmount → mount → unmount → mount
+    - mount
+    - mount → mount → mount
+    - mount → unmount → mount
+  answer: 0
+- id: reconciliation-reset-form-by-key
+  skill: reset-state-with-key
+  question: reconciliation
+  difficulty: 2
+  prompt: "`<EditProfile userId={id} />` хранит в useState десяток полей формы. При выборе другого пользователя в списке форма должна полностью сброситься. Как лучше?"
+  explanation: "key — часть идентичности элемента: новый key означает новый компонент, и React монтирует его с чистым state. Это прямое применение эвристики reconciliation и рекомендованный способ сбросить state поддерева. Сброс через эффект даёт лишний рендер со старыми данными и требует вручную перечислять поля."
+  type: choose-tool
+  options:
+    - label: "Передать id и в key: `<EditProfile key={id} userId={id} />`"
+      why: "Лучший вариант: для React смена key означает новый экземпляр. Весь state поддерева сбрасывается без ручного кода и промежуточного рендера."
+    - label: useEffect по [userId], который вызывает все setState с начальными значениями
+      why: Работает, но сначала рендерится форма со старыми полями, а новое поле легко забыть сбросить. Подходит, если сбросить нужно лишь часть state.
+    - label: Обернуть EditProfile в разные контейнеры в зависимости от чётности id
+      why: "Это хак на смене типа: он неочевиден и не сработает при переходе между id одной чётности (2 → 4). key выражает то же намерение явно."
+    - label: Обернуть EditProfile в memo с компаратором по userId
+      why: memo только пропускает лишние рендеры и никогда не сбрасывает state. Он уместен, когда проблема в производительности, а не в идентичности.
+  answer: 0
+
+# render-vs-commit: принято из черновика 2026-10-11
+- id: render-vs-commit-side-effects-quiz
+  skill: render-commit-phases
+  question: render-vs-commit
+  difficulty: 2
+  prompt: Почему побочные эффекты нельзя делать в теле компонента, а в useEffect и обработчиках событий — можно?
+  explanation: "Render — это вычисление: React может его прервать, повторить или отбросить. Commit — момент, когда изменения точно применяются к DOM. Он синхронный и не прерывается. Правило: тело компонента — чистая функция от props и state, а всё внешнее делается в commit-фазе (эффекты) или в обработчиках."
+  type: quiz
+  options:
+    - label: Рендер может прерваться, повториться или быть отброшен, а commit гарантированно применяет результат — эффекты безопасны только там
+      why: "Верно. В конкурентном режиме рендер может выполниться несколько раз и не попасть на экран. Побочный эффект из такого рендера останется без пары: без отписки или с лишним запросом."
+    - label: Рендер выполняется вне главного потока, поэтому из него нет доступа к DOM и сети
+      why: Неверно. Рендер идёт в главном потоке. Его прерываемость — это кооперативная уступка браузеру между единицами работы, а не отдельный поток.
+    - label: Эффекты в рендере просто медленнее, и React Compiler всё равно вынесет их в useEffect
+      why: Неверно. Compiler мемоизирует чистые вычисления и не переносит побочные эффекты. Он, наоборот, рассчитывает на чистоту рендера.
+    - label: Commit тоже прерываем, но React откатывает его эффекты, а эффекты рендера откатить не может
+      why: "Неверно. Commit синхронный и не прерывается. Откатов эффектов в React нет: есть только cleanup перед следующим запуском или при размонтировании."
+  answer: 0
+- id: render-vs-commit-subscribe-in-render
+  skill: render-purity-side-effects
+  question: render-vs-commit
+  difficulty: 2
+  prompt: Компонент иногда продолжает получать сообщения из старых комнат. Найдите ошибку.
+  explanation: Подписка создаётся при каждом вызове рендера. Если рендер прерван или отброшен, его эффект не выполнится, и отписки не будет. Подписки на внешние источники делают в useEffect с cleanup или через useSyncExternalStore.
+  type: find-bug
+  language: tsx
+  code: |-
+    function Chat({ roomId }: { roomId: string }) {
+      const [msgs, setMsgs] = useState<Msg[]>([]);
+      const off = chat.subscribe(roomId, (m) => {
+        setMsgs((prev) => [...prev, m]);
+      });
+      useEffect(() => off, [off]);
+      return <MessageList items={msgs} />;
+    }
+  bugLines:
+    - 3
+  causes:
+    - "Подписка происходит в рендере: если рендер не дошёл до commit, эффект с отпиской для него не выполнится"
+    - Функциональное обновление setMsgs вызывает бесконечный цикл рендеров
+    - useEffect не может вернуть cleanup-функцию, сохранённую в переменную
+    - MessageList нужно обернуть в memo, иначе сообщения дублируются
+  answer: 0
+- id: render-vs-commit-parent-child-effects
+  skill: effect-execution-order
+  question: render-vs-commit
+  difficulty: 3
+  prompt: Parent монтируется впервые, StrictMode нет. Что будет в консоли?
+  explanation: "Render идёт сверху вниз: сначала родитель, потом ребёнок. Эффекты выполняются в commit снизу вверх: эффекты ребёнка срабатывают раньше эффектов родителя. Все layout-эффекты выполняются до paint, все пассивные — после. Поэтому родитель в своём эффекте может рассчитывать, что дети уже смонтированы."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Child() {
+      console.log('render Child');
+      useLayoutEffect(() => console.log('layout Child'));
+      useEffect(() => console.log('effect Child'));
+      return null;
+    }
+
+    function Parent() {
+      console.log('render Parent');
+      useLayoutEffect(() => console.log('layout Parent'));
+      useEffect(() => console.log('effect Parent'));
+      return <Child />;
+    }
+  options:
+    - render Parent → render Child → layout Child → layout Parent → effect Child → effect Parent
+    - render Parent → render Child → layout Parent → layout Child → effect Parent → effect Child
+    - render Parent → layout Parent → effect Parent → render Child → layout Child → effect Child
+    - render Parent → render Child → layout Child → effect Child → layout Parent → effect Parent
+  answer: 0
+- id: render-vs-commit-tooltip-measure
+  skill: layout-effect-measurement
+  question: render-vs-commit
+  difficulty: 2
+  prompt: Тултип должен измерить свою высоту и, если не помещается снизу, показаться сверху. Пользователь не должен увидеть прыжок. Где измерять?
+  explanation: "Нужен DOM после mutation, но до paint — это layout-фаза commit. useLayoutEffect видит вставленные узлы, а setState в нём применяется синхронно до отрисовки. Его стоит использовать только для измерений: он блокирует кадр."
+  type: choose-tool
+  options:
+    - label: useLayoutEffect + getBoundingClientRect
+      why: Выполняется после вставки в DOM, но до отрисовки. Перерасчёт позиции попадёт в тот же кадр, и мерцания не будет.
+    - label: useEffect + getBoundingClientRect
+      why: Подходит для измерений, которые не меняют видимое положение (аналитика, логирование). Здесь тултип сначала нарисуется снизу, потом прыгнет.
+    - label: Читать ref.current в теле компонента
+      why: "В рендере DOM ещё не обновлён: на первом рендере ref равен null, потом там старый узел. Рендер должен быть чистым — измерения ему не место."
+    - label: Посчитать позицию в useMemo по props
+      why: Годится, если размер заранее известен из данных. Реальную высоту контента без DOM не узнать, а useMemo вызывается в рендере.
+  answer: 0
+
+# virtual-dom: принято из черновика 2026-10-11
+- id: virtual-dom-purpose-quiz
+  skill: virtual-dom-purpose
+  question: virtual-dom
+  difficulty: 1
+  prompt: Зачем React нужны Virtual DOM и reconciliation, если ручная точечная работа с DOM может быть быстрее?
+  explanation: "Главная ценность — декларативность: вы описываете UI для текущего состояния, а React сравнивает деревья эвристиками за O(n) и меняет только нужное. Помните: рендер ≠ обновление DOM. Если результат рендера не изменился, DOM не трогается."
+  type: quiz
+  options:
+    - label: "Чтобы писать UI декларативно: вы описываете результат, а React сам вычисляет разницу и применяет достаточно эффективные изменения к DOM"
+      why: "Верно. VDOM — компромисс: не самый быстрый путь, но он избавляет от ручной синхронизации DOM с состоянием и при этом остаётся достаточно быстрым."
+    - label: Virtual DOM всегда быстрее прямой работы с DOM, потому что операции над JS-объектами дешевле
+      why: Это миф. Сравнение деревьев — дополнительная работа поверх изменений DOM. Точечный ручной код может быть быстрее. Svelte и Solid обходятся без VDOM.
+    - label: Reconciliation полностью сравнивает два дерева и гарантирует минимально возможный набор изменений DOM
+      why: Полное сравнение стоит O(n³). React использует эвристики (тип элемента, key) и получает O(n), поэтому минимальный diff не гарантирован.
+    - label: Virtual DOM — копия браузерного DOM, из которой React читает размеры элементов без reflow
+      why: VDOM — это описание UI из React-элементов, а не копия DOM с layout. Размеры по-прежнему измеряют в реальном DOM, например в useLayoutEffect.
+  answer: 0
+- id: virtual-dom-wrapper-type-change
+  skill: reconciliation-type-heuristic
+  question: virtual-dom
+  difficulty: 2
+  prompt: Counter — кнопка с локальным useState(0), которая показывает своё значение. Пользователь трижды нажал на Counter (на нём 3), затем нажал toggle. Что покажет Counter?
+  explanation: "Позиция Counter в дереве осталась прежней, но его родитель сменил тип с div на section. По эвристике элементы разных типов дают разные поддеревья: старое удаляется целиком вместе с состоянием Counter, новое монтируется с нуля."
+  type: predict-output
+  language: tsx
+  code: |-
+    function App() {
+      const [fancy, setFancy] = useState(false);
+      return (
+        <>
+          {fancy ? (
+            <section><Counter /></section>
+          ) : (
+            <div><Counter /></div>
+          )}
+          <button onClick={() => setFancy(!fancy)}>
+            toggle
+          </button>
+        </>
+      );
+    }
+  options:
+    - 0 — поддерево перемонтировано, состояние сброшено
+    - 3 — Counter того же типа, состояние сохранилось
+    - 3, но DOM-узел кнопки Counter создан заново
+    - "Ошибка: у Counter в условном рендере нет key"
+  answer: 0
+- id: virtual-dom-reset-form-by-key
+  skill: reset-state-with-key
+  question: virtual-dom
+  difficulty: 2
+  prompt: EditProfile хранит поля формы в useState(user.name) и т.д. При выборе другого пользователя в списке форма показывает данные прошлого. Нужно полностью сбрасывать форму при смене пользователя. Что выбрать?
+  explanation: "key — часть идентичности элемента при reconciliation. Если key изменился, React считает элемент другим: размонтирует старый экземпляр и монтирует новый с чистым состоянием. Это штатный способ сбросить всё поддерево без синхронизирующих эффектов."
+  type: choose-tool
+  options:
+    - label: <EditProfile key={user.id} user={user} />
+      why: "Лучший вариант: новый key — новый экземпляр компонента, всё состояние формы и дочерних компонентов сбрасывается автоматически."
+    - label: useEffect по [user.id], который вызывает setName(user.name) и так для каждого поля
+      why: Лишний рендер со старыми данными, легко забыть поле или состояние в детях. Эффект оправдан, если нужно синхронизироваться с внешней системой.
+    - label: Хранить prevUserId в state и сбрасывать поля прямо во время рендера при его смене
+      why: Документированный паттерн для сброса части состояния при смене props. Для полного сброса он громоздкий, key проще.
+    - label: Поднять состояние формы в родителя или контекст
+      why: Имеет смысл, если нужно хранить черновики по каждому пользователю. Сбросить состояние это не помогает, а перерисовок становится больше.
+  answer: 0
+
+# when-rerender: принято из черновика 2026-10-11
+- id: when-rerender-child-without-props
+  skill: rerender-triggers
+  question: when-rerender
+  difficulty: 2
+  prompt: Родитель обновил свой state. Почему его ребёнок рендерится, хотя его props не изменились?
+  explanation: "Рендер запускают три вещи: свой state, прочитанный контекст и рендер родителя. Изменение props — лишь следствие рендера родителя, а не самостоятельная причина. Чтобы ребёнок пропускал рендер при тех же props, нужен `memo` или React Compiler. Рендер ≠ обновление DOM: если результат не изменился, DOM не трогается."
+  type: quiz
+  options:
+    - label: По умолчанию React рендерит всех потомков компонента, чей state изменился, и не сравнивает их props, если нет memo
+      why: "Верно. Без memo React вообще не сравнивает props: рендер родителя каскадом запускает рендер всего поддерева."
+    - label: React поверхностно сравнивает props, но объекты и функции в props всегда считаются новыми
+      why: "Без memo никакого сравнения props нет. Нестабильные объекты мешают только мемоизированным компонентам: memo видит новую ссылку и рендерит."
+    - label: "Так не бывает: ребёнок рендерится только при изменении props, а лишние рендеры даёт StrictMode в dev"
+      why: Это популярный миф. StrictMode удваивает рендеры в dev, но ребёнок рендерится вслед за родителем и без него, и в production.
+    - label: React перерисовывает DOM ребёнка на всякий случай, потому что не знает, зависит ли он от state родителя
+      why: Рендер не равен обновлению DOM. Функция компонента вызывается, но если результат совпал с прошлым, DOM не меняется.
+  answer: 0
+- id: when-rerender-plain-vs-memo
+  skill: rerender-triggers
+  question: when-rerender
+  difficulty: 2
+  prompt: Компонент смонтировали, затем один раз нажали кнопку. StrictMode и React Compiler не используются. Что будет в консоли?
+  explanation: "Рендер App каскадом рендерит Plain, хотя у него нет props. Memo тоже получает новый JSX-элемент, но memo сравнивает props через Object.is. Props пустые и совпадают, поэтому рендер пропускается. С React Compiler пропустился бы и Plain: компилятор закешировал бы его элемент."
+  type: predict-output
+  language: tsx
+  code: |-
+    const Memo = memo(() => {
+      console.log('Memo');
+      return null;
+    });
+    function Plain() {
+      console.log('Plain');
+      return null;
+    }
+    function App() {
+      const [n, setN] = useState(0);
+      console.log('App', n);
+      const inc = () => setN(n + 1);
+      return <button onClick={inc}><Plain /><Memo /></button>;
+    }
+  options:
+    - App 0 → Plain → Memo → App 1 → Plain
+    - App 0 → Plain → Memo → App 1
+    - App 0 → Plain → Memo → App 1 → Plain → Memo
+    - App 0 → Plain → Memo → App 1 → Memo
+  answer: 0
+- id: when-rerender-memo-unstable-prop
+  skill: memo-stable-props
+  question: when-rerender
+  difficulty: 2
+  prompt: Chart обёрнут в memo, но Profiler показывает, что он рендерится на каждый символ в поле ввода. Найдите строку с причиной.
+  explanation: "memo сравнивает каждый prop через Object.is. Литерал `{ theme: 'dark' }` создаёт новый объект на каждом рендере, поэтому сравнение всегда проваливается. Исправление: вынести константу за пределы компонента или обернуть в useMemo. Ещё лучше опустить state поиска в отдельный компонент. React Compiler стабилизировал бы объект автоматически."
+  type: find-bug
+  language: tsx
+  code: |-
+    const Chart = memo(HeavyChart);
+
+    function Dashboard({ data }: { data: Point[] }) {
+      const [query, setQuery] = useState('');
+      return (
+        <>
+          <input value={query}
+            onChange={(e) => setQuery(e.target.value)} />
+          <Chart data={data}
+            options={{ theme: 'dark' }} />
+        </>
+      );
+    }
+  bugLines:
+    - 10
+  causes:
+    - Объект options создаётся заново на каждом рендере — memo видит новую ссылку и рендерит Chart
+    - data приходит через props родителя, поэтому memo всегда считает его изменённым
+    - memo не работает, если родитель хранит состояние в useState
+    - memo нельзя применять к компоненту, объявленному в другом модуле
+  answer: 0
+- id: when-rerender-scroll-wrapper-children
+  skill: rerender-composition
+  question: when-rerender
+  difficulty: 3
+  prompt: Обёртка ScrollShadow хранит scrollTop в state и по нему рисует тень у своего div. Внутри div лежит тяжёлая лента FeedList без props, и она рендерится на каждый скролл. State нужен самой обёртке. React Compiler в проекте нет. Что сделать в первую очередь?
+  explanation: "Порядок предпочтения: сначала структура, потом мемоизация. Если state можно опустить, опускаем. Если state оборачивает тяжёлую часть, передаём её как children. Элемент создан в компоненте выше, и его ссылка при скролле не меняется. React видит тот же элемент и пропускает поддерево без поверхностного сравнения props. memo — следующий шаг."
+  type: choose-tool
+  options:
+    - label: Передать FeedList в ScrollShadow как children из компонента выше
+      why: Лучший вариант. Элемент <FeedList /> создаётся выше и при скролле остаётся той же ссылкой. React пропускает его рендер без memo и без требований к стабильности props.
+    - label: Обернуть FeedList в memo
+      why: Сработает, но это добавочная мемоизация со сравнением props, которая сломается, как только появятся нестабильные props. Уместна, если структуру поменять нельзя.
+    - label: Опустить scrollTop в отдельный компонент рядом с лентой
+      why: Лучший первый шаг, когда state нужен только соседу. Здесь state управляет обёрткой, внутри которой лежит лента, поэтому вынести его без перестройки дерева нельзя.
+    - label: Хранить scrollTop в React Context
+      why: "Не уменьшает рендеры, а добавляет зависимость: все потребители контекста будут рендериться на каждый скролл."
+  answer: 0

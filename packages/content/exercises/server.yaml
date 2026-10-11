@@ -1,0 +1,451 @@
+# hydration-mismatch: принято из черновика 2026-10-11
+- id: hydration-mismatch-quiz
+  skill: hydration-mismatch-causes
+  question: hydration-mismatch
+  difficulty: 3
+  prompt: Что такое ошибка гидрации и что React делает, когда она случается?
+  explanation: "Гидрация «прикрепляет» React к готовому HTML и требует, чтобы первый клиентский рендер совпал с серверным. Отсюда правило: в рендере не должно быть значений, которые различаются на сервере и клиенте. Клиентские значения появляются после монтирования или передаются с сервера."
+  type: quiz
+  options:
+    - label: Серверный HTML не совпал с первым клиентским рендером — React отбрасывает его и рендерит поддерево на клиенте до ближайшей Suspense-границы
+      why: Верно. Привязаться к несовпадающему DOM нельзя, поэтому React восстанавливается клиентским рендером. Это дорого, теряет выгоду SSR и может вызвать мигание.
+    - label: React сравнивает серверный HTML с состоянием после всех эффектов, поэтому setState в useEffect тоже вызывает mismatch
+      why: Нет. Сравнивается только первый рендер. Эффекты выполняются после гидрации, и обновление в useEffect — обычный повторный рендер. На этом и держится паттерн «значение после монтирования».
+    - label: Ошибка возникает, если данные на клиенте изменились уже после загрузки страницы, например пришёл новый ответ API
+      why: Изменения после гидрации — это обычные обновления состояния. Mismatch бывает только при расхождении в самом первом клиентском рендере.
+    - label: "Это лишь предупреждение в dev: React точечно исправляет отличия в DOM и спокойно продолжает гидрацию"
+      why: Неверно. При расхождении текста или структуры React выбрасывает recoverable error и перерисовывает поддерево. Различия в атрибутах он вообще не исправляет, они так и остаются.
+  answer: 0
+- id: hydration-mismatch-typeof-window
+  skill: hydration-mismatch-causes
+  question: hydration-mismatch
+  difficulty: 2
+  prompt: Компонент рендерится через SSR. У пользователя в localStorage сохранено theme = 'dark'. Найдите строки, из-за которых возникает ошибка гидрации.
+  explanation: "Проверка `typeof window` в рендере даёт разный результат: на сервере получается 'light', а на клиенте при первом же рендере — 'dark'. Тему лучше хранить в cookie, чтобы сервер знал её заранее, или читать localStorage после монтирования."
+  type: find-bug
+  language: tsx
+  code: |-
+    function ThemeBadge() {
+      const saved =
+        typeof window !== 'undefined'
+          ? localStorage.getItem('theme')
+          : null;
+      const theme = saved ?? 'light';
+      return (
+        <span className={`badge ${theme}`}>
+          {theme}
+        </span>
+      );
+    }
+  bugLines:
+    - 3
+    - 4
+  causes:
+    - "Рендер ветвится по typeof window: сервер рендерит 'light', а первый клиентский рендер — 'dark', поэтому HTML не совпадает"
+    - На сервере localStorage.getItem выбросит ReferenceError и SSR упадёт
+    - Шаблонная строка в className не сериализуется при SSR
+    - Оператор ?? не поддерживается при серверном рендере
+  answer: 0
+- id: hydration-mismatch-use-is-client
+  skill: hydration-client-only-value
+  question: hydration-mismatch
+  difficulty: 3
+  prompt: Допишите хук так, чтобы при гидрации компонент показал серверную заглушку, а затем — локальное время.
+  explanation: useSyncExternalStore принимает subscribe, getSnapshot и getServerSnapshot. На сервере и во время гидрации React берёт getServerSnapshot (false), поэтому HTML совпадает. Затем он перерисовывает компонент с клиентским снимком (true). Эффект и лишний state не нужны.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function useIsClient() {
+      return ___(
+        () => () => {},
+        () => ___,
+        () => ___,
+      );
+    }
+    function LocalTime() {
+      const isClient = useIsClient();
+      if (!isClient) return <span>—</span>;
+      const t = new Date().toLocaleTimeString();
+      return <span>{t}</span>;
+    }
+  tokens:
+    - useSyncExternalStore
+    - "true"
+    - "false"
+  decoys:
+    - useEffect
+    - useState
+    - "null"
+    - typeof window
+- id: hydration-mismatch-dark-theme
+  skill: hydration-fix-choice
+  question: hydration-mismatch
+  difficulty: 3
+  prompt: "Next.js-приложение рендерится на сервере на каждый запрос. Пользователь выбирает тёмную тему, и после перезагрузки страница должна сразу открыться тёмной: без вспышки светлой и без ошибок гидрации. Что выбрать?"
+  explanation: Если значение нужно уже в первом HTML, сервер должен знать его заранее. Cookie приходит с запросом, поэтому оба рендера совпадают. Чтение после монтирования и ssr:false убирают mismatch ценой мигания. suppressHydrationWarning лишь глушит симптом.
+  type: choose-tool
+  options:
+    - label: Хранить тему в cookie и читать её на сервере при рендере
+      why: "Лучший вариант: сервер знает тему ещё до рендера, HTML сразу тёмный, а клиентский рендер совпадает с серверным. Нет ни мигания, ни mismatch."
+    - label: Читать localStorage в useEffect после монтирования и вызывать setTheme
+      why: Mismatch не будет, но первый кадр отрисуется светлым, и тема мигнёт. Подходит для некритичных клиентских настроек, которые не влияют на первый экран.
+    - label: Повесить suppressHydrationWarning на корневой элемент
+      why: Атрибут работает на один уровень и только для текста и атрибутов. Он глушит предупреждение, но не делает тему правильной. Уместен для заведомо разных значений вроде таймстемпа.
+    - label: "Обернуть страницу в dynamic(..., { ssr: false })"
+      why: "Пропадает вся польза SSR: до загрузки JS пользователь видит пустоту. Подходит для чисто клиентских виджетов вроде карт и редакторов, а не для всей страницы."
+  answer: 0
+
+# rendering-strategies: принято из черновика 2026-10-11
+- id: rendering-strategies-core-difference
+  skill: rendering-strategies-concept
+  question: rendering-strategies
+  difficulty: 2
+  prompt: В чём главное различие между CSR, SSR, SSG и ISR?
+  explanation: "Ключевой вопрос — где и когда появляется HTML: в браузере (CSR), на каждый запрос (SSR), при сборке (SSG) или при сборке с фоновой перегенерацией (ISR). От ответа зависят свежесть данных, SEO, TTFB и нагрузка на сервер. Интерактивность во всех случаях даёт JS на клиенте."
+  type: quiz
+  options:
+    - label: "В том, где и когда генерируется HTML: в браузере, на каждый запрос, при сборке или при сборке с фоновым обновлением"
+      why: Верно. Это и определяет компромисс между свежестью данных, скоростью первого контента, SEO и стоимостью инфраструктуры.
+    - label: "В том, работает ли React на клиенте: при SSR и SSG страница остаётся статичной и не выполняет JS"
+      why: "Неверно. SSR- и SSG-страницы гидрируются: React на клиенте навешивает обработчики и делает их интерактивными."
+    - label: ISR — это SSR, где ответ кешируется в браузере пользователя на заданное время
+      why: Неверно. ISR перегенерирует статическую страницу на сервере в фоне (по таймеру или событию) и раздаёт её всем, а не кеширует у одного пользователя.
+    - label: SSG подходит только для страниц без данных, а любые данные из API требуют SSR
+      why: Неверно. SSG загружает данные при сборке и встраивает их в HTML. Проблема лишь в том, что до пересборки они устаревают.
+  answer: 0
+- id: rendering-strategies-catalog-choice
+  skill: rendering-strategy-choice
+  question: rendering-strategies
+  difficulty: 2
+  prompt: "Каталог интернет-магазина: 50 000 страниц товаров, важны SEO и скорость. Цены меняются пару раз в день, админка может отправить вебхук при изменении товара. Какую стратегию выбрать?"
+  explanation: "Правило: данные меняются редко, а SEO важен — статика. Если страниц много и обновлять их нужно без полной пересборки, подойдёт ISR с on-demand ревалидацией. SSR нужен, когда данные персональные или меняются почти на каждый запрос. CSR — когда SEO не важен."
+  type: choose-tool
+  options:
+    - label: ISR с ревалидацией по вебхуку
+      why: Страницы отдаются как статика с CDN, а изменённый товар перегенерируется точечно по событию. Так получается скорость SSG и достаточная свежесть.
+    - label: SSG с пересборкой при каждом изменении
+      why: Хорошо для небольших сайтов с редкими правками. При 50 000 страниц каждая правка цены запускает долгую полную сборку.
+    - label: SSR на каждый запрос
+      why: Подходит для персональных или очень часто меняющихся данных. Здесь каждый запрос нагружает сервер и БД, а TTFB зависит от скорости данных.
+    - label: CSR-приложение на Vite
+      why: "Разумно для внутренних приложений за логином. Для каталога плохо: пустой HTML до загрузки JS вредит SEO и времени до первого контента."
+  answer: 0
+- id: rendering-strategies-localstorage-mismatch
+  skill: hydration-mismatch
+  question: rendering-strategies
+  difficulty: 3
+  prompt: Компонент рендерится через SSR. У пользователя с сохранённой тёмной темой в консоли появляется ошибка гидрации. Найдите причину.
+  explanation: На сервере window нет, поэтому рендерится 'light'. При гидрации на клиенте initializer возвращает 'dark', и первый клиентский рендер не совпадает с HTML. Первый рендер должен совпадать с серверным. Читайте localStorage в useEffect, через useSyncExternalStore с getServerSnapshot или передавайте тему через cookie.
+  type: find-bug
+  language: tsx
+  code: |-
+    'use client';
+    import { useState } from 'react';
+
+    export function ThemeToggle() {
+      const [theme, setTheme] = useState(() =>
+        typeof window !== 'undefined'
+          ? localStorage.getItem('theme') ?? 'light'
+          : 'light'
+      );
+      const next = theme === 'dark' ? 'light' : 'dark';
+      return (
+        <button onClick={() => setTheme(next)}>{theme}</button>
+      );
+    }
+  bugLines:
+    - 6
+    - 7
+  causes:
+    - "Начальное состояние на сервере и на клиенте разное: первый клиентский рендер не совпадает с серверным HTML"
+    - localStorage вызовет ReferenceError на сервере, потому что компонент обращается к нему при рендере
+    - Ленивый инициализатор useState нельзя использовать в компонентах с 'use client'
+    - Компоненты с 'use client' не рендерятся на сервере, поэтому HTML для них пустой
+  answer: 0
+- id: rendering-strategies-ssr-hydration-timeline
+  skill: hydration-lifecycle
+  question: rendering-strategies
+  difficulty: 2
+  prompt: Расставьте по порядку, что происходит при открытии SSR-страницы.
+  explanation: "При SSR контент виден раньше, чем загрузится JS. Интерактивным он становится только после гидрации: React строит дерево, сверяет его с готовой разметкой и навешивает обработчики. Эффекты запускаются уже после коммита гидрации. Разрыв между «увидел» и «смог кликнуть» зависит от размера бандла и стоимости гидрации."
+  type: order
+  kind: timeline
+  steps:
+    - Сервер получает запрос и загружает данные
+    - Сервер рендерит компоненты в HTML и отправляет ответ
+    - "Браузер отображает HTML: контент виден, но не интерактивен"
+    - Загружается и выполняется JS-бандл
+    - "React гидрирует: строит дерево, сверяет с разметкой, навешивает обработчики — страница становится интерактивной"
+    - После коммита гидрации запускаются эффекты (useEffect) компонентов
+
+# server-components: принято из черновика 2026-10-11
+- id: server-components-vs-ssr
+  skill: rsc-mental-model
+  question: server-components
+  difficulty: 3
+  prompt: Что принципиально отличает React Server Components от классического SSR?
+  explanation: SSR отвечает на вопрос «как быстро показать HTML», а RSC — «какой код вообще нужен на клиенте». Server Components выполняются только на сервере или при сборке, их код не уходит в бандл. Клиент получает RSC payload и при первой загрузке, и при навигации. Обычно RSC и SSR работают вместе.
+  type: quiz
+  options:
+    - label: Код Server Components не попадает в бандл и не гидрируется; клиент получает RSC payload, в том числе при навигации
+      why: Верно. SSR даёт HTML первой загрузки, а потом гидрирует всё дерево. В RSC серверная часть дерева так и остаётся на сервере.
+    - label: "Это новое название SSR в App Router: компоненты на каждый запрос рендерятся на сервере в HTML"
+      why: Нет. Результат RSC — сериализованный payload, а не HTML. Такие компоненты могут выполняться и при сборке. HTML из payload получают отдельно, через SSR.
+    - label: Server Components рендерятся на сервере, а затем гидрируются на клиенте и становятся интерактивными
+      why: У Server Components нет гидрации, state и обработчиков. Интерактивность есть только у Client Components за границей 'use client'.
+    - label: Server Components работают только на первой загрузке, а при клиентской навигации их подменяют клиентские
+      why: "Наоборот: при навигации без перезагрузки роутер запрашивает RSC payload нового маршрута. Серверные компоненты при этом снова выполняются на сервере."
+  answer: 0
+- id: server-components-function-prop
+  skill: rsc-serializable-props
+  question: server-components
+  difficulty: 2
+  prompt: Counter — Client Component с 'use client'. Найдите строку, из-за которой страница упадёт при рендере.
+  explanation: "Props, которые идут через границу server→client, сериализуются в RSC payload. Обычную функцию сериализовать нельзя, и React выдаст ошибку «Functions cannot be passed directly to Client Components». Есть два решения: объявить обработчик внутри клиентского компонента или передать Server Function с 'use server'."
+  type: find-bug
+  language: tsx
+  code: |-
+    // app/page.tsx — Server Component
+    import { Counter } from './Counter';
+
+    export default async function Page() {
+      const start = await getInitialCount();
+      return (
+        <Counter
+          initial={start}
+          onChange={(n) => console.log(n)}
+        />
+      );
+    }
+  bugLines:
+    - 9
+  causes:
+    - Обычная функция не сериализуется и не может пройти через границу server/client как prop
+    - Async-компонент не может рендерить Client Component — нужен dynamic import
+    - Результат await нельзя передавать в props клиентского компонента
+    - console.log запрещён в Server Components, потому что консоли на сервере нет
+  answer: 0
+- id: server-components-heavy-article
+  skill: rsc-client-boundary-placement
+  question: server-components
+  difficulty: 2
+  prompt: Статья блога рендерится тяжёлой библиотекой подсветки кода (~300 КБ). Контент меняется только при публикации, рядом стоит кнопка «лайк». Next.js App Router. Как организовать?
+  explanation: Границу 'use client' опускайте как можно ниже, до интерактивных листьев. Тогда тяжёлые зависимости для чистого рендера остаются на сервере, а в бандл попадают только клиентские острова.
+  type: choose-tool
+  options:
+    - label: Статья — Server Component с подсветкой на сервере, кнопка «лайк» — отдельный 'use client' остров
+      why: Лучший вариант. Библиотека подсветки не попадает в бандл, статья приходит готовой разметкой, а гидрируется только маленькая кнопка.
+    - label: "'use client' на всей странице, данные загружать через useEffect"
+      why: 300 КБ уйдут в бандл, контент появится только после загрузки JS и запроса. Так стоит делать лишь для полностью интерактивного виджета без SEO.
+    - label: Client Component страницы, отрендеренный через SSR, — HTML будет сразу
+      why: HTML действительно будет сразу, но для гидрации библиотека всё равно скачается и выполнится. Подходит, если подсветка должна быть интерактивной, например в живом редакторе.
+    - label: Подгрузить библиотеку подсветки через lazy/dynamic import на клиенте
+      why: Бандл первой загрузки станет меньше, но код всё равно скачается и выполнится в браузере. Уместно для тяжёлого интерактивного виджета, который нужен не сразу.
+  answer: 0
+- id: server-components-children-slot
+  skill: rsc-children-composition
+  question: server-components
+  difficulty: 3
+  prompt: Комментарии загружает async Server Component `Comments`. Допишите код так, чтобы они отображались внутри клиентской сворачиваемой обёртки и не стали клиентским кодом.
+  explanation: "Если Comments импортировать внутрь Collapsible, он стал бы клиентским. Вместо этого серверная страница рендерит Comments сама и передаёт результат как children. Для клиентской обёртки children — уже готовый JSX из RSC payload: она лишь решает, где его показать."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    // Collapsible.tsx
+    '___';
+    export function Collapsible({ children }: Props) {
+      const [open, setOpen] = useState(false);
+      const toggle = () => setOpen((o) => !o);
+      return (
+        <section>
+          <button onClick={toggle}>Toggle</button>
+          {open && ___}
+        </section>
+      );
+    }
+    // page.tsx — Server Component
+    <Collapsible><___ /></Collapsible>
+  tokens:
+    - use client
+    - children
+    - Comments
+  decoys:
+    - use server
+    - server-only
+    - Collapsible
+    - props.children
+
+# server-functions: принято из черновика 2026-10-11
+- id: server-functions-public-endpoint-quiz
+  skill: server-functions-security
+  question: server-functions
+  difficulty: 3
+  prompt: Почему валидацию аргументов и проверку прав нужно делать внутри Server Function, даже если UI уже всё проверяет?
+  explanation: "Функцию с `'use server'` удобно вызывать как обычную async-функцию, но фреймворк превращает вызов в POST-запрос. Это публичный API-эндпоинт. Правило: внутри каждой функции проверяй, кто вызывает, валидируй вход схемой (Zod/Valibot), проверяй права на ресурс и возвращай клиенту только нужные поля."
+  type: quiz
+  options:
+    - label: "Это публичный POST-эндпоинт: его можно вызвать напрямую с любыми аргументами, в обход UI"
+      why: Верно. Любой может повторить запрос из DevTools или скрипта с чужим id. Защита на клиенте ничего не гарантирует, проверки должны быть на сервере.
+    - label: "Не нужно: фреймворк сверяет аргументы с TypeScript-типами параметров при десериализации"
+      why: "TypeScript-типы стираются при компиляции и в рантайме не проверяются. Чтобы реально проверить вход, нужна схема: Zod, Valibot и т. п."
+    - label: Её могут вызвать только компоненты, которые её импортируют, поэтому скрытой кнопки в UI достаточно
+      why: Импорт даёт клиенту ссылку на эндпоинт, а не ограничение доступа. Запрос виден во вкладке Network, его легко воспроизвести без кнопки.
+    - label: Фреймворк проверяет Origin и шифрует данные, поэтому дополнительная защита не нужна
+      why: Проверка Origin защищает от CSRF, а шифруются переменные замыкания. Ни то, ни другое не мешает залогиненному пользователю передать чужой id.
+  answer: 0
+- id: server-functions-missing-authorization
+  skill: server-functions-security
+  question: server-functions
+  difficulty: 2
+  prompt: Кнопку «Удалить» в UI видит только автор поста. Найдите строку, из-за которой любой пользователь может удалить чужой пост.
+  explanation: Аутентификация (сессия есть) — ещё не авторизация (есть ли право на этот пост). Кнопку можно скрыть в UI, но функцию всё равно можно вызвать напрямую с любым postId. Перед мутацией загрузи ресурс и проверь, что `post.authorId === session.user.id`, или вызови свою `canDelete`.
+  type: find-bug
+  language: tsx
+  code: |-
+    'use server';
+
+    // Кнопка «Удалить» видна только автору
+    export async function deletePost(raw: unknown) {
+      const postId = z.uuid().parse(raw);
+      const session = await auth();
+      if (!session) throw new Error('Unauthorized');
+      await db.post.delete(postId);
+      revalidatePath('/posts');
+    }
+  bugLines:
+    - 8
+  causes:
+    - "Пост удаляется без проверки, что текущий пользователь — его автор: проверена только сессия"
+    - revalidatePath нужно вызывать до удаления, иначе кэш не обновится
+    - Server Function не может бросать исключения — нужно возвращать объект с ошибкой
+    - Параметр нужно типизировать как string, а не unknown, иначе схема не сработает
+  answer: 0
+- id: server-functions-zod-validation
+  skill: server-functions-input-validation
+  question: server-functions
+  difficulty: 2
+  prompt: Допишите Server Function так, чтобы данные формы проходили рантайм-валидацию схемой без исключений.
+  explanation: "`Object.fromEntries` превращает FormData в объект, `safeParse` не бросает исключение и возвращает `{ success, data | error }`. Ошибку можно вернуть в UI. authorId берём из сессии, а не из формы: клиенту нельзя доверять ни одно поле."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    'use server';
+    const schema = z.object({
+      postId: z.uuid(),
+      text: z.string().min(1).max(2000),
+    });
+    export async function addComment(fd: FormData) {
+      const session = await auth();
+      if (!session) return { error: 'Нужно войти' };
+      const parsed = schema.___(Object.___(fd));
+      if (!parsed.___) return { error: 'Неверный ввод' };
+      const { postId, text } = parsed.___;
+      const authorId = session.user.id;
+      await db.comment.create({ postId, text, authorId });
+    }
+  tokens:
+    - safeParse
+    - fromEntries
+    - success
+    - data
+  decoys:
+    - parse
+    - entries
+    - ok
+    - value
+- id: server-functions-not-for-reads
+  skill: server-functions-use-cases
+  question: server-functions
+  difficulty: 2
+  prompt: "Next.js App Router: при открытии страницы поста нужно показать комментарии. Важны SEO и минимум клиентского JS, обновлять данные в реальном времени не нужно. Что выбрать?"
+  explanation: Server Functions нужны для мутаций. Это POST-запросы, фреймворк выполняет их последовательно, и они не встраиваются в серверный рендер. Начальную загрузку данных делает async Server Component. Клиентский фетчинг нужен, когда данные надо обновлять интерактивно.
+  type: choose-tool
+  options:
+    - label: async Server Component, который читает данные через слой доступа к БД
+      why: "Лучший вариант: данные приходят прямо в HTML, клиентского JS для загрузки нет, SEO работает из коробки. Проверку доступа держим в слое данных."
+    - label: Server Function, вызванная из useEffect в клиентском компоненте
+      why: "Антипаттерн: функции рассчитаны на мутации и выполняются последовательно, а данные появятся только после гидрации. Нет ни SSR, ни кэша."
+    - label: Route Handler и fetch в useEffect
+      why: Подходит, если тот же API нужен внешним клиентам, например мобильному приложению. Для этой страницы это лишний водопад запросов и клиентский JS.
+    - label: TanStack Query на клиенте поверх Route Handler
+      why: Подходит, если нужны polling, refetch при фокусе или оптимистичные обновления. Для статичного показа при открытии это избыточно.
+  answer: 0
+
+# streaming-ssr: принято из черновика 2026-10-11
+- id: streaming-ssr-quiz
+  skill: streaming-ssr-basics
+  question: streaming-ssr
+  difficulty: 3
+  prompt: Чем стриминговый SSR с выборочной гидрацией лучше связки `renderToString` + `hydrateRoot`?
+  explanation: "Стриминг разрывает «водопад» классического SSR: всё получить → всё отрендерить → весь JS загрузить → всё гидрировать. Единица независимости — Suspense-граница. Она отдельно приходит в HTML и отдельно гидрируется. Приоритет получает та часть, с которой взаимодействует пользователь."
+  type: quiz
+  options:
+    - label: Оболочка с fallback-ами уходит сразу, готовые границы досылаются позже, а гидрация идёт по границам — сначала та, где был клик
+      why: Верно. TTFB не ждёт медленных данных. Гидрация не ждёт весь HTML и JS. Границу, по которой кликнули, React гидрирует вне очереди и воспроизводит событие.
+    - label: HTML приходит по частям, но гидрация стартует, только когда пришёл весь HTML и загрузился весь JS
+      why: "Это гидрация по модели классического SSR: «всё или ничего». Выборочная гидрация гидрирует готовые границы, не дожидаясь остальных."
+    - label: Сервер отдаёт пустой HTML, а контент рендерится на клиенте кусками по мере загрузки чанков
+      why: "Это CSR с code splitting. При стриминге в HTML приходит реальная разметка: сначала оболочка, затем содержимое границ."
+    - label: Сервер рендерит компоненты параллельно в нескольких потоках, поэтому HTML готов быстрее
+      why: "Стриминг не распараллеливает рендер. Он не ждёт медленные части: отдаёт на их месте fallback и досылает HTML позже."
+  answer: 0
+- id: streaming-ssr-timeline
+  skill: streaming-ssr-timeline
+  question: streaming-ssr
+  difficulty: 3
+  prompt: На странице есть медленная Suspense-граница с отзывами. client.js загрузился уже после прихода всего HTML, а пользователь кликнул по отзывам во время гидрации. Расставьте события по порядку.
+  explanation: "Сначала уходит оболочка: onShellReady → pipe. Потом сервер досылает HTML границ вместе с инлайн-скриптами, которые подменяют fallback. Гидрация начинается после загрузки JS. Клик по ещё не гидрированной границе повышает её приоритет, и React воспроизводит событие после гидрации."
+  type: order
+  kind: timeline
+  steps:
+    - "Оболочка отрендерена: срабатывает onShellReady, и pipe(res) начинает отдавать HTML"
+    - Браузер показывает оболочку с fallback вместо отзывов
+    - "Данные готовы: сервер досылает HTML отзывов с инлайн-скриптом"
+    - Инлайн-скрипт заменяет fallback на готовую разметку
+    - Загружается client.js, hydrateRoot запускает гидрацию
+    - "Клик по отзывам: React гидрирует эту границу первой и воспроизводит событие"
+- id: streaming-ssr-shell-blocked
+  skill: streaming-ssr-suspense-boundaries
+  question: streaming-ssr
+  difficulty: 2
+  prompt: Reviews и Recommendations читают медленные данные через use(). Отзывы грузятся 3 с, и TTFB страницы тоже стал 3 с, хотя используется renderToPipeableStream. Найдите строку с причиной.
+  explanation: "Оболочка — это всё, что не внутри Suspense-границы. Reviews приостанавливается снаружи границы, поэтому onShellReady ждёт его данные, и стриминг ничего не даёт. Правило: каждую часть с медленными данными оборачивайте в свою Suspense-границу."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Page() {
+      return (
+        <Layout>
+          <Header />
+          <Reviews />
+          <Suspense fallback={<Spinner />}>
+            <Recommendations />
+          </Suspense>
+        </Layout>
+      );
+    }
+  bugLines:
+    - 5
+  causes:
+    - Reviews приостанавливается вне Suspense-границы и становится частью оболочки, поэтому onShellReady ждёт его данные
+    - Recommendations внутри Suspense блокирует отправку оболочки, пока не загрузится
+    - Header рендерится синхронно, поэтому стрим не начинается до конца рендера страницы
+    - Layout должен быть внутри Suspense, иначе стриминг отключается
+  answer: 0
+- id: streaming-ssr-bots
+  skill: streaming-ssr-seo
+  question: streaming-ssr
+  difficulty: 3
+  prompt: Страница каталога отдаётся через renderToPipeableStream. Поисковым ботам нужен полный HTML всех Suspense-границ в одном ответе, а люди должны и дальше получать быстрый стрим. Что сделать?
+  explanation: onShellReady даёт ранний TTFB для людей. onAllReady срабатывает, когда готовы все границы, — подходит ботам и случаям, где нужен итоговый статус-код. Стрим можно настроить под user-agent, не отказываясь от Suspense.
+  type: choose-tool
+  options:
+    - label: Для ботов вызывать pipe(res) в onAllReady, для остальных — в onShellReady
+      why: Лучший вариант. Бот получает полный HTML, а заодно можно выставить статус по итогам рендера. Люди по-прежнему получают оболочку сразу.
+    - label: Перейти на renderToString для всех запросов
+      why: Стриминг пропадёт для всех. К тому же renderToString не ждёт данных Suspense и отдаёт fallback. Подходит только для простых страниц без асинхронных данных.
+    - label: Убрать Suspense-границы, чтобы всё попало в оболочку
+      why: Бот получит всё, но и люди будут ждать самых медленных данных. Оправдано, только если медленных частей на странице нет.
+    - label: Увеличить таймаут перед abort() до 30 секунд
+      why: Таймаут лишь ограничивает, сколько ждать отложенные части. Бот всё равно получит HTML по частям с fallback-ами. Таймаут нужен как страховка, а не для SEO.
+  answer: 0

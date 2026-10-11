@@ -14,3 +14,918 @@
   explanation: >-
     Сначала измерение, потом оптимизация: без исходной метрики непонятно, помог ли фикс,
     а мемоизация «на всякий случай» часто не даёт выигрыша.
+
+# data-waterfalls: принято из черновика 2026-10-11
+- id: data-waterfalls-cause-quiz
+  skill: data-waterfalls-cause
+  question: data-waterfalls
+  difficulty: 2
+  prompt: Почему загрузка данных внутри компонентов (`useQuery` в родителе и в ребёнке) часто даёт водопад и что помогает в первую очередь?
+  explanation: "Водопад создаёт зависимость старта запроса от рендера, а не скорость сети. Лечится это так: начинать загрузку до рендера (loader, prefetch, Server Components), запускать независимые запросы параллельно и поднимать их выше. Кэш ускоряет только повторные визиты."
+  type: quiz
+  options:
+    - label: Ребёнок монтируется и стартует запрос, только когда родитель загрузился и отрендерился. Помогает ранний старт и параллельные запросы
+      why: Верно. Цепочку создаёт связь «запрос ← рендер». Если запросы стартуют при навигации или вместе через useQueries/Promise.all, ожидания не складываются.
+    - label: Водопад возникает из-за медленной сети, и лучшее решение — закешировать все ответы
+      why: Кэш помогает при повторном визите и дедуплицирует запросы. Первая загрузка всё равно идёт цепочкой, если запросы стартуют по очереди.
+    - label: Достаточно обернуть каждый компонент в свою Suspense-границу, и запросы пойдут параллельно
+      why: Suspense только показывает fallback. Если каждая вложенная граница грузит своё после родителя, получится водопад «по слоям».
+    - label: Эффекты выполняются после paint. Если перенести загрузку в useLayoutEffect, запросы стартуют одновременно
+      why: useLayoutEffect срабатывает чуть раньше, но всё так же после рендера своего компонента. Ребёнок по-прежнему ждёт данных родителя.
+  answer: 0
+- id: data-waterfalls-sequential-await
+  skill: parallel-server-fetch
+  question: data-waterfalls
+  difficulty: 2
+  prompt: Server Component грузится вдвое дольше, чем мог бы. Посты не зависят от данных пользователя. Найдите проблему.
+  explanation: "Каждый `await` останавливает функцию, поэтому getPosts стартует только после ответа getUser. Независимые запросы нужно запустить сразу, без await, а ждать их вместе: `await Promise.all([userP, postsP])`. Тогда время загрузки равно самому долгому запросу, а не их сумме."
+  type: find-bug
+  language: tsx
+  code: |-
+    async function ProfilePage({ id }: Props) {
+      const user = await getUser(id);
+      const posts = await getPosts(id);
+      return (
+        <Layout user={user}>
+          <Posts items={posts} />
+        </Layout>
+      );
+    }
+  bugLines:
+    - 2
+    - 3
+  causes:
+    - "Последовательные await у независимых запросов: getPosts ждёт завершения getUser"
+    - Server Component не может быть async, данные нужно грузить в useEffect
+    - getUser нужно обернуть в cache() — тогда запросы пойдут параллельно
+    - Posts должен сам загружать свои данные, чтобы не блокировать Layout
+  answer: 0
+- id: data-waterfalls-prefetch-hover
+  skill: prefetch-on-intent
+  question: data-waterfalls
+  difficulty: 2
+  prompt: Допишите ссылку так, чтобы данные пользователя начинали грузиться уже при наведении курсора, до перехода на страницу.
+  explanation: "`prefetchQuery` кладёт данные в кэш TanStack Query под тем же queryKey, что использует страница. Между наведением и кликом проходят сотни миллисекунд, поэтому к моменту рендера запрос уже летит или завершён. staleTime: 60_000 нужен, чтобы повторные наведения не перезапрашивали данные, которым меньше минуты."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function UserLink({ id }: { id: string }) {
+      const queryClient = ___();
+      const prefetch = () =>
+        queryClient.___({
+          queryKey: ['user', id],
+          queryFn: () => getUser(id),
+          staleTime: 60_000,
+        });
+      return (
+        <Link to={`/users/${id}`} ___={prefetch}>
+          {id}
+        </Link>
+      );
+    }
+  tokens:
+    - useQueryClient
+    - prefetchQuery
+    - onMouseEnter
+  decoys:
+    - useQuery
+    - invalidateQueries
+    - onClick
+    - refetchQueries
+- id: data-waterfalls-dedupe-server
+  skill: request-dedupe-cache
+  question: data-waterfalls
+  difficulty: 3
+  prompt: В Next.js App Router getUser(id) вызывается в layout, в шапке и на странице — это разные Server Components одного рендера. В БД уходит 3 запроса. Нужен один на HTTP-запрос, без пробрасывания props. Что выбрать?
+  explanation: "`cache()` из React мемоизирует функцию в рамках одного серверного рендера: все компоненты дерева получат один результат, а между HTTP-запросами кэш не живёт. Для кэша между запросами берут механизмы фреймворка, для клиентского серверного состояния — TanStack Query."
+  type: choose-tool
+  options:
+    - label: Обернуть getUser в cache() из react
+      why: "Лучший выбор: вызовы с теми же аргументами дедуплицируются в пределах одного серверного рендера, и данные не утекают между пользователями."
+    - label: TanStack Query с queryClient на сервере
+      why: Подходит для клиентского кэша, гидрации и фонового обновления. Ради дедупликации внутри одного RSC-рендера это лишняя инфраструктура.
+    - label: Глобальный Map на уровне модуля
+      why: "Map переживёт HTTP-запрос: данные одного пользователя могут попасть к другому, кэш устареет и будет расти. Годится только для общих данных с явной инвалидацией."
+    - label: useMemo в каждом компоненте
+      why: useMemo кэширует только внутри одного компонента и не делится результатом с layout, шапкой и страницей — запросов останется три.
+  answer: 0
+
+# debounce-throttle: принято из черновика 2026-10-11
+- id: debounce-throttle-body-recreate-quiz
+  skill: debounce-stable-instance
+  question: debounce-throttle
+  difficulty: 2
+  prompt: Почему `const onSearch = debounce(search, 300)` прямо в теле компонента не уменьшает число запросов, если каждый ввод меняет state?
+  explanation: "Debounce держит таймер в замыкании своего экземпляра. Экземпляр должен жить между рендерами: `useMemo`/`useRef` и `fnRef` для свежего колбэка. Отложенный вызов отменяют в cleanup при размонтировании."
+  type: quiz
+  options:
+    - label: Каждый рендер — новый экземпляр со своим таймером; старые таймеры никто не сбрасывает, и запрос уходит на каждый ввод
+      why: Верно. clearTimeout сбрасывает только таймер своего экземпляра. После setState вызывается уже новая функция, а таймер старой срабатывает.
+    - label: "Проблема только в производительности: функция пересоздаётся, но таймер у всех экземпляров общий"
+      why: "Общего таймера нет: id хранится в замыкании конкретного вызова debounce(). Поэтому это поломка логики, а не лишние аллокации."
+    - label: Синтетические события React переиспользуются, и к срабатыванию таймера event уже пустой
+      why: "Event pooling убрали в React 17. К тому же проблема не в событии: debounce не работает, даже если передавать строку."
+    - label: Функция замыкается на устаревший query, поэтому запросы уходят со старым значением
+      why: "Устаревшее замыкание — отдельная проблема. Она возникает при обратной ошибке: debounce создают один раз без fnRef. Здесь функция как раз свежая на каждом рендере."
+  answer: 0
+- id: debounce-throttle-inline-fn-deps
+  skill: debounce-stable-instance
+  question: debounce-throttle
+  difficulty: 3
+  prompt: "Хук используют, как показано внизу: search вызывают в onChange рядом с setQuery. Запросы почти не уходят. Найдите причину."
+  explanation: Инлайн-стрелка новая на каждом рендере, поэтому `useMemo` с `[fn]` пересоздаёт debounce. Cleanup эффекта отменяет вызов, отложенный в прошлом экземпляре. Решение — держать fn в `useRef`, обновлять ref в эффекте, а в зависимостях оставить только delay.
+  type: find-bug
+  language: tsx
+  code: |-
+    function useDebounced<A extends unknown[]>(
+      fn: (...args: A) => void,
+      delay: number,
+    ) {
+      const debounced = useMemo(
+        () => debounce(fn, delay),
+        [fn, delay],
+      );
+      useEffect(() => () => debounced.cancel(), [debounced]);
+      return debounced;
+    }
+    // in component:
+    const search = useDebounced(
+      (q: string) => api.search(q), 300);
+  bugLines:
+    - 7
+  causes:
+    - "fn — новая инлайн-функция на каждом рендере: useMemo пересоздаёт debounce, и cleanup отменяет отложенный вызов"
+    - delay в зависимостях сбрасывает таймер, ведь число 300 каждый раз сравнивается заново
+    - cancel нужно вызывать в теле эффекта, а не возвращать из него
+    - useMemo не сохраняет функции между рендерами — нужен useCallback
+  answer: 0
+- id: debounce-throttle-callback-hook-fill
+  skill: debounce-callback-hook
+  question: debounce-throttle
+  difficulty: 2
+  prompt: "Допишите хук debounced-функции: экземпляр стабилен, вызывается свежий колбэк, при размонтировании вызов отменяется. Тип `Fn = (q: string) => void`."
+  explanation: "`useRef` хранит последний fn, поэтому useMemo зависит только от delay и не пересоздаёт таймер. Вызов идёт через `fnRef.current` — без устаревшего замыкания. Cleanup возвращает `cancel`, и после размонтирования отложенный вызов не сработает."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function useDebouncedFn(fn: Fn, delay: number) {
+      const fnRef = ___(fn);
+      useEffect(() => { fnRef.current = fn; });
+      const debounced = useMemo(() => {
+        let id: ReturnType<typeof setTimeout>;
+        const call = (q: string) => {
+          clearTimeout(id);
+          id = setTimeout(() => fnRef.___(q), delay);
+        };
+        return Object.assign(call, { cancel: () => clearTimeout(id) });
+      }, [___]);
+      useEffect(() => debounced.___, [debounced]);
+      return debounced;
+    }
+  tokens:
+    - useRef
+    - current
+    - delay
+    - cancel
+  decoys:
+    - useState
+    - fn
+    - flush
+    - useCallback
+- id: debounce-throttle-local-filter-choice
+  skill: deferred-value-for-heavy-render
+  question: debounce-throttle
+  difficulty: 2
+  prompt: Поле фильтрует локальный список из 5000 строк, данные уже в памяти, запросов нет. При быстром вводе инпут подтормаживает. Что выбрать?
+  explanation: "Debounce и throttle уменьшают число вызовов по времени — это нужно для запросов к API и частых событий. `useDeferredValue` ничего не ждёт: он рендерит тяжёлый результат с низким приоритетом, и ввод не блокируется. Для локальной фильтрации — useDeferredValue, для поиска по API — debounce."
+  type: choose-tool
+  options:
+    - label: useDeferredValue для query + memo-компонент списка
+      why: Ввод обновляется сразу, а тяжёлый рендер списка идёт с низким приоритетом и прерывается новым вводом. Искусственной задержки нет.
+    - label: Debounce query на 300 мс
+      why: Подходит для поиска по API, где важно сократить число запросов. Здесь он добавит лаг, а сам рендер после паузы всё равно заблокирует ввод.
+    - label: Throttle фильтрации раз в 200 мс
+      why: Хорош для scroll, resize и mousemove, где нужен регулярный отклик. При вводе фильтрует промежуточные значения, а рендер остаётся блокирующим.
+    - label: Только useMemo для отфильтрованного массива
+      why: Помогает, если дорого само вычисление. Но query меняется на каждый символ, и пересчёт с рендером 5000 строк всё равно будет. Тормозит рендер, а не повторное вычисление.
+  answer: 0
+
+# lazy-suspense: принято из черновика 2026-10-11
+- id: lazy-suspense-core-idea
+  skill: code-splitting-lazy-suspense
+  question: lazy-suspense
+  difficulty: 2
+  prompt: Как `React.lazy` и `Suspense` вместе разделяют код приложения?
+  explanation: "`lazy` превращает динамический `import()` в компонент. Сборщик выносит этот модуль в отдельный чанк, и React запрашивает его при первом рендере. Пока чанк грузится, ближайшая граница `Suspense` выше по дереву показывает fallback. Поэтому тяжёлые страницы не попадают в начальный бандл."
+  type: quiz
+  options:
+    - label: При первом рендере lazy-компонент запрашивает свой чанк, а ближайший Suspense выше по дереву показывает fallback до загрузки
+      why: Верно. `import()` вызывается при первом рендере, пока промис не разрешён. Fallback показывает граница Suspense, которая стоит над lazy-компонентом.
+    - label: lazy загружает все чанки в фоне при старте приложения, а Suspense лишь скрывает компонент до монтирования
+      why: Неверно. Загрузка начинается только при первом рендере. Раньше её можно запустить лишь вручную, вызвав `import()`, например при наведении.
+    - label: Suspense нужно разместить внутри lazy-компонента, вокруг его собственной разметки
+      why: Неверно. Пока чанк не загружен, кода компонента ещё нет. Граница должна стоять выше по дереву, иначе показывать fallback некому.
+    - label: Код компонента всё равно остаётся в основном бандле, lazy лишь откладывает его монтирование
+      why: Неверно. Сборщик видит динамический `import()` и выносит модуль в отдельный чанк. В этом и состоит смысл code splitting.
+  answer: 0
+- id: lazy-suspense-inside-component
+  skill: lazy-module-level
+  question: lazy-suspense
+  difficulty: 2
+  prompt: После каждого ввода в фильтр график мигает скелетоном и теряет зум. Найдите строку с ошибкой.
+  explanation: "`lazy` внутри компонента на каждом рендере создаёт новый тип компонента. React видит другой тип, размонтирует старый `Chart` вместе с его состоянием и снова приостанавливается. Правило: `lazy` объявляют на уровне модуля, рядом с импортами."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Dashboard({ filter }: Props) {
+      const Chart = lazy(() => import('./Chart'));
+      return (
+        <Suspense fallback={<ChartSkeleton />}>
+          <Chart filter={filter} />
+        </Suspense>
+      );
+    }
+  bugLines:
+    - 2
+  causes:
+    - "lazy вызывается при каждом рендере: создаётся новый тип компонента, Chart перемонтируется и теряет состояние"
+    - Suspense должен быть внутри Chart, а не снаружи
+    - lazy работает только с именованными экспортами, а здесь импортируется default
+    - Нельзя передавать props в lazy-компонент до загрузки чанка
+  answer: 0
+- id: lazy-suspense-named-export
+  skill: lazy-named-export
+  question: lazy-suspense
+  difficulty: 2
+  prompt: Модуль `./charts` экспортирует `Chart` именованно. Допишите ленивую загрузку с запасным UI.
+  explanation: "`lazy` ожидает промис модуля с default-экспортом. Именованный экспорт заворачивают в `{ default: m.Chart }`. Запасной UI задаётся пропом `fallback` у ближайшего `Suspense`."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const Chart = ___(() =>
+      import('./charts').then((m) => ({
+        ___: m.Chart,
+      }))
+    );
+
+    function Report() {
+      return (
+        <Suspense ___={<ChartSkeleton />}>
+          <Chart />
+        </Suspense>
+      );
+    }
+  tokens:
+    - lazy
+    - default
+    - fallback
+  decoys:
+    - memo
+    - component
+    - loading
+    - placeholder
+- id: lazy-suspense-tab-switch-fallback
+  skill: suspense-transitions
+  question: lazy-suspense
+  difficulty: 3
+  prompt: Вкладки отчёта загружаются через lazy. При переключении весь экран на полсекунды заменяется скелетоном. Нужно оставить старую вкладку на экране, пока грузится новая. Что выбрать?
+  explanation: Если обновление, которое приостанавливает уже показанный контент, помечено как переход, React не прячет его за fallback. Он продолжает показывать старый экран, пока новый не готов. Предзагрузка и вложенные границы хорошо это дополняют.
+  type: choose-tool
+  options:
+    - label: Переключать вкладку через startTransition (или useTransition с индикатором isPending)
+      why: Лучший вариант. Переход позволяет React держать старый UI вместо fallback до загрузки чанка, а isPending даёт ненавязчивый индикатор загрузки.
+    - label: Предзагружать чанк вкладки вызовом import() по onMouseEnter
+      why: "Полезное дополнение: часто чанк успевает загрузиться. Но на медленной сети или при клике без наведения fallback всё равно появится."
+    - label: Убрать lazy и импортировать вкладки статически
+      why: Подходит, если вкладки лёгкие. Тяжёлые вкладки раздуют начальный бандл и замедлят первую загрузку.
+    - label: Поднять Suspense выше, до корня приложения
+      why: "Станет хуже: fallback заменит ещё больше интерфейса. Границы, наоборот, стоит дробить и ставить ближе к месту загрузки."
+  answer: 0
+
+# memory-leaks: принято из черновика 2026-10-11
+- id: memory-leaks-root-cause
+  skill: memory-leak-sources
+  question: memory-leaks
+  difficulty: 2
+  prompt: Почему компонент, уже ушедший из дерева, может продолжать занимать память?
+  explanation: "GC собирает только то, до чего нельзя дотянуться от корней. Утечка — это всегда **лишняя ссылка** от долгоживущего объекта: window, сокета, таймера, observer, глобального кэша, сторонней библиотеки. Поэтому каждый эффект, который что-то регистрирует снаружи, должен возвращать cleanup, а кэши — иметь лимит."
+  type: quiz
+  options:
+    - label: Долгоживущий объект (window, сокет, таймер, глобальный кэш) хранит ссылку на колбэк или данные компонента, и GC не может их собрать
+      why: Верно. Колбэк замыкает state, props и refs компонента. Пока на колбэк ссылается живой объект, вся эта цепочка достижима и не собирается.
+    - label: React не освобождает память компонента, пока не произойдёт следующий ререндер корня
+      why: "React отбрасывает Fiber-узлы при коммите размонтирования, а память освобождает GC. Ререндер корня тут ни при чём: держит память внешняя ссылка."
+    - label: Утечку вызывает setState после размонтирования — об этом и предупреждал React
+      why: Сам setState на размонтированном компоненте безвреден. Предупреждение убрали в React 18 как чаще ложное. Течёт подписка, которая этот setState вызывает.
+    - label: Замыкания в JS удерживают память навсегда, поэтому стрелочные функции в JSX надо выносить
+      why: Замыкание собирается вместе с функцией, когда на неё не осталось ссылок. Inline-функции в JSX не текут, если их не регистрирует внешний объект.
+  answer: 0
+- id: memory-leaks-listener-identity
+  skill: effect-cleanup-subscriptions
+  question: memory-leaks
+  difficulty: 2
+  prompt: После каждого монтирования и размонтирования хука в window остаётся слушатель. Найдите ошибку.
+  explanation: removeEventListener удаляет слушатель, только если ему передали **ту же ссылку** на функцию. Две одинаковые стрелочные функции — это разные объекты. Нужно сохранить обработчик в переменную (`const onResize = ...`) и передать её и в add, и в remove.
+  type: find-bug
+  language: tsx
+  code: |-
+    function useWindowWidth() {
+      const [width, setWidth] = useState(0);
+      useEffect(() => {
+        window.addEventListener('resize', () =>
+          setWidth(window.innerWidth)
+        );
+        return () => {
+          window.removeEventListener('resize', () =>
+            setWidth(window.innerWidth)
+          );
+        };
+      }, []);
+      return width;
+    }
+  bugLines:
+    - 8
+    - 9
+  causes:
+    - "Пустой массив зависимостей: эффект должен зависеть от width"
+    - В remove передаётся новая функция, а не та, что была добавлена, поэтому слушатель не снимается
+    - Cleanup нельзя возвращать из эффекта с пустыми зависимостями
+    - setWidth нельзя вызывать внутри обработчика событий window
+  answer: 1
+- id: memory-leaks-heap-snapshot-recipe
+  skill: memory-leak-investigation
+  question: memory-leaks
+  difficulty: 3
+  prompt: "Подозрение: память растёт при каждом открытии и закрытии модалки. Соберите алгоритм поиска утечки."
+  explanation: "Сценарий повторяют несколько раз: разовые аллокации (ленивые модули, кэши) тогда не маскируют рост. Comparison показывает, каких объектов стало больше, а Retainers — **кто их держит**. Именно эта цепочка ведёт к забытой подписке или ref. После фикса замер повторяют."
+  type: order
+  kind: recipe
+  steps:
+    - Сделать базовый heap snapshot во вкладке Memory
+    - "Несколько раз повторить сценарий: открыть и закрыть модалку"
+    - Сделать второй heap snapshot
+    - В режиме Comparison отфильтровать по «Detached» и найти классы, число которых растёт
+    - Открыть Retainers и найти цепочку ссылок, удерживающую объект
+    - Исправить источник (cleanup, лимит кэша) и повторить замер
+- id: memory-leaks-find-retainer
+  skill: memory-leak-investigation
+  question: memory-leaks
+  difficulty: 2
+  prompt: Известно, что после закрытия модалки с графиком DOM-узлы не освобождаются. Нужно выяснить, какой объект держит отсоединённый canvas. Что использовать?
+  explanation: Каждый инструмент отвечает на свой вопрос. Performance monitor показывает, есть ли рост. Strict Mode подсказывает, где нет cleanup. Heap snapshot с Retainers отвечает, **кто держит** объект. Когда факт утечки известен, нужен именно он.
+  type: choose-tool
+  options:
+    - label: "Heap snapshots в Memory: Comparison, фильтр «Detached» и просмотр Retainers"
+      why: "Лучший выбор. Snapshot показывает отсоединённые узлы, а Retainers — цепочку ссылок до них: например, экземпляр Chart без destroy() или ref в стороннем коде."
+    - label: Performance monitor (JS heap size и DOM nodes)
+      why: "Хорош на первом шаге: подтверждает, что память и число узлов растут со временем. Но не показывает, какой объект держит ссылку."
+    - label: React DevTools Profiler
+      why: Измеряет рендеры и коммиты, а не память. Подходит, если интерфейс тормозит из-за лишних ререндеров.
+    - label: Включить Strict Mode и посмотреть на двойной mount
+      why: "В dev быстро выявляет эффекты без cleanup: дубли подписок становятся заметны. Но цепочку удержания конкретного canvas он не покажет."
+  answer: 0
+
+# performance-methodology: принято из черновика 2026-10-11
+- id: performance-methodology-first-step
+  skill: perf-measure-first
+  question: performance-methodology
+  difficulty: 2
+  prompt: Пользователи жалуются, что дашборд «тормозит». С чего системно начать работу над производительностью?
+  explanation: "Главное правило: сначала измерить, потом оптимизировать. Нужны метрика, условия воспроизведения (production, throttling) и профиль. Только он покажет категорию проблемы: бандл, рендеры, тяжёлые вычисления, списки, сеть. Под эту категорию и выбирается инструмент."
+  type: quiz
+  options:
+    - label: Выбрать метрику (INP, LCP), по RUM понять, где и у кого медленно, воспроизвести на production-сборке с CPU throttling и профилировать
+      why: Верно. Без метрики и профиля непонятно, что чинить и помог ли фикс. Полевые данные показывают реальную проблему, а throttling воспроизводит её на слабом устройстве.
+    - label: Обернуть тяжёлые компоненты в memo и useCallback, затем проверить, стало ли быстрее на ощупь
+      why: Это оптимизация на глаз. Лишние рендеры — лишь одна категория проблем и часто не главная. Бандл или водопад запросов мемоизация не исправит.
+    - label: Открыть React Profiler в dev-режиме на своём мощном ноутбуке и ускорить самые долгие компоненты
+      why: Dev-режим со StrictMode и отладочными проверками искажает картину. Мощная машина может вообще не воспроизвести проблему пользователей.
+    - label: "Включить React Compiler: автоматическая мемоизация закрывает основные проблемы производительности"
+      why: Компилятор убирает лишние рендеры. Размер бандла, длинные списки, сеть и тяжёлые вычисления от этого не меняются.
+  answer: 0
+- id: performance-methodology-heavy-chart-lib
+  skill: perf-bundle-splitting
+  question: performance-methodology
+  difficulty: 2
+  prompt: "rollup-plugin-visualizer показал: библиотека графиков на 300 КБ попадает в главный чанк, хотя графики есть только на странице отчётов. LCP и TTI на главной плохие. Что сделать?"
+  explanation: Сначала определите категорию проблемы. «Большой бандл» лечится разделением кода, удалением лишнего и заменой тяжёлых библиотек. Инструменты против рендеров и вычислений не уменьшают объём JS, который нужно скачать и распарсить.
+  type: choose-tool
+  options:
+    - label: "Code splitting: страница отчётов через React.lazy и динамический import()"
+      why: Верно. Библиотека уйдёт в отдельный чанк и загрузится только при переходе на отчёты, а главный бандл станет легче.
+    - label: React.memo для компонентов графиков
+      why: memo сокращает повторные рендеры при тех же props. На размер бандла он не влияет и нужен, когда профайлер показывает лишние рендеры.
+    - label: useTransition при переходе на страницу отчётов
+      why: Делает тяжёлое обновление прерываемым, и интерфейс остаётся отзывчивым. Код при этом остаётся в главном чанке.
+    - label: Перенести расчёт данных для графиков в Web Worker
+      why: Полезно, когда долгие вычисления блокируют main thread. Скачивать и парсить библиотеку всё равно придётся на главной.
+  answer: 0
+- id: performance-methodology-lcp-hero-image
+  skill: perf-lcp-media
+  question: performance-methodology
+  difficulty: 2
+  prompt: По RUM и Lighthouse LCP-элемент — hero-картинка. Она есть в HTML с сервера и уже в AVIF нужного размера, но в waterfall стартует поздно, после скриптов. Что поможет?
+  explanation: 'Проблема LCP с картинкой — это поздний старт загрузки, а не JS. Браузеру нужно сообщить, что ресурс критичен: fetchpriority="high", при необходимости preload. lazy подходит только для картинок ниже первого экрана.'
+  type: choose-tool
+  options:
+    - label: Добавить картинке fetchpriority="high" и убедиться, что на ней нет loading="lazy"
+      why: Верно. Браузер поднимет приоритет загрузки LCP-ресурса, и картинка начнёт грузиться раньше остальных ресурсов.
+    - label: Добавить loading="lazy", чтобы картинка не мешала загрузке скриптов
+      why: "Ухудшит LCP: загрузка картинки в первом экране отложится. lazy нужен для изображений ниже первого экрана."
+    - label: Разбить JS-бандл через React.lazy
+      why: Полезно, если узкое место — объём JS. Здесь картинка уже в серверном HTML, и мешает её низкий приоритет, а не код.
+    - label: "Включить content-visibility: auto для блока с картинкой"
+      why: Экономит рендеринг длинного контента за пределами экрана. Hero находится в первом экране, и на приоритет загрузки это не влияет.
+  answer: 0
+- id: performance-methodology-rum-web-vitals
+  skill: perf-rum-web-vitals
+  question: performance-methodology
+  difficulty: 3
+  prompt: "Допишите сбор полевых метрик: нужна разбивка причин плохого INP, а отправка не должна теряться при закрытии вкладки."
+  explanation: "Сборка web-vitals/attribution добавляет в метрику поле attribution. Для INP это целевой элемент и фазы задержки: input delay, processing, presentation. По ним видно, что чинить. sendBeacon надёжно доставляет данные при уходе со страницы, а INP часто репортится именно тогда."
+  type: fill-tokens
+  language: ts
+  code: |-
+    import { onINP, onLCP } from 'web-vitals/___';
+    import type { Metric } from 'web-vitals';
+
+    function send(metric: Metric) {
+      const body = JSON.stringify(metric);
+      navigator.___('/rum', body);
+    }
+
+    onINP(send);
+    onLCP(send);
+  tokens:
+    - attribution
+    - sendBeacon
+  decoys:
+    - debug
+    - fetch
+    - postMessage
+
+# react-memo: принято из черновика 2026-10-11
+- id: react-memo-how-it-works
+  skill: react-memo-shallow-compare
+  question: react-memo
+  difficulty: 2
+  prompt: Как работает React.memo и в каких случаях он не спасает от перерисовки?
+  explanation: "memo — это проверка «props не изменились?» перед рендером: Object.is для каждого prop. Он бесполезен, если в props каждый раз новые ссылки (инлайн-объекты, стрелки, children) или если рендер вызван своим state или контекстом. Для дешёвых компонентов сравнение тоже стоит времени."
+  type: quiz
+  options:
+    - label: Сравнивает каждый prop через Object.is и пропускает рендер при равенстве; не помогает при новых ссылках, своём state и контексте
+      why: Верно. Сравнение поверхностное, поэтому новый объект или функция с тем же содержимым считается изменением, а state и useContext запускают рендер в обход memo.
+    - label: Глубоко сравнивает props, поэтому инлайн-объект с тем же содержимым не вызовет повторный рендер
+      why: "Сравнение поверхностное: {...item} — новая ссылка, Object.is вернёт false, и компонент перерисуется. Глубокое сравнение было бы слишком дорогим."
+    - label: Кеширует результат компонента и блокирует любые перерисовки, пока не изменятся props
+      why: memo не блокирует рендер из-за собственного state компонента и из-за изменения контекста, прочитанного через useContext.
+    - label: Мемоизирует тяжёлые вычисления внутри компонента между рендерами, как useMemo
+      why: "Это путаница с useMemo: тот кеширует значение внутри компонента, а memo решает, вызывать ли компонент вообще, глядя на props."
+  answer: 0
+- id: react-memo-render-log
+  skill: react-memo-shallow-compare
+  question: react-memo
+  difficulty: 2
+  prompt: Без StrictMode и без React Compiler. Компонент App смонтировали, затем один раз кликнули по div. Что будет в консоли?
+  explanation: При рендере App обычный Child рендерится всегда. Memo с label="a" получает ту же строку — Object.is даёт true, рендер пропущен. У третьего label меняется с c0 на c1, поэтому он перерисуется. memo пропускает рендер только при поверхностно равных props.
+  type: predict-output
+  language: tsx
+  code: |-
+    function Child({ label }: { label: string }) {
+      console.log(label);
+      return <p>{label}</p>;
+    }
+    const Memo = memo(Child);
+    function App() {
+      const [n, setN] = useState(0);
+      return <div onClick={() => setN(n + 1)}>
+        <Memo label="a" />
+        <Child label="b" />
+        <Memo label={`c${n}`} />
+      </div>;
+    }
+  options:
+    - a, b, c0 → b, c1
+    - a, b, c0 → a, b, c1
+    - a, b, c0 → b
+    - a, b, c0 → c1
+  answer: 0
+- id: react-memo-inline-callback
+  skill: react-memo-unstable-props
+  question: react-memo
+  difficulty: 2
+  prompt: При вводе в поиск все Row перерисовываются, хотя обёрнуты в memo. Найдите строку с причиной.
+  explanation: "Стрелка (id) => onToggle(id) создаётся заново на каждом рендере List, и Object.is видит новый prop. Здесь обёртка вообще не нужна — передайте onToggle напрямую (и убедитесь, что он стабилен у родителя, например через useCallback). Правило: memo работает только со стабильными ссылками в props."
+  type: find-bug
+  language: tsx
+  code: |-
+    const Row = memo(function Row({ item, onToggle }: RowProps) {
+      return <li onClick={() => onToggle(item.id)}>{item.title}</li>;
+    });
+    function List({ items, onToggle }: ListProps) {
+      const [query, setQuery] = useState('');
+      return (
+        <>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} />
+          {items.map((it) => (
+            <Row key={it.id} item={it} onToggle={(id) => onToggle(id)} />
+          ))}
+        </>
+      );
+    }
+  bugLines:
+    - 10
+  causes:
+    - В onToggle передаётся новая стрелочная функция на каждом рендере List — поверхностное сравнение props всегда видит изменение
+    - memo в принципе не защищает от перерисовки при изменении state родителя
+    - items.map создаёт новые объекты item на каждом рендере, поэтому prop item всегда новый
+    - Prop key участвует в сравнении memo и сбрасывает мемоизацию
+  answer: 0
+- id: react-memo-vs-state-colocation
+  skill: memo-alternatives-composition
+  question: react-memo
+  difficulty: 2
+  prompt: "Layout хранит scrollY (меняется на каждый scroll) и по нему рисует полоску прогресса. Ниже в том же Layout — тяжёлый Dashboard без props. Профайлер: Dashboard рендерится при каждом скролле. Какое исправление надёжнее всего?"
+  explanation: "Прежде чем тянуться к memo, проверьте структуру: state, который нужен одному месту, опускается в это место (colocation), а тяжёлые части можно передавать как children. Тогда лишних рендеров нет вовсе, и не нужно следить за стабильностью props."
+  type: choose-tool
+  options:
+    - label: Вынести scrollY и подписку на scroll в отдельный компонент ScrollProgress
+      why: "Лучший вариант: state живёт там, где нужен, Layout больше не перерисовывается при скролле, а значит и Dashboard — без всякой мемоизации."
+    - label: Обернуть Dashboard в memo
+      why: "Здесь сработает, раз props нет, но лечит симптом: появится prop-объект или стрелка — memo сломается. Уместен, когда state нельзя переместить."
+    - label: Обернуть вычисление scrollY в useMemo
+      why: useMemo кеширует значение внутри Layout, но не мешает рендеру Layout и его детей при смене state. Нужен для дорогих вычислений.
+    - label: Положить scrollY в Context и читать его в ScrollProgress
+      why: Если провайдер со state остаётся в Layout, Dashboard по-прежнему перерисуется вместе с ним. Context решает prop drilling, а не производительность.
+  answer: 0
+
+# resource-loading: принято из черновика 2026-10-11
+- id: resource-loading-why-in-component
+  skill: resource-loading-model
+  question: resource-loading
+  difficulty: 2
+  prompt: Зачем в React 19 описывать `<title>`, стили и скрипты прямо в компоненте, а не в index.html или через react-helmet?
+  explanation: "Главная идея: компонент сам объявляет свои ресурсы и метаданные, а React решает, когда и куда их вставить, в том числе при стриминге SSR. Он поднимает теги в head, убирает дубли и задаёт порядок стилей через precedence. SEO-выгоду это даёт прежде всего при SSR."
+  type: quiz
+  options:
+    - label: Компонент объявляет свои зависимости, а React поднимает их в head, убирает дубли и задаёт порядок, в том числе при стриминге SSR
+      why: Верно. Зависимости лежат рядом с кодом, который их использует. React дедуплицирует повторы и вставляет теги в нужное место и в нужный момент.
+    - label: Стили и скрипты попадают в бандл компонента, поэтому отдельных сетевых запросов не будет
+      why: "React ничего не инлайнит: ресурсы по-прежнему загружаются по href. Меняется только то, кто управляет вставкой тегов и их порядком."
+    - label: "`<title>` в компоненте даёт SPA без SSR ту же SEO-выгоду, что и серверный рендеринг"
+      why: Без SSR заголовок появится только после выполнения JS. Краулер, который не исполняет JS, его не увидит. Это типичный подводный камень.
+    - label: React оставляет теги там, где их отрендерили, а браузер сам переносит их в head
+      why: 'Браузер так не делает: поднимает теги сам React. Причём `<link rel="stylesheet">` он поднимает и упорядочивает, только если задан precedence.'
+  answer: 0
+- id: resource-loading-title-children
+  skill: document-metadata
+  question: resource-loading
+  difficulty: 2
+  prompt: Заголовок вкладки на странице товара отображается не так, как ожидалось, а в консоли появляется предупреждение. Найдите строку с ошибкой.
+  explanation: "В JSX `{product.name} — Магазин` даёт два дочерних узла, то есть массив. React 19 ожидает, что у `<title>` будет ровно одна строка: иначе он выдаёт предупреждение и заголовок не будет корректным. Исправление — шаблонная строка: <title>{`${product.name} — Магазин`}</title>."
+  type: find-bug
+  language: tsx
+  code: |-
+    function ProductPage({ product }: Props) {
+      return (
+        <>
+          <title>{product.name} — Магазин</title>
+          <meta name="description"
+            content={product.summary} />
+          <ProductGallery images={product.images} />
+        </>
+      );
+    }
+  bugLines:
+    - 4
+  causes:
+    - У `<title>` несколько дочерних узлов (выражение и текст), а React ожидает одну строку
+    - "`<title>` можно рендерить только внутри `<head>`, а не в теле компонента"
+    - "`<meta>` нужно выставлять в useEffect, иначе он не попадёт в head"
+    - Метаданные нельзя возвращать внутри Fragment — нужен обёрточный элемент
+  answer: 0
+- id: resource-loading-hero-hints
+  skill: resource-hints-api
+  question: resource-loading
+  difficulty: 2
+  prompt: "Допишите компонент: заранее установить соединение с CDN, приоритетно загрузить LCP-картинку и подключить стили так, чтобы React поднял их в head и упорядочил."
+  explanation: "preconnect открывает соединение (DNS, TCP, TLS) заранее. preload с as: 'image' и высоким fetchPriority ускоряет загрузку LCP-картинки. Атрибут precedence передаёт стиль под управление React: тот поднимает его в head, дедуплицирует и до загрузки CSS не показывает контент за Suspense."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    import { preload, preconnect } from 'react-dom';
+    function Hero({ src }: { src: string }) {
+      ___('https://cdn.example.com');
+      preload(src, { as: ___, fetchPriority: 'high' });
+      return (
+        <>
+          <link rel="stylesheet" href="/hero.css"
+            ___="default" />
+          <img src={src} alt="" />
+        </>
+      );
+    }
+  tokens:
+    - preconnect
+    - "'image'"
+    - precedence
+  decoys:
+    - preinit
+    - "'img'"
+    - priority
+    - "'fetch'"
+- id: resource-loading-map-sdk
+  skill: resource-hints-choice
+  question: resource-loading
+  difficulty: 3
+  prompt: Виджету карты нужен SDK с maps.example.com, который надо загрузить и выполнить как можно раньше. На странице виджет может встретиться дважды, страница стримится с сервера. Что выбрать?
+  explanation: "Правило: preinit — загрузить и выполнить (скрипт) или подключить (стиль), preload — только скачать заранее, preconnect/prefetchDNS — только подготовить соединение. React дедуплицирует вызовы и учитывает их при SSR-стриминге. Альтернатива для этого случая — `<script async src>` в JSX: React его тоже дедуплицирует."
+  type: choose-tool
+  options:
+    - label: "preinit(url, { as: 'script' }) в компоненте"
+      why: "Подходит лучше всего: скрипт загрузится и выполнится, повторный вызов React дедуплицирует, а при SSR подсказка попадёт в поток HTML."
+    - label: "preload(url, { as: 'script' }) в компоненте"
+      why: Только скачивает скрипт, но не выполняет его. Хорошо, когда скрипт понадобится позже и его подключат отдельно.
+    - label: preconnect('https://maps.example.com')
+      why: Лишь заранее открывает соединение с доменом. Полезно, если конкретный ресурс ещё неизвестен или потребуется позже.
+    - label: useEffect, который создаёт `<script>` через document.createElement
+      why: Срабатывает только после paint на клиенте. Дедупликацию придётся писать вручную, и на сервере такой скрипт не подключится. Это старый подход.
+  answer: 0
+
+# use-memo-use-callback: принято из черновика 2026-10-11
+- id: use-memo-use-callback-when-needed
+  skill: memoization-when-needed
+  question: use-memo-use-callback
+  difficulty: 2
+  prompt: Когда в коде действительно оправданы useMemo и useCallback?
+  explanation: "Три законных повода: измеримо дорогое вычисление, проп для `memo`-компонента и зависимость другого хука. В остальных случаях мемоизация только добавляет код и сравнения. useMemo — подсказка, а не гарантия: логика не должна зависеть от кэша. С React Compiler большая часть ручной мемоизации не нужна."
+  type: quiz
+  options:
+    - label: Когда вычисление измеримо дорогое, значение уходит в memo-компонент или служит зависимостью другого хука
+      why: Верно. Только в этих случаях стабильная ссылка или закэшированный результат дают реальный выигрыш. Без этих условий мемоизация — лишний код.
+    - label: Всегда для объектов и функций внутри компонента — так дочерние компоненты рендерятся реже
+      why: "Без `memo` у дочернего компонента стабильная ссылка ничего не даёт: он перерисуется вместе с родителем. Хранение значений и сравнение зависимостей тоже не бесплатны."
+    - label: Когда значение должно вычисляться строго один раз — на useMemo можно опереться для корректности
+      why: "useMemo — только подсказка для оптимизации: React может сбросить кэш. Для данных, которые обязаны жить между рендерами, нужны useRef или useState."
+    - label: useCallback ускоряет код, потому что React перестаёт создавать функцию на каждом рендере
+      why: Функция-аргумент всё равно создаётся на каждом рендере. useCallback лишь возвращает прежнюю ссылку, пока не изменились зависимости.
+  answer: 0
+- id: use-memo-unstable-dependency
+  skill: memo-referential-stability
+  question: use-memo-use-callback
+  difficulty: 2
+  prompt: Проект без React Compiler. При переключении вкладки тяжёлый Chart всё равно перерисовывается. Найдите причину.
+  explanation: "Мемоизация ломается, если хотя бы одна зависимость каждый рендер создаётся заново. `options` — новый объект на каждом рендере, поэтому useMemo пересчитывает series, а memo у Chart получает новую ссылку. Решение: вынести константу за пределы компонента или создать объект внутри колбэка useMemo."
+  type: find-bug
+  language: tsx
+  code: |-
+    const Chart = memo(ChartImpl);
+    function Dashboard({ data }: Props) {
+      const [tab, setTab] = useState('day');
+      const options = { color: 'blue', smooth: true };
+      const series = useMemo(
+        () => buildSeries(data, options),
+        [data, options],
+      );
+      return (
+        <Layout tab={tab} onTab={setTab}>
+          <Chart series={series} />
+        </Layout>
+      );
+    }
+  bugLines:
+    - 4
+    - 7
+  causes:
+    - options каждый рендер создаётся заново, поэтому зависимость useMemo всегда «новая», series пересоздаётся и memo у Chart бесполезен
+    - useMemo нужно заменить на useCallback, потому что series передаётся в дочерний компонент
+    - Chart лежит внутри children компонента Layout, а memo не работает для элементов, переданных как children
+    - setTab передаётся без useCallback, поэтому при каждом рендере перерисовывается всё дерево
+  answer: 0
+- id: use-callback-empty-deps-stale
+  skill: usecallback-deps
+  question: use-memo-use-callback
+  difficulty: 2
+  prompt: Без StrictMode и без React Compiler. Компонент смонтировали, дважды нажали «+», затем один раз нажали «pick». Что будет в консоли?
+  explanation: "Ссылка на pick стабильна, поэтому memo-компонент Child рендерится только при монтировании. Но из-за пустого массива зависимостей колбэк навсегда замкнул n = 0. Правило: стабильная ссылка без честных зависимостей превращается в устаревшее замыкание. Чтобы видеть актуальное n, его нужно указать в deps."
+  type: predict-output
+  language: tsx
+  code: |-
+    const Child = memo(({ onPick }: Props) => {
+      console.log('child');
+      return <button onClick={onPick}>pick</button>;
+    });
+    function Parent() {
+      const [n, setN] = useState(0);
+      const pick = useCallback(() => console.log(n), []);
+      return (
+        <>
+          <button onClick={() => setN(n + 1)}>+</button>
+          <Child onPick={pick} />
+        </>
+      );
+    }
+  options:
+    - child → 0
+    - child → 2
+    - child → child → child → 2
+    - child → child → child → 0
+  answer: 0
+- id: use-memo-alternative-state-down
+  skill: rerender-fix-without-memo
+  question: use-memo-use-callback
+  difficulty: 2
+  prompt: Поле поиска в шапке хранит value в state корневого компонента Page; кроме самого поля, value нигде не используется. При каждом нажатии клавиши перерисовывается тяжёлый ExpensiveTree. Что сделать в первую очередь?
+  explanation: "Прежде чем мемоизировать, переструктурируйте компоненты: опустите state ниже или передайте тяжёлую часть как children. Тогда лишний рендер исчезает сам, без хрупких зависимостей. memo и useDeferredValue — инструменты для случаев, когда структура уже не позволяет изолировать состояние."
+  type: choose-tool
+  options:
+    - label: Вынести input и его state в отдельный компонент SearchBox
+      why: "Лучший вариант: state живёт там, где используется. Page и ExpensiveTree больше не перерисовываются при вводе, и мемоизация не нужна."
+    - label: Обернуть ExpensiveTree в memo и стабилизировать его props через useMemo/useCallback
+      why: "Сработает, но это хрупко: одна нестабильная зависимость — и всё ломается. Оправдано, если state нельзя опустить ниже из-за структуры."
+    - label: Обернуть onChange у input в useCallback
+      why: "Не поможет: перерисовка ExpensiveTree вызвана рендером Page, а не ссылкой на обработчик. useCallback полезен только вместе с memo у получателя."
+    - label: Передать value в ExpensiveTree через useDeferredValue
+      why: useDeferredValue подходит, когда тяжёлое дерево зависит от value и ввод должен оставаться отзывчивым. Здесь дерево от value не зависит.
+  answer: 0
+
+# virtualization: принято из черновика 2026-10-11
+- id: virtualization-core-idea
+  skill: list-virtualization
+  question: virtualization
+  difficulty: 2
+  prompt: Список из 10 000 строк тормозит при открытии и прокрутке. В чём суть виртуализации (windowing) как решения?
+  explanation: "Тормозят не вычисления, а объём: 10 000 компонентов и DOM-узлов. Виртуализация держит в DOM только окно видимых строк с запасом (overscan), а высоту остального имитирует отступом. Цена — Ctrl+F и скринридеры не видят скрытые строки. Для списка в 50 элементов это лишняя сложность."
+  type: quiz
+  options:
+    - label: В DOM живут только видимые строки плюс небольшой запас, остальное заменено отступом нужной высоты
+      why: Верно. Число узлов и компонентов почти не зависит от длины списка, поэтому монтирование и прокрутка остаются быстрыми. Платим поиском по странице и доступностью.
+    - label: "Обернуть строки в memo: тогда React не будет их рендерить, и 10 000 элементов перестанут тормозить"
+      why: memo пропускает только повторные рендеры. Первый рендер и 10 000 узлов в DOM никуда не деваются, а layout и память остаются тяжёлыми.
+    - label: "Рендерить все строки, но невидимые скрывать через display: none, чтобы браузер их не рисовал"
+      why: Компоненты всё равно монтируются, и узлы остаются в DOM. Экономится только отрисовка, а основная стоимость в рендере и создании узлов.
+    - label: В React 19 конкурентный рендеринг сам разбивает длинный список на части, поэтому виртуализация больше не нужна
+      why: Конкурентность может прерывать рендер, но не уменьшает число узлов. Все 10 000 строк всё равно окажутся в DOM.
+  answer: 0
+- id: virtualization-tanstack-virtualizer
+  skill: list-virtualization
+  question: virtualization
+  difficulty: 2
+  prompt: Допишите виртуализированный список на TanStack Virtual. RowView позиционируется абсолютно через translateY(y).
+  explanation: getScrollElement сообщает, какой элемент прокручивается. getTotalSize задаёт высоту распорки, чтобы скроллбар соответствовал всему списку. getVirtualItems возвращает только видимые строки, а item.start даёт смещение строки сверху.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const v = useVirtualizer({
+      count: rows.length,
+      ___: () => ref.current,
+      estimateSize: () => 40,
+    });
+    return (
+      <div ref={ref} style={{ height: 600, overflow: 'auto' }}>
+        <div style={{ height: v.___(), position: 'relative' }}>
+          {v.___().map((it) => (
+            <RowView key={it.key} row={rows[it.index]} y={it.___} />
+          ))}
+        </div>
+      </div>
+    );
+  tokens:
+    - getScrollElement
+    - getTotalSize
+    - getVirtualItems
+    - start
+  decoys:
+    - scrollElement
+    - getItems
+    - size
+    - index
+- id: virtualization-missing-total-size
+  skill: list-virtualization
+  question: virtualization
+  difficulty: 2
+  prompt: "RowView позиционируется через position: absolute и translateY(y). Ползунок скроллбара показывает, будто список почти кончился, и прыгает при прокрутке, а до конца из 10 000 строк не добраться. Где ошибка?"
+  explanation: "Абсолютно позиционированные строки не задают высоту родителя. Без height: v.getTotalSize() у распорки прокручиваемая область равна лишь отрисованному окну. Поэтому скроллбар не отражает длину списка и растёт рывками по мере появления строк. Правило: внутренний контейнер всегда получает полную виртуальную высоту."
+  type: find-bug
+  language: tsx
+  code: |-
+    function BigList({ rows }: { rows: Row[] }) {
+      const ref = useRef<HTMLDivElement>(null);
+      const v = useVirtualizer({
+        count: rows.length, estimateSize: () => 40,
+        getScrollElement: () => ref.current,
+      });
+      return <div ref={ref} style={{ height: 600, overflow: 'auto' }}>
+        <div style={{ position: 'relative' }}>
+          {v.getVirtualItems().map((it) => (
+            <RowView key={it.key} row={rows[it.index]} y={it.start} />
+          ))}
+        </div>
+      </div>;
+    }
+  bugLines:
+    - 8
+  causes:
+    - "У внутреннего контейнера нет height: v.getTotalSize(), и абсолютные строки не создают полную высоту для прокрутки"
+    - Не указан overscan, поэтому строки за пределами экрана не рендерятся
+    - estimateSize должен точно совпадать с реальной высотой, иначе прокрутка ломается
+    - key={it.key} нестабилен, нужно использовать key={it.index}
+  answer: 0
+- id: virtualization-faq-content-visibility
+  skill: list-rendering-strategy-choice
+  question: virtualization
+  difficulty: 3
+  prompt: "Страница справки: 2 000 блоков FAQ с простой разметкой. Первая отрисовка медленная. При этом Ctrl+F по всему тексту, SEO и скринридеры должны работать. Что выбрать?"
+  explanation: "Виртуализация и пагинация убирают элементы из DOM и поэтому ломают поиск по странице и доступность. Если весь контент обязан оставаться в DOM, а разметка простая, content-visibility: auto экономит layout и paint без смены архитектуры. Правило: сначала требования к поиску и доступности, потом техника."
+  type: choose-tool
+  options:
+    - label: "CSS content-visibility: auto + contain-intrinsic-size"
+      why: Узлы остаются в DOM, поэтому Ctrl+F, SEO и доступность работают. Браузер пропускает layout и paint блоков за экраном. Для простой разметки этого достаточно.
+    - label: Виртуализация через TanStack Virtual
+      why: Лучший выбор для десятков тысяч строк или тяжёлых строк. Здесь скрытых блоков нет в DOM, поэтому Ctrl+F и скринридеры их не найдут.
+    - label: Пагинация по 50 вопросов
+      why: Подходит каталогам, где пользователь листает страницы. Поиск по всей справке через Ctrl+F перестанет работать.
+    - label: useDeferredValue для рендера списка
+      why: Помогает сохранить отзывчивость ввода при фильтрации большого массива. Число узлов при этом не уменьшается, и первая отрисовка быстрее не станет.
+  answer: 0
+
+# web-vitals: принято из черновика 2026-10-11
+- id: web-vitals-react-causes-quiz
+  skill: web-vitals-causes
+  question: web-vitals
+  difficulty: 2
+  prompt: Какое утверждение о том, как React-приложение влияет на Core Web Vitals, верно?
+  explanation: "Каждая метрика ломается по своей причине. LCP — когда главный контент поздно попадает на экран. INP — когда главный поток занят в момент взаимодействия. CLS — когда контент появляется без зарезервированного места. Поэтому сначала определите метрику, потом выбирайте технику: SSR, startTransition и memo лечат разные вещи."
+  type: quiz
+  options:
+    - label: LCP страдает от CSR и поздней загрузки главного контента, INP — от долгих задач в главном потоке, CLS — от контента без места
+      why: Верно. LCP — это то, когда виден главный контент. INP — насколько занят поток при взаимодействии. CLS — насколько сдвигается вёрстка.
+    - label: "SSR закрывает все три метрики: HTML приходит готовым, поэтому и INP, и CLS будут в порядке"
+      why: SSR помогает LCP, но гидрация — это долгая задача, и она может ухудшить INP. Картинки без размеров и баннеры дают CLS и при SSR.
+    - label: Виртуальный DOM батчит изменения, поэтому React не может испортить INP — только LCP
+      why: Батчинг не делает рендер дешёвым. Тяжёлый рендер или синхронный обработчик всё равно блокируют главный поток и задерживают следующий кадр.
+    - label: CLS в основном вызывают лишние ререндеры, поэтому memo и React Compiler снижают сдвиги
+      why: Ререндер без изменения геометрии ничего не сдвигает. CLS дают появляющиеся элементы без размеров, а memo влияет скорее на INP.
+  answer: 0
+- id: web-vitals-lcp-lazy-hero
+  skill: lcp-image-priority
+  question: web-vitals
+  difficulty: 2
+  prompt: Hero-картинка на первом экране — LCP-элемент страницы. Найдите строку, из-за которой LCP вырос.
+  explanation: '`loading="lazy"` откладывает загрузку: браузер ждёт раскладки, чтобы понять, видна ли картинка, поэтому LCP-изображение начинает грузиться позже. Для картинки первого экрана уберите lazy, добавьте `fetchPriority="high"` и при необходимости `preload`. Lazy оставьте для того, что ниже видимой области.'
+  type: find-bug
+  language: tsx
+  code: |-
+    function Hero({ product }: { product: Product }) {
+      return (
+        <section className="hero">
+          <img
+            src={product.coverUrl}
+            alt={product.title}
+            width={1200}
+            height={600}
+            loading="lazy"
+          />
+          <h1>{product.title}</h1>
+        </section>
+      );
+    }
+  bugLines:
+    - 9
+  causes:
+    - '`loading="lazy"` откладывает загрузку LCP-изображения, а оно должно грузиться как можно раньше с высоким приоритетом'
+    - Явные width и height мешают браузеру масштабировать картинку и увеличивают LCP
+    - Заголовок h1 стоит после img, поэтому браузер считает LCP-элементом текст
+    - Атрибут alt заставляет браузер ждать декодирования изображения перед отрисовкой
+  answer: 0
+- id: web-vitals-inp-heavy-compute
+  skill: inp-long-tasks
+  question: web-vitals
+  difficulty: 3
+  prompt: "По клику «Построить отчёт» синхронно агрегируются 200 тыс. строк: около 600 мс чистого JS. Рендер результата дешёвый, INP в поле — 700 мс. Что выбрать?"
+  explanation: "Сначала выясните, на что уходит время. Если это рендер React — помогут startTransition, memo, перенос state ниже и виртуализация. Если это одно долгое вычисление вне React, его нужно убрать из главного потока: Web Worker или разбиение на куски через `scheduler.yield()`."
+  type: choose-tool
+  options:
+    - label: Вынести агрегацию в Web Worker
+      why: "Лучший вариант: 600 мс JS уходят из главного потока, клик сразу получает отклик (спиннер), а результат приходит через postMessage."
+    - label: Обернуть setState результата в startTransition
+      why: Transition делает прерываемым рендер React, а не синхронное вычисление. Агрегация всё равно займёт поток на 600 мс. Подошёл бы, если бы дорогим был рендер.
+    - label: Обернуть агрегацию в useMemo
+      why: useMemo не пересчитывает при тех же входных данных, но первое вычисление по клику всё равно блокирует поток. Полезен, когда расчёт повторяется при ререндерах.
+    - label: Виртуализировать таблицу отчёта
+      why: Помогает, когда дорого рисовать тысячи DOM-узлов. Здесь рендер дешёвый, а время уходит на JS-вычисление.
+  answer: 0
+- id: web-vitals-find-bad-inp-recipe
+  skill: inp-investigation
+  question: web-vitals
+  difficulty: 3
+  prompt: В Search Console INP «плохой», а Lighthouse на ноутбуке показывает 98. Расставьте шаги поиска и исправления проблемного взаимодействия.
+  explanation: Google оценивает страницу по полевым данным на 75-м перцентиле. Поэтому начинать нужно с RUM, а не с Lighthouse на мощной машине. Attribution подскажет элемент и долгую фазу; воспроизводить нужно на слабом CPU. Подтверждает фикс тоже поле, а не лабораторный замер.
+  type: order
+  kind: recipe
+  steps:
+    - "Собрать полевые данные через web-vitals/attribution: значение INP, interactionTarget и длительность фаз"
+    - Сгруппировать по элементу и типу взаимодействия, найти худшие на 75-м перцентиле
+    - Воспроизвести на бюджетном устройстве или с CPU throttling в DevTools
+    - "Записать Performance-профиль и найти долгую фазу: input delay, обработка или presentation"
+    - Применить фикс под эту фазу и подтвердить улучшение по полевым данным после релиза

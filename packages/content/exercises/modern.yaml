@@ -1,0 +1,817 @@
+# actions: принято из черновика 2026-10-11
+- id: actions-vs-onsubmit-quiz
+  skill: react-actions-concept
+  question: actions
+  difficulty: 2
+  prompt: Чем Action в React 19 (`<form action={fn}>`, `useActionState`) отличается от ручного onSubmit с fetch?
+  explanation: "Action — это async-функция, запущенная в transition. Поэтому React сам отслеживает pending, пробрасывает ошибки в Error Boundary, ставит отправки в очередь и после успеха сбрасывает неконтролируемые поля. Правило: всё, что раньше писали через isLoading и try/finally, теперь даёт сам React."
+  type: quiz
+  options:
+    - label: "Action — async-функция в transition: React сам ведёт pending, ошибки, очередь отправок и сбрасывает неконтролируемые поля"
+      why: Верно. Transition даёт pending-состояние и обработку ошибок через Error Boundary, а последовательные вызовы выполняются по порядку без гонок.
+    - label: "Это сахар над onSubmit: React вызывает preventDefault и передаёт FormData, а pending и ошибки по-прежнему ведутся вручную"
+      why: FormData и отмена перезагрузки — лишь часть. Главное в том, что функция запускается в transition, и состояние ожидания React ведёт сам.
+    - label: Actions работают только с серверными функциями 'use server', для клиентской логики нужен onSubmit
+      why: В action можно передать и обычную клиентскую async-функцию. Серверные функции добавляют прогрессивное улучшение, но не обязательны.
+    - label: useActionState делает поля контролируемыми и сохраняет введённые значения после отправки
+      why: Это типичный подводный камень. Поля остаются неконтролируемыми и сбрасываются после action, а нужные значения надо вернуть в state.
+  answer: 0
+- id: actions-form-status-same-component
+  skill: use-form-status-scope
+  question: actions
+  difficulty: 2
+  prompt: Кнопка никогда не блокируется во время отправки. Найдите строку с ошибкой.
+  explanation: "`useFormStatus` возвращает статус ближайшей **родительской** `<form>`. Здесь форму рендерит тот же компонент, поэтому родительской формы нет и pending всегда false. Исправить можно двумя способами: вынести кнопку в дочерний SubmitButton или взять isPending третьим элементом из useActionState."
+  type: find-bug
+  language: tsx
+  code: |-
+    function NameForm() {
+      const [state, formAction] = useActionState(
+        updateName, { error: null }
+      );
+      const { pending } = useFormStatus();
+      return (
+        <form action={formAction}>
+          <input name="name" />
+          <button disabled={pending}>Save</button>
+          {state.error && <p>{state.error}</p>}
+        </form>
+      );
+    }
+  bugLines:
+    - 5
+  causes:
+    - "useFormStatus вызван в компоненте, который сам рендерит form: родительской формы нет, и pending всегда false"
+    - useActionState нужно вызывать внутри дочернего компонента формы, иначе action не запустится
+    - В action формы нельзя передавать функцию из useActionState, только исходную async-функцию
+    - У кнопки нет type="submit", поэтому форма не отправляется и pending не меняется
+  answer: 0
+- id: actions-use-action-state-wiring
+  skill: use-action-state-api
+  question: actions
+  difficulty: 2
+  prompt: "Допишите форму: action читает поле из FormData, а форма получает результат и флаг ожидания через хук."
+  explanation: "Функция для useActionState получает (prevState, formData) и возвращает новый state. Хук отдаёт кортеж [state, formAction, isPending], а formAction передаётся в проп `action` у form. useFormStatus не подходит: он нужен в потомке формы и не хранит результат."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    async function addTodo(prev: State, data: FormData) {
+      const title = String(data.___('title'));
+      return api.addTodo(title);
+    }
+    function TodoForm() {
+      const [state, formAction, isPending] =
+        ___(addTodo, { error: null });
+      return (
+        <form ___={formAction}>
+          <input name="title" />
+          <button disabled={isPending}>Add</button>
+        </form>
+      );
+    }
+  tokens:
+    - get
+    - useActionState
+    - action
+  decoys:
+    - value
+    - useFormStatus
+    - onSubmit
+    - useTransition
+- id: actions-progressive-form-choice
+  skill: form-actions-choice
+  question: actions
+  difficulty: 3
+  prompt: Next.js App Router, форма отзыва. Она должна отправляться ещё до загрузки JS, а ошибку серверной валидации нужно показать под полем. Клиентской валидации почти нет. Что выбрать?
+  explanation: "Если важны прогрессивное улучшение и результат с сервера, берите серверную функцию с useActionState: форма работает как обычный HTML-POST, а state приносит ошибку. Для тяжёлой клиентской валидации лучше React Hook Form, а useFormStatus лишь дополняет этот выбор и показывает pending в кнопке."
+  type: choose-tool
+  options:
+    - label: Серверная функция ('use server') + useActionState
+      why: "Лучший выбор: <form action> работает до гидрации, state возвращает ошибку валидации, isPending даётся из коробки. Можно передать permalink."
+    - label: onSubmit + useState + fetch к API-роуту
+      why: Подойдёт, если нужен полный ручной контроль. Но без JS форма не работает, а pending, ошибки и гонки придётся вести самому.
+    - label: React Hook Form
+      why: Хорош при сложной клиентской валидации и зависимых полях. Но он требует JS, поэтому прогрессивного улучшения не даст.
+    - label: Только useFormStatus в кнопке отправки
+      why: Даёт лишь pending родительской формы в потомке. Результата действия и ошибок сервера у него нет, это дополнение к useActionState.
+  answer: 0
+
+# activity: принято из черновика 2026-10-11
+- id: activity-hidden-semantics-quiz
+  skill: activity-hidden-semantics
+  question: activity
+  difficulty: 2
+  prompt: Что происходит с поддеревом внутри `<Activity mode="hidden">`?
+  explanation: "Activity — середина между `{cond && <X />}` и CSS `display: none`. State и DOM сохраняются, эффекты отключаются, а обновления идут с самым низким приоритетом. Поэтому скрытый экран можно заранее отрендерить, и при показе он появится мгновенно."
+  type: quiz
+  options:
+    - label: State и DOM сохраняются, эффекты размонтируются, а обновления рендерятся с самым низким приоритетом
+      why: "Верно. Содержимое скрыто через display: none. При возврате в visible state на месте, а эффекты запускаются снова."
+    - label: "Всё как с CSS `display: none`: state, DOM и эффекты продолжают работать, просто элемент не виден"
+      why: "Именно это Activity и исправляет: у display: none подписки и таймеры работают зря. Activity вызывает cleanup эффектов скрытого дерева."
+    - label: "Как условный рендеринг: DOM удаляется, но React запоминает state и восстанавливает его при показе"
+      why: "DOM не удаляется, он остаётся в документе со стилем display: none. За счёт этого сохраняется, например, значение неконтролируемых полей."
+    - label: React вообще не рендерит скрытое дерево, пока mode не станет visible
+      why: "Наоборот: hidden-дерево рендерится в фоне с низким приоритетом. Поэтому Activity подходит для предзагрузки данных и кода следующего экрана."
+  answer: 0
+- id: activity-toggle-effects-state
+  skill: activity-hidden-semantics
+  question: activity
+  difficulty: 2
+  prompt: StrictMode нет. Сначала open = true, пользователь вводит «hi». Затем open становится false, потом снова true. Что будет в консоли и в поле?
+  explanation: "При переходе в hidden React вызывает cleanup эффектов, но state не трогает. При возврате в visible эффекты запускаются снова, а text по-прежнему равен «hi». Правило: Activity сохраняет state, но не сохраняет работающие эффекты."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Draft() {
+      const [text, setText] = useState('');
+      useEffect(() => {
+        console.log('subscribe');
+        return () => console.log('unsubscribe');
+      }, []);
+      return <input value={text}
+        onChange={(e) => setText(e.target.value)} />;
+    }
+
+    <Activity mode={open ? 'visible' : 'hidden'}>
+      <Draft />
+    </Activity>
+  options:
+    - subscribe → unsubscribe → subscribe; в поле «hi»
+    - subscribe → unsubscribe → subscribe; поле пустое
+    - subscribe; в поле «hi»
+    - subscribe → subscribe; в поле «hi»
+  answer: 0
+- id: activity-background-player
+  skill: activity-effects-in-background
+  question: activity
+  difficulty: 3
+  prompt: Музыка должна продолжать играть, когда пользователь уходит с вкладки плеера. Но она останавливается. Где ошибка?
+  explanation: В hidden-режиме Activity размонтирует эффекты, и cleanup вызывает `audio.pause()`. Логику, которая должна работать в фоне (плеер, загрузка, сокет), выносят выше Activity, а в скрываемой части оставляют только UI управления.
+  type: find-bug
+  language: tsx
+  code: |-
+    function Player({ src }: { src: string }) {
+      const ref = useRef<HTMLAudioElement>(null);
+      useEffect(() => {
+        const audio = ref.current!;
+        audio.play();
+        return () => audio.pause();
+      }, [src]);
+      return <audio ref={ref} src={src} />;
+    }
+
+    <Activity mode={tab === 'player' ? 'visible' : 'hidden'}>
+      <Player src={track} />
+    </Activity>
+  bugLines:
+    - 6
+    - 11
+    - 12
+  causes:
+    - "Плеер лежит внутри Activity: при hidden React вызывает cleanup эффектов и `pause()` срабатывает. Плеер нужно вынести выше"
+    - Activity в режиме hidden удаляет `<audio>` из DOM, и воспроизведение прерывается
+    - Эффект перезапускается, потому что src указан в зависимостях
+    - В режиме hidden React навсегда перестаёт рендерить компонент, поэтому `play()` больше не вызывается
+  answer: 0
+- id: activity-tabs-hiding-choice
+  skill: ui-hiding-strategy-choice
+  question: activity
+  difficulty: 2
+  prompt: Вкладки «Лента» и «Сообщения». Черновик сообщения и загруженные данные лежат в локальном state компонентов вкладок, переписывать их не хочется. При переключении всё это нужно сохранять. Скрытая вкладка не должна держать WebSocket-подписку. Что выбрать?
+  explanation: "Выбор способа скрытия сводится к трём вопросам: нужно ли сохранить state, нужно ли сохранить DOM и должны ли работать эффекты. «Сохранить всё, но остановить эффекты» — это `<Activity>`. «Ничего сохранять не нужно» — условный рендеринг. «Эффекты обязаны работать в фоне» — логику выносят выше дерева."
+  type: choose-tool
+  options:
+    - label: '`<Activity mode="visible" | "hidden">`'
+      why: Лучший вариант. State и DOM сохраняются, эффекты (и подписка) отключаются при скрытии и снова запускаются при показе.
+    - label: Условный рендеринг `{tab === 'inbox' && <Inbox />}`
+      why: Подписку остановит, но черновик и данные пропадут. Подходит для лёгких экранов без ценного локального state.
+    - label: "CSS `display: none` через className"
+      why: State и DOM сохранит, но эффекты продолжат работать, и WebSocket будет висеть зря. Годится для простых статичных блоков без подписок.
+    - label: Поднять черновик и данные в глобальный стор (Zustand)
+      why: Сработает, но придётся переписать компоненты, а DOM и прочий локальный state всё равно пересоздадутся. Оправдано, если данные нужны другим экранам.
+  answer: 0
+
+# react-19-changes: принято из черновика 2026-10-11
+- id: react-19-changes-quiz
+  skill: react-19-overview
+  question: react-19-changes
+  difficulty: 2
+  prompt: Какое утверждение верно описывает изменение React 19 для повседневного кода?
+  explanation: "Главные изменения React 19: Actions и хуки для форм (useActionState, useFormStatus, useOptimistic), API use, ref как prop, <Context> вместо <Context.Provider>, cleanup у ref-колбэков, <title>/<meta> прямо в компонентах. Удалены propTypes и defaultProps у функций, строковые refs, legacy context, ReactDOM.render."
+  type: quiz
+  options:
+    - label: Функциональный компонент получает ref как обычный prop — forwardRef больше не нужен
+      why: Верно. В React 19 ref приходит в props функционального компонента, forwardRef можно убрать (codemod делает это автоматически).
+    - label: "useEffect заменён Actions: побочные эффекты теперь пишут в action-функциях"
+      why: Actions — это асинхронные переходы для мутаций и форм. useEffect по-прежнему нужен для синхронизации с внешними системами.
+    - label: defaultProps у функциональных компонентов стал основным способом задавать значения по умолчанию
+      why: "Наоборот: defaultProps у функций в React 19 удалён. Значения по умолчанию задают через параметры по умолчанию при деструктуризации props."
+    - label: <Context.Provider> удалён, старый синтаксис больше не работает
+      why: Появилась возможность рендерить <Context> как провайдер, но <Context.Provider> продолжает работать; его устаревание планируется позже.
+  answer: 0
+- id: react-19-ref-callback-leak
+  skill: ref-callback-cleanup
+  question: react-19-changes
+  difficulty: 2
+  prompt: Панель перерисовывается при каждом onResize, и со временем вкладка начинает тормозить. Найдите строку с ошибкой.
+  explanation: "Инлайн ref-колбэк — новая функция на каждом рендере, поэтому React отсоединяет старый ref и вызывает новый. Без cleanup каждый вызов создаёт ещё один ResizeObserver, а старые не отключаются. В React 19 из ref-колбэка можно вернуть cleanup: return () => ro.disconnect()."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Panel({ onResize }: Props) {
+      return (
+        <div
+          ref={(node) => {
+            if (!node) return;
+            const ro = new ResizeObserver(onResize);
+            ro.observe(node);
+          }}
+        />
+      );
+    }
+  bugLines:
+    - 7
+  causes:
+    - "После observe нет return () => ro.disconnect(): при каждом новом вызове ref создаётся ещё один observer, а старые продолжают работать"
+    - "Строка if (!node) return; ломает код: в React 19 undefined из ref-колбэка воспринимается как cleanup"
+    - ResizeObserver нельзя создавать в ref-колбэке — только в useLayoutEffect
+    - В React 19 ref-колбэк вызывается только один раз при монтировании, поэтому onResize устаревает
+  answer: 0
+- id: react-19-new-syntax-fill
+  skill: react-19-new-syntax
+  question: react-19-changes
+  difficulty: 1
+  prompt: "Перепишите в стиле React 19: ref без forwardRef, контекст без .Provider, заголовок страницы прямо из компонента."
+  explanation: ref приходит в props как обычное свойство. <ThemeContext value> работает как провайдер. <title>, отрендеренный в любом месте дерева, React поднимет в <head>, поэтому react-helmet для простых случаев не нужен.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function Field({
+      ___,
+      ...props
+    }: React.ComponentProps<'input'>) {
+      return <input ref={ref} {...props} />;
+    }
+    function Page({ post }: { post: Post }) {
+      return (
+        <ThemeContext ___="dark">
+          <___>{post.title}</title>
+          <Field placeholder="Search" />
+        </ThemeContext>
+      );
+    }
+  tokens:
+    - ref
+    - value
+    - title
+  decoys:
+    - forwardRef
+    - provider
+    - Head
+    - inputRef
+- id: react-19-migration-recipe
+  skill: react-19-migration
+  question: react-19-changes
+  difficulty: 2
+  prompt: Расставьте шаги миграции проекта с React 18 на React 19 по порядку.
+  explanation: "React 18.3 — тот же 18, но с предупреждениями обо всех API, удалённых в 19: так видно объём работы до обновления. После перехода на 19 codemods берут на себя механическую часть (ReactDOM.render, строковые refs, типы), остальное правят вручную. Последним шагом новые типы ловят, например, ref-колбэки с неявным return."
+  type: order
+  kind: recipe
+  steps:
+    - Обновиться до React 18.3 и собрать предупреждения об устаревших API
+    - Обновить react, react-dom и @types/react до 19
+    - "Запустить codemods (react/19/migration-recipe, types-react-codemod) и вручную устранить оставшееся: legacy context, defaultProps у функций, строковые refs"
+    - Исправить ошибки TypeScript (например, ref-колбэки с неявным return) и прогнать тесты
+
+# react-compiler: принято из черновика 2026-10-11
+- id: react-compiler-manual-memo-quiz
+  skill: react-compiler-memoization
+  question: react-compiler
+  difficulty: 3
+  prompt: В проекте на React 19 включили React Compiler. Нужны ли теперь в новом коде useMemo, useCallback и memo?
+  explanation: "Компилятор на этапе сборки кэширует значения, функции и JSX с точностью до отдельных выражений, даже в условных ветках. Поэтому ручная мемоизация в новом коде обычно лишняя. Она остаётся «ручкой» для точного контроля, например для стабильной зависимости эффекта. Сами вычисления компилятор не ускоряет: он только не повторяет их без нужды."
+  type: quiz
+  options:
+    - label: "В большинстве случаев нет: компилятор сам мемоизирует. Ручные хуки остаются для точного контроля, например зависимостей эффектов"
+      why: Верно. Компилятор кэширует по входам каждого выражения, а useMemo/useCallback пригодятся, когда стабильность значения нужно гарантировать явно.
+    - label: "Нет, и пользоваться ими нельзя: с компилятором useMemo и useCallback устарели и выдают предупреждение"
+      why: Хуки никуда не делись и совместимы с компилятором. Обычно они просто избыточны, но иногда нужны для явного контроля.
+    - label: "Да: компилятор оборачивает в memo только компоненты, а значения и колбэки внутри по-прежнему мемоизируют вручную"
+      why: "Наоборот: компилятор мемоизирует именно значения, функции и JSX внутри компонентов и хуков, вплоть до отдельных выражений."
+    - label: "Нет: компилятор оптимизирует сами вычисления, и даже тяжёлые операции становятся дешёвыми"
+      why: Компилятор лишь пропускает повторные вычисления при тех же входах. Медленный алгоритм при новых входах останется медленным.
+  answer: 0
+- id: react-compiler-props-mutation
+  skill: rules-of-react-purity
+  question: react-compiler
+  difficulty: 2
+  prompt: После включения React Compiler линтер сообщает о нарушении в этом компоненте. Найдите строку, нарушающую Rules of React.
+  explanation: "`sort` сортирует массив на месте, то есть мутирует props во время рендера. Компилятор считает props иммутабельными: такой компонент он пропустит, а код, работавший благодаря мутации, после компиляции может вести себя иначе. Исправление — `items.toSorted(...)` или `[...items].sort(...)`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function PriceList({ items, currency }: Props) {
+      const sorted = items.sort((a, b) => a.price - b.price);
+      const label = formatCurrency(currency);
+      return (
+        <ul>
+          {sorted.map((i) => (
+            <li key={i.id}>{i.price} {label}</li>
+          ))}
+        </ul>
+      );
+    }
+  bugLines:
+    - 2
+  causes:
+    - "`sort` мутирует массив из props во время рендера, а компилятор полагается на иммутабельность props"
+    - formatCurrency вызывается без useMemo, и компилятор не сможет его закэшировать
+    - Колбэк сортировки создаётся заново на каждом рендере, и его нужно обернуть в useCallback
+    - "Нельзя использовать key={i.id}: компилятор требует ключи-индексы"
+  answer: 0
+- id: react-compiler-adoption-recipe
+  skill: react-compiler-adoption
+  question: react-compiler
+  difficulty: 3
+  prompt: Расставьте шаги внедрения React Compiler в большой существующий проект.
+  explanation: Компилятор пропускает код, нарушающий Rules of React. Поэтому сначала нужен линтер с правилами компилятора, потом исправления, затем постепенное включение с проверкой поведения и профилем. Отдельный проблемный компонент можно временно исключить директивой `'use no memo'`.
+  type: order
+  kind: recipe
+  steps:
+    - Включить eslint-plugin-react-hooks с правилами компилятора
+    - "Исправить нарушения Rules of React: мутации в рендере, нечистые компоненты"
+    - "Включить компилятор частично: по директориям или через директиву 'use memo'"
+    - Прогнать тесты и сравнить профили до и после
+    - Расширить охват, проблемные компоненты временно пометить 'use no memo'
+- id: react-compiler-slow-render-choice
+  skill: react-compiler-limits
+  question: react-compiler
+  difficulty: 2
+  prompt: "React Compiler включён, но поиск по таблице из 20 000 строк тормозит при вводе. Профайлер показывает: основное время уходит на рендер тысяч строк, а видно на экране около 30. Что выбрать?"
+  explanation: Компилятор избегает повторной работы при тех же входах, но при новом query отфильтрованный список честно рендерится заново. Если узкое место — объём работы, его нужно уменьшить, а не мемоизировать. Виртуализация рендерит только видимые строки.
+  type: choose-tool
+  options:
+    - label: Виртуализация списка (например, TanStack Virtual)
+      why: "Лучший вариант: число рендеримых строк сокращается с тысяч до нескольких десятков видимых."
+    - label: Обернуть фильтрацию в useMemo, а строки — в memo
+      why: Компилятор уже мемоизирует это сам. При новом query список пересчитывается, и тысячи строк всё равно рендерятся и монтируются.
+    - label: useDeferredValue для query
+      why: Сохранит отзывчивость инпута, если рендер умеренно тяжёлый. Но тысячи строк всё равно отрендерятся — это хорошее дополнение к виртуализации.
+    - label: Пометить таблицу директивой 'use no memo'
+      why: Директива отключает компилятор для компонента. Это нужно, когда компиляция ломает поведение, но не ускорит рендер.
+  answer: 0
+
+# suspense-deep-dive: принято из черновика 2026-10-11
+- id: suspense-deep-dive-mechanics
+  skill: suspense-mechanics
+  question: suspense-deep-dive
+  difficulty: 2
+  prompt: Что делает React, когда компонент при рендере читает через `use(promise)` ещё не разрешённый промис?
+  explanation: "Suspense — это не await внутри компонента. React бросает незавершённый рендер поддерева, показывает fallback ближайшей границы и потом рендерит компонент заново с нуля. Отсюда два правила: промис должен быть стабильным (кэшированным), а граница определяет, какой кусок UI заменится скелетоном."
+  type: quiz
+  options:
+    - label: Прерывает рендер поддерева, показывает fallback ближайшей <Suspense> и повторяет рендер, когда промис разрешится
+      why: Верно. Незавершённый рендер выбрасывается, граница показывает fallback, а после resolve React заново вызывает функцию компонента — теперь use вернёт значение.
+    - label: Ставит компонент на паузу в месте вызова use и продолжает с той же строки после resolve, как await
+      why: React не сохраняет стек выполнения компонента. Функция вызывается заново целиком, поэтому промис, созданный в рендере, при повторе окажется новым.
+    - label: Рендерит компонент с undefined вместо данных, а после resolve делает обычный ререндер
+      why: Так работает ручной паттерн useEffect + useState с флагом загрузки. С Suspense компонент не коммитится, пока данные не готовы.
+    - label: Скрывает только этот компонент, а соседей внутри той же границы оставляет на экране
+      why: Fallback заменяет всё содержимое границы. Чтобы соседи грузились независимо, их оборачивают в отдельные вложенные <Suspense>.
+  answer: 0
+- id: suspense-deep-dive-uncached-promise
+  skill: suspense-stable-promise
+  question: suspense-deep-dive
+  difficulty: 2
+  prompt: Компонент обёрнут в <Suspense>, но вместо постов скелетон крутится бесконечно. Найдите строку с ошибкой.
+  explanation: "После resolve React повторяет рендер, и fetchPosts создаёт новый, ещё не готовый промис — компонент снова приостанавливается, и так по кругу. Промис должен приходить из кэша: useSuspenseQuery, RSC, кэш фреймворка или промис, созданный выше и переданный в props."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Posts({ userId }: { userId: string }) {
+      const posts = use(fetchPosts(userId));
+      return (
+        <ul>
+          {posts.map((p) => (
+            <li key={p.id}>{p.title}</li>
+          ))}
+        </ul>
+      );
+    }
+  bugLines:
+    - 2
+  causes:
+    - "Промис создаётся в каждом рендере: при повторе после resolve появляется новый незавершённый промис, и компонент приостанавливается снова"
+    - use умеет читать только Context, для промисов внутри компонента нужен await
+    - Клиентский компонент должен быть async, иначе use не дождётся промиса
+    - Ключ p.id меняется между рендерами, поэтому список перемонтируется и снова грузится
+  answer: 0
+- id: suspense-deep-dive-keep-old-tab
+  skill: suspense-transitions
+  question: suspense-deep-dive
+  difficulty: 3
+  prompt: Вкладки «Посты» и «Друзья» внутри одной Suspense-границы. При клике на вкладку видимый контент сразу сменяется скелетоном. Нужно оставить текущую вкладку на экране, пока новая не загрузится. Что сделать?
+  explanation: "Обновление в transition не прячет уже показанный контент за fallback: React держит старый UI, пока новое дерево не готово, а isPending даёт лёгкий индикатор. key на границе — обратный приём: он нужен, когда старые данные показывать нельзя."
+  type: choose-tool
+  options:
+    - label: Обернуть setTab в startTransition (или useTransition с isPending)
+      why: Лучший вариант. Transition не показывает fallback для уже видимого контента, старая вкладка остаётся до готовности новой, а isPending позволяет приглушить её.
+    - label: Поставить key={tab} на границу <Suspense>
+      why: Даёт обратный эффект — граница сбрасывается и гарантированно показывает fallback. Подходит, когда устаревший контент показывать нельзя, например при смене userId.
+    - label: Вынести единую границу <Suspense> на уровень всего приложения
+      why: "Fallback станет только крупнее: любая загрузка заменит спиннером весь экран. Это классический антипаттерн дизайна границ."
+    - label: Убрать Suspense и вести флаг isLoading через useEffect
+      why: Старый контент можно удержать вручную, но придётся самим решать гонки, кэш и координацию загрузок. Это шаг назад, если данные уже работают через Suspense.
+  answer: 0
+- id: suspense-deep-dive-suspend-timeline
+  skill: suspense-render-timeline
+  question: suspense-deep-dive
+  difficulty: 3
+  prompt: "Первый рендер страницы: внутри границы <Suspense> компонент Posts читает неготовый промис, а рядом стоят Friends. Расставьте события по порядку (React 19)."
+  explanation: В React 19 при приостановке React сразу коммитит fallback и не дорендеривает соседей. Затем он pre-warm'ит их в фоне, чтобы их запросы стартовали параллельно, а не водопадом. После resolve React повторяет рендер и заменяет fallback контентом.
+  type: order
+  kind: timeline
+  steps:
+    - React рендерит дерево, Posts вызывает use(promise) с неразрешённым промисом
+    - React прекращает рендер содержимого ближайшей границы <Suspense>
+    - Коммитит fallback этой границы — пользователь видит скелетон
+    - В фоне предрендерит соседей (Friends), чтобы запустить их запросы параллельно
+    - Промис разрешается, и React заново рендерит содержимое границы
+    - Коммитит готовый контент вместо fallback
+
+# use-deferred-value: принято из черновика 2026-10-11
+- id: use-deferred-value-vs-debounce-quiz
+  skill: deferred-value-vs-debounce
+  question: use-deferred-value
+  difficulty: 3
+  prompt: Что делает `useDeferredValue` и чем он принципиально отличается от debounce?
+  explanation: "`useDeferredValue` управляет приоритетом рендера, а не временем. React рендерит срочное обновление со старым значением, затем в фоне с новым и прерывает фоновый рендер при новом вводе. Задержки нет: отставание зависит от скорости устройства. Сократить запросы к API так нельзя — для этого нужен debounce."
+  type: quiz
+  options:
+    - label: "Отдаёт отстающую копию: срочный рендер со старым значением, затем прерываемый фоновый с новым, без фиксированной задержки"
+      why: Верно. На быстром устройстве значение догоняет почти сразу, на медленном отстаёт, а ввод не блокируется.
+    - label: "Это встроенный debounce: значение обновляется через фиксированную паузу после последнего изменения"
+      why: Таймера нет. React начинает фоновый рендер сразу после срочного, а не после паузы во вводе.
+    - label: "Сокращает число запросов к API: отложенное значение меняется реже, чем исходное"
+      why: На быстром устройстве отложенное значение обновляется почти на каждый символ. Если нужно меньше запросов, используйте debounce.
+    - label: Тяжёлый потомок не рендерится, пока ввод не стихнет, даже без memo
+      why: Без memo потомок перерисуется в срочном проходе со старым значением, потому что перерисовывается родитель. Выигрыша не будет.
+  answer: 0
+- id: use-deferred-value-missing-memo
+  skill: deferred-value-memo
+  question: use-deferred-value
+  difficulty: 2
+  prompt: Проект без React Compiler. Ввод всё равно лагает, хотя список получает отложенное значение. Найдите строку с причиной.
+  explanation: При каждом нажатии Search перерисовывается срочно, и вместе с ним SlowList — пусть со старым deferred, но вся тяжёлая работа выполняется. `memo(SlowList)` пропустит срочный проход, потому что props не изменились, и тяжёлым останется только прерываемый фоновый рендер. React Compiler мемоизирует такое автоматически.
+  type: find-bug
+  language: tsx
+  code: |-
+    function Search() {
+      const [query, setQuery] = useState('');
+      const deferred = useDeferredValue(query);
+      const onChange = (e: ChangeEvent<HTMLInputElement>) =>
+        setQuery(e.target.value);
+      return (
+        <>
+          <input value={query} onChange={onChange} />
+          <SlowList query={deferred} />
+        </>
+      );
+    }
+
+    function SlowList({ query }: { query: string }) {
+      return <ul>{renderThousandsOfRows(query)}</ul>;
+    }
+  bugLines:
+    - 14
+  causes:
+    - SlowList не обёрнут в memo и тяжело рендерится в каждом срочном проходе со старым значением
+    - useDeferredValue нужно передать задержку в мс вторым аргументом, иначе откладывания нет
+    - В input нужно передавать deferred вместо query, иначе срочный рендер не отложится
+    - Вызов setQuery нужно обернуть в setTimeout, чтобы useDeferredValue заработал
+  answer: 0
+- id: use-deferred-value-external-prop
+  skill: deferred-value-for-heavy-render
+  question: use-deferred-value
+  difficulty: 3
+  prompt: Компонент `Chart` получает `filter` через props из сторонней формы, её код менять нельзя. Тяжёлый рендер графика тормозит ввод в форме. Запросов к API нет. Что выбрать?
+  explanation: "Правило: контролируете вызов `setState` — берите `useTransition`. Значение пришло извне (props, сторонний хук) — `useDeferredValue` + `memo`. Нужно реже ходить в сеть — debounce. `useMemo` не делает рендер прерываемым."
+  type: choose-tool
+  options:
+    - label: useDeferredValue(filter) + memo на тяжёлом графике
+      why: Значение приходит извне, обновление не обернуть. Отложенная копия даёт прерываемый фоновый рендер, ввод остаётся отзывчивым.
+    - label: useTransition вокруг обновления filter
+      why: Подошёл бы, если бы setState был в нашем коде. Здесь он внутри сторонней формы, обернуть его в startTransition нельзя.
+    - label: Debounce filter на 300 мс
+      why: Уместен для сокращения запросов к API. Для рендера это фиксированная задержка даже на быстром устройстве, а сам тяжёлый рендер всё равно блокирует поток.
+    - label: useMemo для вычисления данных графика
+      why: Помогает, только если тяжёлое вычисление повторяется с теми же входами. При новом filter расчёт всё равно синхронный и блокирует ввод.
+  answer: 0
+- id: use-deferred-value-render-timeline
+  skill: deferred-value-rendering
+  question: use-deferred-value
+  difficulty: 3
+  prompt: Search с `useDeferredValue` и memo-списком. Пользователь ввёл «a», а пока шёл фоновый рендер — ещё «b». Расставьте события по порядку.
+  explanation: "Срочный проход всегда идёт первым и использует старое отложенное значение — поэтому ввод мгновенный. Фоновый рендер прерываем: новый ввод отбрасывает незавершённую работу. На экран попадает только актуальное отложенное значение «ab», промежуточное «a» может так и не закоммититься."
+  type: order
+  kind: timeline
+  steps:
+    - "Срочный рендер: query = 'a', deferredQuery остаётся ''"
+    - "Коммит: в input видно 'a', memo-список не перерисовался"
+    - Начинается фоновый рендер с deferredQuery = 'a'
+    - Ввод 'b' прерывает фоновый рендер, его результат отброшен
+    - Срочный рендер и коммит с query = 'ab'
+    - Фоновый рендер и коммит с deferredQuery = 'ab'
+
+# use-hook: принято из черновика 2026-10-11
+- id: use-hook-vs-other-hooks
+  skill: use-hook-semantics
+  question: use-hook
+  difficulty: 3
+  prompt: Чем хук `use` из React 19 принципиально отличается от остальных хуков?
+  explanation: "`use(resource)` читает промис или контекст прямо в рендере. Пока промис не разрешён, компонент приостанавливается до ближайшего Suspense, а отклонение уходит в Error Boundary. Состояния в списке хуков у `use` нет, поэтому его можно вызывать в условиях и циклах. Промис при этом должен быть стабильным и приходить извне."
+  type: quiz
+  options:
+    - label: Он читает промис или контекст во время рендера, приостанавливает компонент через Suspense и его можно вызывать в условиях и циклах
+      why: Верно. `use` не хранит состояние в списке хуков Fiber, поэтому порядок вызова не важен. Ожидание промиса реализовано через Suspense, а ошибки уходят в Error Boundary.
+    - label: "Это аналог useEffect для загрузки данных: запускает запрос после рендера и кладёт результат в состояние"
+      why: Нет. `use` ничего не запускает и работает во время рендера, а не после него. Запрос должен быть создан заранее, например в Server Component или библиотеке.
+    - label: Он сам кэширует промисы, поэтому в него можно передавать `fetch(url)` прямо из рендера
+      why: Кэша у `use` нет. Новый промис на каждом рендере, в том числе после приостановки, даёт бесконечную загрузку и предупреждение «uncached promise».
+    - label: Это обычная функция, а не хук, поэтому её можно вызывать где угодно, даже вне компонентов
+      why: "`use` можно вызывать условно, но только в рендере компонента или внутри другого хука. Вне React-рендера он не работает."
+  answer: 0
+- id: use-hook-uncached-promise
+  skill: use-hook-stable-promise
+  question: use-hook
+  difficulty: 2
+  prompt: Клиентский компонент обёрнут в Suspense, но вечно показывает fallback. Найдите ошибку.
+  explanation: "При каждом рендере вызывается новый `fetch`, и `use` получает новый промис. После приостановки React рендерит компонент заново, создаётся ещё один промис, и так по кругу. Промис должен быть стабильным: прийти из Server Component, из кэша или из библиотеки данных (TanStack Query, фреймворк)."
+  type: find-bug
+  language: tsx
+  code: |-
+    'use client';
+    function UserCard({ id }: { id: string }) {
+      const user = use(
+        fetch(`/api/users/${id}`).then((r) => r.json())
+      );
+      return <p>{user.name}</p>;
+    }
+  bugLines:
+    - 3
+    - 4
+  causes:
+    - "Промис создаётся в рендере: после каждой приостановки появляется новый, и загрузка никогда не заканчивается"
+    - Хук `use` нельзя вызывать в Client Component — только в Server Component
+    - Перед `fetch` не хватает `await`, поэтому `use` получает не данные, а промис
+    - Вызов `use` нужно обернуть в try/catch, иначе Suspense не сработает
+  answer: 0
+- id: use-hook-stream-promise-to-client
+  skill: use-hook-server-promise-streaming
+  question: use-hook
+  difficulty: 2
+  prompt: "Допишите код: страница не ждёт комментарии, а клиентский компонент читает их, когда они придут."
+  explanation: Server Component запускает запрос и передаёт промис без `await`. Промисы сериализуются при передаче в Client Component. Клиент читает промис через `use`, а пока данные не пришли, Suspense показывает `fallback`. Остальная страница стримится сразу.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    // Server Component
+    async function Page({ id }: { id: string }) {
+      const commentsPromise = getComments(id);
+      return (
+        <Suspense ___={<Skeleton />}>
+          <Comments commentsPromise={___} />
+        </Suspense>
+      );
+    }
+    // Client Component
+    function Comments({ commentsPromise }: Props) {
+      const comments = ___(commentsPromise);
+      return comments.map((c) => <p key={c.id}>{c.text}</p>);
+    }
+  tokens:
+    - fallback
+    - commentsPromise
+    - use
+  decoys:
+    - loading
+    - comments
+    - useEffect
+    - await
+- id: use-hook-slow-comments-choice
+  skill: use-hook-server-promise-streaming
+  question: use-hook
+  difficulty: 3
+  prompt: "Next.js App Router: пост грузится быстро, комментарии — 2 секунды. Нужно показать пост сразу, а комментарии получить в том же ответе сервера, без отдельного запроса с клиента. Как сделать?"
+  explanation: Медленную часть не нужно ждать на сервере. Создайте промис в Server Component, передайте его в Client Component и прочитайте через `use` внутри Suspense. Запрос стартует сразу, пост отрисуется без ожидания, а комментарии дойдут позже в том же потоковом ответе.
+  type: choose-tool
+  options:
+    - label: Создать промис в Server Component без await, передать пропсом и прочитать через `use` под Suspense
+      why: Лучший вариант. Запрос стартует на сервере сразу, пост рендерится без ожидания, комментарии придут в том же стриме, а fallback закроет паузу.
+    - label: "`await Promise.all([getPost(id), getComments(id)])` в Server Component"
+      why: Запросы пойдут параллельно, но страница будет ждать самый медленный. Подходит, если без комментариев страница бессмысленна.
+    - label: useEffect + fetch в Client Component после гидрации
+      why: Запрос начнётся только после загрузки JS и гидрации, это водопад. Кэш и гонки придётся писать вручную. Оправдано разве что в чистом SPA без сервера.
+    - label: "`use(fetch(url))` прямо в Client Component"
+      why: Каждый рендер создаёт новый промис, поэтому загрузка бесконечная. На клиенте промис должен приходить из кэша или библиотеки, например useSuspenseQuery.
+  answer: 0
+
+# use-optimistic: принято из черновика 2026-10-11
+- id: use-optimistic-after-action
+  skill: use-optimistic-lifecycle
+  question: use-optimistic
+  difficulty: 2
+  prompt: Что происходит с оптимистичным значением из useOptimistic, когда Action завершился?
+  explanation: useOptimistic — это временный слой поверх реального state, который живёт только пока идёт Action. После завершения слой исчезает, и UI показывает тот state, что передан в хук. Поэтому источник (props, кэш, setState) должен обновиться сам, а об ошибке нужно сообщить отдельно.
+  type: quiz
+  options:
+    - label: "Оно отбрасывается, и UI показывает текущий state, переданный в хук: при успехе там уже свежие данные, при ошибке это и есть откат"
+      why: Верно. Хук не хранит результат и ничего не фиксирует. Он показывает оптимистичное значение, пока Action в процессе, а потом снова отдаёт state.
+    - label: При успешном промисе оптимистичное значение фиксируется и становится новым состоянием
+      why: Хук ничего не фиксирует. Если источник state не обновился, после успеха значение «откатится» к старому. Это главный подводный камень.
+    - label: При ошибке откат нужно сделать вручную, повторно вызвав addOptimistic со старым значением
+      why: "Откат автоматический: при ошибке оптимистичное значение тоже отбрасывается. Вручную придётся только показать ошибку пользователю."
+    - label: Оно держится до следующего рендера родителя, даже если Action уже завершился
+      why: Время жизни оптимистичного значения привязано к Action или transition, а не к рендерам родителя. Как только действие завершено, значение пропадает.
+  answer: 0
+- id: use-optimistic-like-rollback
+  skill: use-optimistic-lifecycle
+  question: use-optimistic
+  difficulty: 3
+  prompt: Лайк засчитывается на сервере, но через мгновение счётчик на кнопке возвращается к старому числу. Где ошибка?
+  explanation: "Когда Action завершается, useOptimistic отбрасывает своё значение и показывает likes, а likes так и не изменился. Реальный state нужно обновить: после await вызвать `startTransition(() => setLikes(n => n + 1))` или взять свежее значение из props или кэша."
+  type: find-bug
+  language: tsx
+  code: |-
+    const add = (n: number, d: number) => n + d;
+    function Like({ initial }: { initial: number }) {
+      const [likes, setLikes] = useState(initial);
+      const [shown, addOptimistic] = useOptimistic(likes, add);
+      async function action() {
+        addOptimistic(1);
+        await api.like();
+      }
+      return (
+        <form action={action}>
+          <button>♥ {shown}</button>
+        </form>
+      );
+    }
+  bugLines:
+    - 7
+  causes:
+    - После await реальный likes не обновляется, а оптимистичное значение по завершении Action отбрасывается, поэтому счётчик откатывается
+    - addOptimistic вызван вне transition, поэтому React сразу игнорирует обновление
+    - Функция add должна быть объявлена внутри компонента, иначе useOptimistic её не видит
+    - Action формы не может быть async-функцией, поэтому промис api.like() не дожидается
+  answer: 0
+- id: use-optimistic-onclick-transition
+  skill: use-optimistic-transition
+  question: use-optimistic
+  difficulty: 2
+  prompt: Кнопка «звёздочка» срабатывает в onClick, а не через form action. Допишите код, чтобы оптимистичное обновление работало без предупреждений.
+  explanation: Оптимистичное обновление допустимо только внутри Action или transition. Форма с action делает это за нас, а в обычном onClick вызов нужно обернуть в startTransition. Пока async-функция выполняется, shown показывает новое значение, а затем возвращается к props starred.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function Star({ starred, save }: Props) {
+      const [shown, setShown] = ___(
+        starred,
+        (_cur: boolean, next: boolean) => next,
+      );
+      const [isPending, startTransition] = ___();
+      function onClick() {
+        ___(async () => {
+          setShown(!starred);
+          await save(!starred);
+        });
+      }
+      return <StarIcon on={shown} onClick={onClick} />;
+    }
+  tokens:
+    - useOptimistic
+    - useTransition
+    - startTransition
+  decoys:
+    - useState
+    - useDeferredValue
+    - useActionState
+    - setTimeout
+- id: use-optimistic-vs-query-cache
+  skill: optimistic-update-choice
+  question: use-optimistic
+  difficulty: 3
+  prompt: "Приложение на TanStack Query. Новое название проекта должно сразу появиться в сайдбаре, хлебных крошках и шапке: все три читают useQuery(['project', id]). При ошибке нужен откат. Что выбрать?"
+  explanation: "Правило: если оптимистичное значение должны видеть многие компоненты через общий кэш, правьте кэш в onMutate (cancelQueries → снимок → setQueryData), откатывайте в onError и инвалидируйте в onSettled. useOptimistic и variables подходят, когда обновление нужно показать локально, там же, где запущено действие."
+  type: choose-tool
+  options:
+    - label: "useMutation с onMutate: снимок и setQueryData в кэш, откат в onError, invalidateQueries в onSettled"
+      why: Лучший выбор. Правится общий кэш, поэтому все три компонента сразу видят новое имя. Снимок даёт откат при ошибке, а инвалидация сверяет данные с сервером.
+    - label: useOptimistic в компоненте формы переименования
+      why: Оптимистичное значение локально для компонента и живёт только во время Action, сайдбар и шапка его не увидят. Подходит, когда результат нужен там же, где форма.
+    - label: Показывать variables мутации в компоненте с useMutation
+      why: Простой вариант без ручного отката, но variables доступны только там, где вызван useMutation. Удобно для одного места, например для элемента списка рядом с формой.
+    - label: Копия названия в useState с ручной синхронизацией
+      why: Придётся вручную передавать значение трём компонентам и следить за расхождением с кэшем. Оправдано разве что для черновика внутри одной формы.
+  answer: 0
+
+# use-transition: принято из черновика 2026-10-11
+- id: use-transition-core-idea
+  skill: transition-semantics
+  question: use-transition
+  difficulty: 2
+  prompt: Что на самом деле делает startTransition с обновлением состояния?
+  explanation: "Transition — про приоритет, а не про скорость. Колбэк вызывается сразу, а получившийся рендер становится несрочным: его можно прервать ради ввода. Пока он не готов, на экране остаётся старый UI, а `isPending` позволяет показать индикатор."
+  type: quiz
+  options:
+    - label: "Помечает обновление несрочным: рендер прерываемый, ввод идёт первым, а видимый контент не заменяется Suspense-fallback"
+      why: Верно. Срочные обновления прерывают фоновый рендер. Уже показанный UI остаётся на экране до готовности нового, без отката к спиннеру.
+    - label: Откладывает вызов колбэка до простоя браузера, как requestIdleCallback
+      why: Колбэк выполняется сразу и синхронно. Откладывается не вызов функции, а рендер, вызванный setState внутри неё.
+    - label: Ускоряет тяжёлый рендер, распределяя работу по нескольким потокам
+      why: "Рендер идёт в том же потоке и быстрее не становится. Он становится неблокирующим: React уступает место срочной работе."
+    - label: "Дебаунсит обновления: через паузу применяется только последнее из серии"
+      why: Таймера и фиксированной задержки нет. React начинает рендер сразу и бросает устаревший, только если пришло новое обновление.
+  answer: 0
+- id: use-transition-controlled-input
+  skill: transition-urgent-input
+  question: use-transition
+  difficulty: 2
+  prompt: Фильтрация большого списка тормозила ввод, и её обернули в transition. Теперь инпут ведёт себя странно. Где ошибка?
+  explanation: "Значение текстового инпута должно обновляться срочно. Правильно разделить состояние: `query` для инпута меняется обычным setState, а второе состояние для фильтра обновляется в transition. Другой вариант — передать в фильтр `useDeferredValue(query)`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Search({ items }: Props) {
+      const [query, setQuery] = useState('');
+      const [, startTransition] = useTransition();
+      function onChange(e: ChangeEvent<HTMLInputElement>) {
+        startTransition(() => setQuery(e.target.value));
+      }
+      const visible = filterHeavy(items, query);
+      return (
+        <>
+          <input value={query} onChange={onChange} />
+          <List items={visible} />
+        </>
+      );
+    }
+  bugLines:
+    - 5
+  causes:
+    - "Состояние контролируемого инпута обновляется в transition: ввод стал несрочным и прерываемым, хотя должен применяться сразу"
+    - e.target читается внутри колбэка, когда событие уже очищено React
+    - Из useTransition нельзя брать только startTransition, пропуская isPending
+    - filterHeavy нужно вызывать в useEffect, иначе transition не сработает
+  answer: 0
+- id: use-transition-async-action
+  skill: async-transition-actions
+  question: use-transition
+  difficulty: 3
+  prompt: "Допишите Action: кнопка блокируется на время запроса, а обновления после ответа остаются частью transition."
+  explanation: В React 19 startTransition принимает async-функцию, и `isPending` держится до её завершения. Обновления состояния после `await` пока не попадают в transition автоматически, поэтому их снова оборачивают в `startTransition`.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function NameForm({ name }: { name: string }) {
+      const [error, setError] = useState<string | null>(null);
+      const [isPending, startTransition] = ___();
+      function submit() {
+        startTransition(___ () => {
+          const err = await updateName(name);
+          ___(() => {
+            if (err) setError(err);
+            else navigate('/profile');
+          });
+        });
+      }
+      return <button onClick={submit} disabled={___}>Save</button>;
+    }
+  tokens:
+    - useTransition
+    - async
+    - startTransition
+    - isPending
+  decoys:
+    - useDeferredValue
+    - useActionState
+    - setTimeout
+    - await
+- id: use-transition-vs-deferred-value
+  skill: deferred-value-for-heavy-render
+  question: use-transition
+  difficulty: 2
+  prompt: Компонент Results получает query пропсом от родителя из сторонней библиотеки и рендерит 5000 строк. Ввод тормозит, доступа к сеттеру query нет. Что выбрать?
+  explanation: useTransition оборачивает место, где вызывается setState. useDeferredValue работает со значением, когда сеттер недоступен. Оба дают прерываемый фоновый рендер без фиксированной задержки, в отличие от debounce.
+  type: choose-tool
+  options:
+    - label: useDeferredValue(query) + memo для списка
+      why: "Лучший вариант: сеттера нет, есть только значение. Список рендерится с отложенной копией query, а этот рендер прерывается новым вводом."
+    - label: useTransition вокруг setQuery
+      why: Подошёл бы, если бы setQuery был в вашем коде. Здесь обновление создаёт чужой родитель, обернуть его нельзя.
+    - label: Debounce query на 300 мс
+      why: Уместен, чтобы реже слать запросы на сервер. Для рендера он даёт фиксированную задержку, а когда срабатывает, рендер всё равно блокирует поток.
+    - label: Только React.memo для Results
+      why: memo помогает, если пропсы не меняются. Здесь query меняется на каждый символ, и тяжёлый рендер остаётся синхронным.
+  answer: 0

@@ -1,0 +1,991 @@
+# code-review: принято из черновика 2026-10-11
+- id: code-review-focus-quiz
+  skill: code-review-priorities
+  question: code-review
+  difficulty: 3
+  prompt: На что в первую очередь должен смотреть человек при code review React-кода?
+  explanation: "Ревью — проверка смысла: корректность, архитектура, производительность горячих путей, a11y, безопасность, типы и тесты. Всё, что можно проверить машиной (формат, простые правила, типы), уходит в Prettier, ESLint и TypeScript в CI, чтобы ревьюер не тратил на это внимание."
+  type: quiz
+  options:
+    - label: "На смысл: корректность эффектов и состояния, архитектуру, горячие пути, доступность, безопасность и тесты"
+      why: "Верно. Это то, что не поймает автоматика: лишний источник истины, гонка в эффекте, XSS через dangerouslySetInnerHTML, тест на реализацию."
+    - label: "На соблюдение стайлгайда: именование, форматирование, порядок импортов — это основа качества кода"
+      why: Стиль важен, но его должны решать Prettier и ESLint в CI. Споры о стиле на ревью — типичный подводный камень и трата времени команды.
+    - label: "На покрытие: если coverage выше порога, логику можно подробно не читать"
+      why: Высокий coverage не гарантирует, что тесты проверяют поведение и краевые случаи. Тесты на реализацию дают процент, но не уверенность.
+    - label: "На производительность: каждое вычисление и колбэк должны быть обёрнуты в useMemo и useCallback"
+      why: "Мемоизация «везде» — не цель ревью: смотрят на лишние рендеры именно на горячих путях, а React Compiler и так мемоизирует многое сам."
+  answer: 0
+- id: code-review-nested-component
+  skill: nested-component-definition
+  question: code-review
+  difficulty: 2
+  prompt: "На ревью: пользователи жалуются, что поле поиска теряет фокус после каждого символа. Найдите строку с причиной."
+  explanation: "Компонент, объявленный внутри компонента, на каждом рендере — новая функция, то есть новый тип. React не может сопоставить его с прошлым, размонтирует старый input и монтирует новый — фокус и состояние теряются. Решение: вынести SearchInput наружу и передать value/onChange через props или вставить JSX напрямую."
+  type: find-bug
+  language: tsx
+  code: |-
+    function SearchPage() {
+      const [query, setQuery] = useState('');
+      const SearchInput = () => (
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      );
+      return (
+        <Layout search={<SearchInput />}>
+          <Results query={query} />
+        </Layout>
+      );
+    }
+  bugLines:
+    - 3
+  causes:
+    - "SearchInput объявлен внутри SearchPage: каждый рендер создаёт новый тип компонента, и React перемонтирует input"
+    - Контролируемому input нужен defaultValue вместе с value, иначе React сбрасывает фокус
+    - setQuery нельзя вызывать из вложенной стрелочной функции — замыкание устаревает и ломает ввод
+    - JSX-элемент нельзя передавать в prop search — React клонирует его при каждом рендере Layout
+  answer: 0
+- id: code-review-style-automation
+  skill: code-review-automation
+  question: code-review
+  difficulty: 2
+  prompt: На каждом ревью в команде по полчаса спорят о кавычках, точках с запятой и порядке импортов. Как это решить?
+  explanation: "Правило: всё, что можно проверить машиной, проверяет машина. Форматтер и линтер в pre-commit и CI снимают споры о стиле, а ревьюер тратит внимание на смысл: состояние, эффекты, архитектуру, безопасность."
+  type: choose-tool
+  options:
+    - label: Prettier + ESLint (import order) в pre-commit и обязательной проверке CI
+      why: "Лучший вариант: стиль применяется автоматически и единообразно, спорить не о чем, PR со сломанным стилем просто не пройдёт CI."
+    - label: Подробный стайлгайд в вики и ссылки на него в комментариях
+      why: Полезен для договорённостей, которые не автоматизировать (именование, структура модулей), но правила форматирования люди всё равно будут нарушать и обсуждать.
+    - label: Помечать стилевые замечания как nit:, чтобы они не блокировали мерж
+      why: "Разделение блокирующих и nit: — хорошая культура для вкусовых предложений, но время на написание и чтение таких комментариев никуда не девается."
+    - label: Назначить одного ревьюера, отвечающего только за стиль
+      why: Создаёт бутылочное горлышко и задержки ревью, а проверку, которую делает машина за секунды, перекладывает на человека.
+  answer: 0
+- id: code-review-process-recipe
+  skill: code-review-process
+  question: code-review
+  difficulty: 2
+  prompt: Соберите порядок действий при ревью PR с новой фичей.
+  explanation: "Сначала понять цель и размер PR: если его не понять за ~15 минут, его просят разбить. Затем проверить, что автоматика зелёная, иначе вы ревьюите то, что машина отвергнет. Дальше идти от крупного к мелкому: если архитектура неверна, детали всё равно придётся переписывать. В конце оставить комментарии с «почему» и явным разделением блокирующих замечаний и nit:."
+  type: order
+  kind: recipe
+  steps:
+    - Прочитать описание и задачу, оценить размер — при необходимости попросить разбить PR
+    - "Убедиться, что CI зелёный: линтер, типы, тесты"
+    - "Оценить архитектуру: где живёт состояние, границы модулей, нет ли дублирования источников истины"
+    - "Проверить детали: эффекты и зависимости, гонки, ключи, загрузку и ошибки, безопасность, тесты на поведение"
+    - "Оставить комментарии с объяснением «почему», разделив блокирующие и nit:"
+
+# component-patterns: принято из черновика 2026-10-11
+- id: component-patterns-inversion-of-control
+  skill: component-patterns-purpose
+  question: component-patterns
+  difficulty: 3
+  prompt: Какую общую задачу решают compound components, control props, state reducer и headless hooks?
+  explanation: "Все эти паттерны дают потребителю контроль над разметкой, состоянием или переходами, но не раздувают API пропсами-флагами. Правило выбора: разметка — compound или headless, значение — control props, логика переходов — state reducer."
+  type: quiz
+  options:
+    - label: "Инверсия управления: потребитель получает контроль над разметкой, состоянием или переходами без новых флагов в props"
+      why: Верно. Вместо `closeOnSelect`, `renderItem`, `hideIcon` и других флагов компонент отдаёт наружу нужную точку контроля, а свою логику оставляет в одном месте.
+    - label: "Оптимизация производительности: меньше лишних ререндеров за счёт контекста и мемоизации"
+      why: Это не их цель. Compound components на контексте могут даже добавить ререндеры потребителей. Производительность здесь — побочная тема.
+    - label: Замена глобального стейт-менеджера для состояния UI-компонентов
+      why: "Паттерны работают на уровне одного компонента: состояние табов или меню живёт внутри него. Глобальный store они не заменяют и не должны."
+    - label: "Совместимость с SSR: логика уходит в хуки, и компонент рендерится на сервере без гидрации"
+      why: SSR и гидрация тут ни при чём. Headless-хук тоже выполняется при гидрации, просто разметку пишет потребитель.
+  answer: 0
+- id: component-patterns-dropdown-custom-transitions
+  skill: state-reducer-pattern
+  question: component-patterns
+  difficulty: 3
+  prompt: Dropdown из дизайн-системы используется в 40 местах. В одном месте меню не должно закрываться при выборе пункта, в другом Escape должен только сбрасывать поиск. Флаги на каждый случай добавлять не хочется. Что выбрать?
+  explanation: "Если просят «а можно, чтобы при X не происходило Y», нужно менять переходы состояния. State reducer отдаёт потребителю функцию `(state, action) => changes`: он правит только нужные переходы, остальное работает по умолчанию. Так сделано в Downshift."
+  type: choose-tool
+  options:
+    - label: "State reducer: проп `stateReducer(state, action)`, который может переопределить изменения"
+      why: Лучший выбор. Потребитель перехватывает конкретный action (выбор пункта, Escape) и меняет результат, а остальная логика компонента остаётся нетронутой.
+    - label: "Control props: сделать `isOpen` контролируемым через `isOpen` и `onOpenChange`"
+      why: Подходит, когда снаружи нужно просто открыть или закрыть меню. Для правки переходов каждому потребителю пришлось бы повторять логику клавиатуры и выбора.
+    - label: "Headless hook: переписать Dropdown на `useDropdown` с prop getters"
+      why: "Хорош, когда в каждом месте сильно разная разметка. Здесь проблема в поведении, а не в разметке: хук без state reducer не решит задачу, а миграция дорогая."
+    - label: "Compound components: разбить на `<Dropdown.Trigger>` и `<Dropdown.Item>`"
+      why: Даёт гибкость разметки и состава частей. Логика закрытия по-прежнему зашита внутри, так что просьбы о поведении не закрыты.
+  answer: 0
+- id: component-patterns-controllable-falsy-value
+  skill: controlled-uncontrolled-props
+  question: component-patterns
+  difficulty: 2
+  prompt: Родитель передаёт `value={0}` или `value=""`, но компонент игнорирует внешнее значение и живёт своим состоянием. Найдите ошибку.
+  explanation: "Режим определяется по проверке на `undefined`, а не по истинности: `0`, `''` и `false` — валидные контролируемые значения. Режим вычисляется на каждом рендере. Если он сменится за время жизни компонента, стоит предупредить в dev, как это делает React для input."
+  type: find-bug
+  language: tsx
+  code: |-
+    function useControllableState<T>(
+      controlled: T | undefined,
+      defaultValue: T,
+      onChange?: (v: T) => void,
+    ) {
+      const [inner, setInner] = useState(defaultValue);
+      const isControlled = Boolean(controlled);
+      const value = isControlled ? controlled! : inner;
+      const setValue = (next: T) => {
+        if (!isControlled) setInner(next);
+        onChange?.(next);
+      };
+      return [value, setValue] as const;
+    }
+  bugLines:
+    - 7
+  causes:
+    - "Проверка на истинность: при `0`, `''` или `false` компонент считает себя неконтролируемым — нужно `controlled !== undefined`"
+    - В контролируемом режиме нужно тоже вызывать `setInner`, иначе значение не обновится
+    - "`onChange` нужно вызывать только в неконтролируемом режиме, иначе родитель получит лишний вызов"
+    - "`setValue` должен быть обёрнут в `useCallback`, иначе значение сбрасывается на каждом рендере"
+  answer: 0
+- id: component-patterns-compound-context
+  skill: compound-components
+  question: component-patterns
+  difficulty: 2
+  prompt: "Допишите основу compound components: `Tabs` делится состоянием с частями через контекст, а `useTabs` падает с понятной ошибкой вне `<Tabs>` (React 19)."
+  explanation: Части compound-компонента получают неявное состояние из контекста. Default `null` и guard-хук превращают «Tab вне Tabs» в понятную ошибку вместо `undefined`. В React 19 сам контекст рендерится как провайдер, а `use` читает его, в том числе условно.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const TabsContext = createContext<TabsCtx | ___>(null);
+
+    function Tabs({ children }: { children: ReactNode }) {
+      const [value, setValue] = useState('a');
+      const ctx = { value, setValue };
+      return <TabsContext ___={ctx}>{children}</TabsContext>;
+    }
+
+    function useTabs() {
+      const ctx = ___(TabsContext);
+      if (!ctx) throw new Error('Tab outside <Tabs>');
+      return ctx;
+    }
+  tokens:
+    - "null"
+    - value
+    - use
+  decoys:
+    - undefined
+    - Provider
+    - useRef
+    - children
+
+# design-system: принято из черновика 2026-10-11
+- id: design-system-architecture-quiz
+  skill: design-system-architecture
+  question: design-system
+  difficulty: 3
+  prompt: Команда начинает собственную библиотеку компонентов на React. Какая архитектура считается надёжной основой?
+  explanation: Разделяйте ответственность по слоям. Токены задают визуальный язык и темы. Headless-библиотека отвечает за поведение и доступность. Ваши стили отвечают за внешний вид. Композиционный API (compound components, `asChild`, нативные props) позволяет комбинировать готовые части и не плодить флаги.
+  type: quiz
+  options:
+    - label: Токены как CSS-переменные для тем, поведение и a11y из headless-библиотеки, свои стили и композиционный API
+      why: "Верно. Каждый слой решает свою задачу: токены — визуальный язык, Radix или React Aria — фокус, клавиатуру и ARIA, стили и API остаются за командой."
+    - label: Взять стилизованную библиотеку вроде MUI и переопределять её стили через тему
+      why: Так быстро стартовать, но придётся бороться с чужими стилями и runtime CSS-in-JS, который плохо сочетается с RSC. Своего визуального языка по сути не будет.
+    - label: Написать все компоненты с нуля, включая фокус-ловушки и навигацию с клавиатуры, чтобы не зависеть от чужого кода
+      why: Доступные модалки, меню и комбобоксы — это месяцы работы над краевыми случаями. Чаще всего в итоге ломаются клавиатура и скринридеры.
+    - label: Сделать по одному универсальному компоненту на сущность с набором boolean-props вроде isLarge, isRounded, withIcon
+      why: Флаги дают комбинаторный взрыв и противоречивые сочетания. Лучше использовать явные варианты (variant, size) и композицию.
+  answer: 0
+- id: design-system-accessible-combobox
+  skill: headless-components-choice
+  question: design-system
+  difficulty: 2
+  prompt: "В дизайн-систему нужен комбобокс с автодополнением: навигация стрелками, ARIA для скринридеров, позиционирование списка у края экрана. Стили — строго по макетам и токенам. Что выбрать?"
+  explanation: Сложное интерактивное поведение берите из headless-библиотеки, а внешний вид делайте сами. Так доступность и позиционирование достаются проверенными, а визуальный язык остаётся вашим.
+  type: choose-tool
+  options:
+    - label: Headless-комбобокс (React Aria, Ariakit, Headless UI) + свои стили на токенах
+      why: "Лучший вариант: фокус, клавиатура, ARIA и позиционирование уже решены, разметка и стили полностью ваши."
+    - label: Свой компонент на div и useState с обработкой onKeyDown
+      why: Подходит разве что для учебной задачи. Роли, aria-activedescendant, скринридеры и краевые случаи придётся проходить заново.
+    - label: Готовый Autocomplete из стилизованной библиотеки (MUI)
+      why: Хорош, если команда принимает чужой визуальный язык. Подгонять его под свои макеты дорого, а runtime-стили мешают RSC.
+    - label: Нативный input с datalist
+      why: Годится для простой подсказки без стилизации. Внешний вид списка почти не настраивается и отличается между браузерами.
+  answer: 0
+- id: design-system-aschild-slot
+  skill: aschild-slot
+  question: design-system
+  difficulty: 3
+  prompt: "Допишите упрощённый Slot и Button с `asChild`: при asChild кнопка отдаёт свои props дочернему элементу вместо рендера button."
+  explanation: Slot не рендерит свой DOM-узел. Он клонирует единственного ребёнка и подмешивает ему props. Настоящий Slot из Radix ещё сливает className, style, обработчики и ref, а не просто перезаписывает их. Это даёт поведение и стили кнопки с разметкой ссылки роутера.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    type SlotProps = React.HTMLAttributes<HTMLElement> & {
+      children?: React.ReactNode;
+    };
+
+    function Slot({ children, ...props }: SlotProps) {
+      if (!React.___(children)) return null;
+      return React.___(children, props);
+    }
+
+    function Button({ asChild, ...props }: ButtonProps) {
+      const Comp = asChild ? ___ : 'button';
+      return <Comp className="btn" {...props} />;
+    }
+  tokens:
+    - isValidElement
+    - cloneElement
+    - Slot
+  decoys:
+    - createElement
+    - forwardRef
+    - Fragment
+    - "'a'"
+- id: design-system-button-classname
+  skill: component-props-forwarding
+  question: design-system
+  difficulty: 2
+  prompt: Потребители пишут `<Button className="mt-4">`, но отступ не применяется. Найдите ошибку (React 19).
+  explanation: "Компонент дизайн-системы должен расширять нативные props: className потребителя сливается с базовыми классами через cn или clsx, остальное прокидывается через spread. В React 19 ref — обычный prop, ComponentProps<'button'> его уже включает, и forwardRef не нужен."
+  type: find-bug
+  language: tsx
+  code: |-
+    type ButtonProps = React.ComponentProps<'button'> & {
+      variant?: 'primary' | 'ghost';
+    };
+    export function Button({
+      variant = 'primary', className, ...props
+    }: ButtonProps) {
+      return (
+        <button
+          {...props}
+          className={`btn btn-${variant}`}
+        />
+      );
+    }
+  bugLines:
+    - 10
+  causes:
+    - "className потребителя деструктурирован и выброшен — его нужно слить с базовыми классами: cn('btn', `btn-${variant}`, className)"
+    - Без forwardRef компонент теряет ref, и стили не применяются
+    - "{...props} должен стоять после className, чтобы потребитель мог переопределить классы"
+    - variant нужно заменить на boolean-props isPrimary и isGhost
+  answer: 0
+
+# flux-unidirectional: принято из черновика 2026-10-11
+- id: flux-vs-mvc-core-idea
+  skill: unidirectional-data-flow
+  question: flux-unidirectional
+  difficulty: 2
+  prompt: Какую главную проблему клиентского MVC с двусторонним связыванием решил Flux?
+  explanation: "Flux ценен не скоростью, а **отслеживаемостью**: состояние меняется только в ответ на явные действия и в одном направлении. Поэтому изменения можно залогировать, воспроизвести и отладить. Та же идея есть в самом React: state → UI, props вниз, события вверх."
+  type: quiz
+  options:
+    - label: Изменения шли каскадом в обе стороны, и было трудно понять, кто и почему поменял данные. Flux меняет состояние только через действия
+      why: Верно. Цикл Action → Dispatcher → Store → View делает каждое изменение явным, поэтому его можно отследить, залогировать и воспроизвести.
+    - label: "Однонаправленный поток быстрее: он сокращает число операций с DOM"
+      why: Производительность не была целью Flux. Число операций с DOM сокращает reconciliation в React, а архитектура данных на это не влияет.
+    - label: В MVC не было общего состояния, а Flux ввёл единый глобальный стор
+      why: Модели в MVC и были общим состоянием. Единый стор появился в Redux, а в оригинальном Flux сторов несколько.
+    - label: Однонаправленный поток требует глобального стора вроде Redux, без него React-приложение двунаправленное
+      why: "Типичное заблуждение. React однонаправлен и без Redux: props идут вниз, события — вверх, а useState меняется только через setState."
+  answer: 0
+- id: flux-mutating-props-bug
+  skill: props-down-events-up
+  question: flux-unidirectional
+  difficulty: 2
+  prompt: Галочка не переключается, хотя onChange срабатывает. Найдите строку, которая нарушает однонаправленный поток данных.
+  explanation: Props принадлежат родителю и доступны только для чтения. Мутация объекта не вызывает рендер, поэтому React возвращает checkbox к последнему отрендеренному значению. Правильно поднять событие вверх, например через `onToggle(todo.id)`. Тогда владелец сам изменит своё состояние, и новые props придут вниз.
+  type: find-bug
+  language: tsx
+  code: |-
+    function TodoItem({ todo }: { todo: Todo }) {
+      return (
+        <label>
+          <input
+            type="checkbox"
+            checked={todo.done}
+            onChange={() => {
+              todo.done = !todo.done;
+            }}
+          />
+          {todo.title}
+        </label>
+      );
+    }
+  bugLines:
+    - 8
+  causes:
+    - "Компонент мутирует props: рендер не запускается, а данные должен менять владелец через колбэк вроде onToggle"
+    - Для checkbox нужно использовать onClick, а не onChange
+    - Вместо checked нужно использовать defaultChecked, тогда изменение сохранится
+    - Без htmlFor у label клик по checkbox не доходит до обработчика
+  answer: 0
+- id: flux-controlled-input-lifted
+  skill: props-down-events-up
+  question: flux-unidirectional
+  difficulty: 1
+  prompt: Состояние поиска хранит родитель. Допишите контролируемый инпут так, чтобы данные шли вниз, а изменения — вверх.
+  explanation: "В React нет двустороннего связывания: пара `value` + `onChange` лишь имитирует его. Значение приходит вниз через props, а ввод пользователя уходит вверх событием. Владелец состояния решает, принять ли изменение, поэтому поток остаётся однонаправленным."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    type Props = {
+      query: string;
+      onQueryChange: (q: string) => void;
+    };
+
+    function SearchBox({ query, onQueryChange }: Props) {
+      return (
+        <input
+          value={___}
+          onChange={(e) => ___(e.target.___)}
+        />
+      );
+    }
+  tokens:
+    - query
+    - onQueryChange
+    - value
+  decoys:
+    - setQuery
+    - defaultValue
+    - checked
+- id: flux-redux-dispatch-cycle
+  skill: flux-action-cycle
+  question: flux-unidirectional
+  difficulty: 2
+  prompt: Расставьте по порядку, что происходит в приложении на Redux после клика «Добавить задачу».
+  explanation: "Это цикл Flux в упрощении Redux: действие → чистый редьюсер → новое состояние → подписчики → UI → новое событие. Состояние меняется только в одном месте и только в ответ на действие. Поэтому работают лог действий и time-travel в DevTools."
+  type: order
+  kind: timeline
+  steps:
+    - "Обработчик клика вызывает dispatch({ type: 'todos/added', payload })"
+    - Стор передаёт текущее состояние и действие в редьюсер
+    - Редьюсер возвращает новый объект состояния, не мутируя старый
+    - Стор уведомляет подписчиков, useSelector сравнивает выбранные значения
+    - Компоненты, чьи данные изменились, перерисовываются и ждут следующего события
+
+# hoc-render-props-hooks: принято из черновика 2026-10-11
+- id: hoc-render-props-hooks-quiz
+  skill: logic-reuse-patterns
+  question: hoc-render-props-hooks
+  difficulty: 2
+  prompt: Почему в современном React логику переиспользуют в основном через хуки, а не через HOC и render props?
+  explanation: "Все три паттерна решают одну задачу: как переиспользовать логику. Хуки делают это без лишних узлов в дереве и с явным источником каждого значения. HOC оставляют для сквозной обёртки целого компонента: доступ, error boundary, аналитика. Render props — там, где разметку нужно отдать пользователю."
+  type: quiz
+  options:
+    - label: "Хук не добавляет компонентов в дерево: видно, откуда взялось значение, нет коллизий props и вложенности обёрток"
+      why: Верно. Хук — это вызов функции внутри компонента. Значение явно приходит в переменную, типизируется как обычная функция и не порождает wrapper hell.
+    - label: HOC и render props вызывают лишние ре-рендеры, поэтому React объявил их устаревшими
+      why: "Паттерны не объявлены устаревшими: это обычные компоненты и функции. Хуки вытеснили их ради простоты и явности, а не из-за производительности."
+    - label: HOC и render props не работают с функциональными компонентами, только с классовыми
+      why: Оба паттерна прекрасно работают с функциональными компонентами. Например, HOC withAuth может сам вызывать хук внутри обёртки.
+    - label: Хуки заменили только render props, а получать данные по-прежнему принято через HOC вроде connect
+      why: connect тоже вытеснен хуками (useSelector, useDispatch). HOC остался нишевым инструментом для обёрток на уровне компонента.
+  answer: 0
+- id: hoc-render-props-hooks-hoc-in-render
+  skill: hoc-in-render
+  question: hoc-render-props-hooks
+  difficulty: 2
+  prompt: Каждый раз, когда Page перерисовывается (например, родитель передал новый id), поля Form очищаются, а лог 'mount' пишется снова. Найдите причину.
+  explanation: Вызов withLogger(Form) в теле Page на каждом рендере создаёт новую функцию-компонент. React видит новый тип, размонтирует старое поддерево и монтирует его заново. Поэтому состояние Form теряется, а эффект срабатывает повторно. HOC применяют один раз, на уровне модуля.
+  type: find-bug
+  language: tsx
+  code: |-
+    function withLogger<P extends object>(
+      C: React.ComponentType<P>
+    ) {
+      return (props: P) => {
+        useEffect(() => log('mount'), []);
+        return <C {...props} />;
+      };
+    }
+
+    function Page({ id }: { id: string }) {
+      const LoggedForm = withLogger(Form);
+      return <LoggedForm id={id} />;
+    }
+  bugLines:
+    - 11
+  causes:
+    - "HOC вызывается внутри рендера: каждый раз получается новый тип компонента, поэтому Form перемонтируется и теряет состояние"
+    - useEffect с пустым массивом внутри HOC нарушает правила хуков
+    - Анонимная стрелка вместо именованной функции ломает сравнение деревьев
+    - Обобщённый P без явного указания типа не даёт пробросить id в Form
+  answer: 0
+- id: hoc-render-props-hooks-typed-hoc
+  skill: hoc-typing
+  question: hoc-render-props-hooks
+  difficulty: 2
+  prompt: "Допишите типизированный HOC: он принимает любой компонент и прозрачно пробрасывает его props."
+  explanation: P extends object ограничивает props объектом. React.ComponentType<P> принимает и функциональные, и классовые компоненты с такими props. Обёртка должна передать все props дальше, иначе обёрнутый компонент их потеряет. ReactNode и ReactElement описывают результат рендера, а не сам компонент.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function withAuth<P extends ___>(
+      Component: React.___<P>
+    ) {
+      return function Protected(props: P) {
+        const user = useUser();
+        if (!user) return <Navigate to="/login" />;
+        return <Component {...___} />;
+      };
+    }
+  tokens:
+    - object
+    - ComponentType
+    - props
+  decoys:
+    - ReactNode
+    - ReactElement
+    - user
+    - children
+- id: hoc-render-props-hooks-choose-reuse
+  skill: logic-reuse-choice
+  question: hoc-render-props-hooks
+  difficulty: 2
+  prompt: Виджету дашборда нужны позиция мыши, размер окна и текущий пользователь. Координаты используются в useEffect и вычислениях до JSX. Как переиспользовать эту логику?
+  explanation: Если значения нужны в логике компонента, а не только в разметке, выбирайте кастомный хук. Несколько источников комбинируются простыми вызовами без вложенности. Render props полезны, когда разметку отдают пользователю (headless-библиотеки), HOC — для обёртки целого компонента.
+  type: choose-tool
+  options:
+    - label: "Кастомные хуки: useMousePosition, useWindowSize, useUser"
+      why: "Лучший выбор: значения сразу доступны в теле компонента, эффектах и вычислениях, хуки свободно комбинируются и легко типизируются."
+    - label: "Render props: <MouseTracker render={...} />"
+      why: Значения доступны только внутри колбэка в JSX. Три источника дали бы вложенные колбэки. Уместно, когда библиотека отдаёт разметку пользователю.
+    - label: "HOC: withMouse(withWindowSize(withUser(Widget)))"
+      why: Получится обёртка в обёртке, возможны коллизии props и неясно, кто какой prop добавил. Подходит для сквозных задач вроде проверки доступа.
+    - label: React Context с координатами мыши на всё приложение
+      why: Context передаёт значение вглубь, но частые обновления позиции перерисуют всех потребителей. Хорош для редко меняющихся данных вроде темы.
+  answer: 0
+
+# large-scale-architecture: принято из черновика 2026-10-11
+- id: large-scale-architecture-goal
+  skill: frontend-architecture-goals
+  question: large-scale-architecture
+  difficulty: 3
+  prompt: Какая главная цель архитектуры большого фронтенд-приложения?
+  explanation: "Архитектура — это про независимость изменений: домены с публичным API, направление зависимостей, разделение типов состояния и единые слои. Правила фиксируются в ADR и проверяются в CI. Конкретный стек вторичен и зависит от контекста: размера команды, частоты релизов, SEO."
+  type: quiz
+  options:
+    - label: "Чтобы команды могли менять код независимо и предсказуемо: границы модулей, контракты и их проверка инструментами"
+      why: Верно. Всё остальное — монорепо, слой данных, дизайн-система — лишь средства, которые служат этой цели.
+    - label: Взять масштабируемый стек — микрофронтенды, RSC, монорепо — чтобы приложение выдержало рост
+      why: Это перечисление модных слов. Микрофронтенды для одной команды — преждевременная сложность. Инструмент выбирают под контекст.
+    - label: Максимально переиспользовать код, складывая общее в пакет common или utils
+      why: "Это типичная ловушка: от такого пакета зависит всё, а владельца у него нет. Сцепленность растёт, независимость пропадает."
+    - label: Один раз в начале утвердить структуру папок и договорённости, чтобы потом не тратить время на рефакторинг
+      why: Договорённости без проверки инструментами со временем размываются. К тому же архитектура должна развиваться, а решения фиксируются в ADR.
+  answer: 0
+- id: large-scale-architecture-repo-layout
+  skill: monorepo-vs-microfrontends
+  question: large-scale-architecture
+  difficulty: 2
+  prompt: Одна команда из 6 человек ведёт Next.js-приложение и админку. У них общие UI-компоненты, API-клиент и конфиги линтера, релизы выходят вместе. Как организовать код?
+  explanation: "Монорепо оправдано, когда у нескольких приложений есть общий код и общий цикл релизов: изменение в `ui` сразу проверяется во всех потребителях. Микрофронтенды решают другую задачу — независимые деплои многих команд — и стоят дорого."
+  type: choose-tool
+  options:
+    - label: "Монорепозиторий: pnpm workspaces + Turborepo, пакеты ui, api-client, eslint-config"
+      why: Лучший вариант. Общий код без публикации версий, атомарные изменения сразу во всех приложениях, кэш сборок и запуск только затронутого.
+    - label: Микрофронтенды на Module Federation
+      why: "Подходят, когда много команд должны деплоиться независимо. Для одной команды это лишняя сложность: рантайм-интеграция, версии, общий стейт."
+    - label: Отдельные репозитории и публикация общих пакетов в приватный npm
+      why: Уместно, если пакеты нужны внешним потребителям или команды независимы. Здесь каждое изменение ui превратится в цикл «публикация → обновление версий».
+    - label: Скопировать общие компоненты в оба приложения в папку common
+      why: Терпимо только для пары файлов. Копии быстро расходятся, а исправления приходится делать дважды.
+  answer: 0
+- id: large-scale-architecture-deep-import
+  skill: module-boundaries
+  question: large-scale-architecture
+  difficulty: 2
+  prompt: В проекте домены лежат в `features/*`, и каждый открывает публичный API через свой index.ts. Слой `shared` — нижний. Какая строка нарушает архитектурные правила?
+  explanation: "Импортировать можно только публичный API домена (`@/features/cart`). Глубокий импорт привязывает checkout к внутренней структуре cart: стоит переименовать файл — и сломается чужой код. Такие импорты ловит линтер (eslint-plugin-boundaries, no-restricted-imports), а не ревью."
+  type: find-bug
+  language: tsx
+  code: |-
+    // features/checkout/ui/CheckoutButton.tsx
+    import { Button } from '@acme/ui';
+    import { useCart } from '@/features/cart';
+    import { calcTotal } from '@/features/cart/lib';
+    import { formatPrice } from '@/shared/format';
+
+    export function CheckoutButton() {
+      const { items } = useCart();
+      const total = calcTotal(items);
+      return (
+        <Button>Оплатить {formatPrice(total)}</Button>
+      );
+    }
+  bugLines:
+    - 4
+  causes:
+    - Импорт внутренностей домена cart в обход его публичного API
+    - Фича не должна импортировать из shared — зависимости нарушают направление
+    - Приложение не может напрямую импортировать пакет дизайн-системы @acme/ui
+    - Хук другого домена нельзя вызывать внутри компонента checkout
+  answer: 0
+- id: large-scale-architecture-boundaries-rollout
+  skill: module-boundaries
+  question: large-scale-architecture
+  difficulty: 3
+  prompt: Соберите алгоритм внедрения границ модулей в существующее большое приложение.
+  explanation: Сначала правила и публичные API, затем измерение нарушений в мягком режиме, потом исправления, и только после этого жёсткая проверка в CI. Если сразу включить error, сборка встанет. Если остановиться на договорённостях, границы снова размоются.
+  type: order
+  kind: recipe
+  steps:
+    - Описать домены и разрешённые направления зависимостей, зафиксировать решение в ADR
+    - Выделить публичный API каждого домена — index.ts с явными экспортами
+    - Включить правило границ в линтере в режиме warn и собрать список нарушений
+    - "Исправить нарушения: перевести импорты на публичный API, общее вынести в пакет с владельцем"
+    - Перевести правило в error и проверять его в CI на каждом PR
+
+# legacy-migration: принято из черновика 2026-10-11
+- id: legacy-migration-strategy-quiz
+  skill: legacy-migration-strategy
+  question: legacy-migration
+  difficulty: 2
+  prompt: Команда мигрирует большое приложение с React 16 на React 19. Какая стратегия надёжнее всего?
+  explanation: Миграцию ведут маленькими шагами с измерениями. Сначала ставят последнюю минорную версию ветки и добиваются нуля предупреждений, затем переходят на следующую мажорную версию с codemods. Версия 18.3 заранее предупреждает о том, что удалено в 19. Классы React 19 поддерживает, поэтому переписывают постепенно только то, что активно меняется.
+  type: quiz
+  options:
+    - label: Идти по мажорным версиям (16 → 17 → 18.3 → 19), убирая предупреждения и запуская codemods; классы переписывать при касании
+      why: Верно. Каждый шаг маленький и проверяемый, предупреждения 18.3 заранее показывают, что сломается в 19. Фичи при этом не замораживаются.
+    - label: Сначала переписать все классы на хуки, потому что React 19 перестал поддерживать классовые компоненты
+      why: Классы в React 19 работают. Удалены только legacy-API вроде строковых refs, legacy context и findDOMNode. Массовое переписывание — тот же «большой взрыв».
+    - label: "Сразу поставить React 19 и прогнать codemod migration-recipe: он исправит всё, что нужно"
+      why: Codemods покрывают только типовые замены. Без промежуточной 18.3 вы не увидите предупреждений об устаревших API и получите много поломок разом.
+    - label: Заморозить фичи и в отдельной ветке переписать приложение на актуальный стек, а потом переключиться
+      why: "Это классический «большой взрыв»: долгая ветка расходится с main, бизнес месяцами ждёт фичи, а риск выкатить всё одним релизом огромен."
+  answer: 0
+- id: legacy-migration-plan-recipe
+  skill: legacy-migration-plan
+  question: legacy-migration
+  difficulty: 2
+  prompt: Расставьте шаги миграции legacy-приложения с React 16 до React 19 по порядку.
+  explanation: Сначала нужно понять масштаб и подготовить страховку, и только потом менять версии. Версия 18.3 — это 18 с предупреждениями о том, что удалено в 19. Поэтому её «зелёное» состояние — пропуск к шагу на 19. Без e2e-тестов и мониторинга регрессии найдут пользователи.
+  type: order
+  kind: recipe
+  steps:
+    - "Аудит: версии, устаревшие API (строковые refs, legacy context, findDOMNode), покрытие тестами"
+    - "Страховка: e2e на ключевые сценарии, мониторинг ошибок, feature flags"
+    - "React 18: createRoot вместо ReactDOM.render, проверить батчинг и StrictMode"
+    - Обновиться до 18.3 и исправить все предупреждения об устаревших API
+    - "React 19: запустить codemod migration-recipe и types-react-codemod preset-19"
+- id: class-to-hooks-stale-interval
+  skill: class-to-hooks-migration
+  question: legacy-migration
+  difficulty: 2
+  prompt: "Класс переписали на хуки. В классе было this.setState(s => ({ count: s.count + this.props.step })). После миграции счётчик застревает на значении step. Найдите ошибку."
+  explanation: Эффект с [] создаётся один раз, и его замыкание навсегда видит count = 0. В классе this.setState с функцией брал актуальное состояние. При переносе нужен функциональный апдейтер setCount(c => c + step), а step нужно добавить в зависимости.
+  type: find-bug
+  language: tsx
+  code: |-
+    function Ticker({ step }: { step: number }) {
+      const [count, setCount] = useState(0);
+      useEffect(() => {
+        const id = setInterval(() => {
+          setCount(count + step);
+        }, 1000);
+        return () => clearInterval(id);
+      }, []);
+      return <span>{count}</span>;
+    }
+  bugLines:
+    - 5
+  causes:
+    - Колбэк интервала замкнул count первого рендера (0), поэтому каждый тик ставит 0 + step
+    - "Нет cleanup: старые интервалы накапливаются и перезаписывают друг друга"
+    - Интервал нужно запускать в useLayoutEffect, иначе он стартует после paint и теряет тики
+    - "useState(0) нужно инициализировать лениво: useState(() => 0)"
+  answer: 0
+- id: react18-create-root-migration
+  skill: react18-create-root
+  question: legacy-migration
+  difficulty: 1
+  prompt: Замените ReactDOM.render и unmountComponentAtNode на API React 18+.
+  explanation: "В React 18 ReactDOM.render заменили на createRoot из react-dom/client: только с новым корнем включаются конкурентные возможности и автоматический батчинг. В React 19 старые render и unmountComponentAtNode удалены. Для SSR-разметки вместо createRoot используют hydrateRoot."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    import { ___ } from 'react-dom/client';
+
+    const container = document.getElementById('root')!;
+    const root = ___(container);
+    root.___(<App />);
+
+    // при размонтировании (микрофронтенд)
+    root.___();
+  tokens:
+    - createRoot
+    - createRoot
+    - render
+    - unmount
+  decoys:
+    - hydrateRoot
+    - unmountComponentAtNode
+    - hydrate
+    - destroy
+
+# micro-frontends: принято из черновика 2026-10-11
+- id: micro-frontends-when-justified
+  skill: micro-frontends-tradeoffs
+  question: micro-frontends
+  difficulty: 3
+  prompt: Когда переход на микрофронтенды действительно оправдан?
+  explanation: "Микрофронтенды решают организационную проблему: много команд, которым мешают общий релизный цикл и общий код. Платите вы инфраструктурой, дублированием зависимостей, согласованием версий и UX. Если команд одна-две, модульный монолит почти всегда дешевле и быстрее."
+  type: quiz
+  options:
+    - label: Когда много команд владеют разными частями продукта и им нужны независимые релизы
+      why: "Верно. Главная ценность — автономия команд: каждая деплоит свою часть в своём ритме и не блокирует остальных."
+    - label: Когда приложение стало медленным и его нужно ускорить за счёт разбиения
+      why: "Микрофронтенды обычно ухудшают производительность: лишние загрузки, дубли зависимостей. Ускорение даёт code splitting внутри монолита."
+    - label: Когда небольшой команде нужно упростить разросшуюся кодовую базу
+      why: Для одной-двух команд это лишняя инфраструктурная сложность. Порядок в коде наводит модульный монолит с чёткими границами модулей.
+    - label: Когда хочется писать разные части на разных фреймворках
+      why: Это возможно (например, через Web Components), но не цель. Зоопарк фреймворков бьёт по размеру бандла и единству UX.
+  answer: 0
+- id: micro-frontends-integration-choice
+  skill: micro-frontends-integration
+  question: micro-frontends
+  difficulty: 3
+  prompt: Маркетплейс, 6 команд на React. Команда checkout хочет деплоить корзину независимо, а переход каталог → корзина должен быть без перезагрузки страницы и с общим React. Как интегрировать?
+  explanation: Выбор зависит от условий. Нужны независимый деплой и SPA-переходы с общими зависимостями — Module Federation. Если перезагрузка допустима — маршрутизация по путям. Если деплой можно связать с хостом — npm-пакеты. Нужна полная изоляция — iframe.
+  type: choose-tool
+  options:
+    - label: Module Federation с react и react-dom как shared singleton
+      why: "Лучший вариант: remote загружается в рантайме и деплоится отдельно, React на странице один, переходы остаются внутри SPA."
+    - label: Публиковать checkout как npm-пакет и собирать вместе с хостом
+      why: Самый простой путь, но каждый релиз checkout требует пересборки и деплоя хоста. Подойдёт, когда независимый деплой не нужен.
+    - label: "Разные приложения на разных путях: /catalog и /checkout"
+      why: Даёт максимальную изоляцию, но каждый переход — полная перезагрузка страницы. Хорошо, когда разделы слабо связаны.
+    - label: Встроить checkout через iframe
+      why: Полная изоляция стилей и JS, но общение идёт через postMessage, а с a11y, высотой и навигацией много проблем. Уместно для сторонних виджетов.
+  answer: 0
+- id: micro-frontends-duplicate-react
+  skill: module-federation-shared-deps
+  question: micro-frontends
+  difficulty: 3
+  prompt: Хост и checkout написаны на React 19. После подключения remote появилась ошибка «Invalid hook call», а контекст темы хоста внутри checkout не виден. Где ошибка в конфиге хоста?
+  explanation: "react и react-dom не объявлены в shared, поэтому remote подтягивает собственный экземпляр React. Хуки из checkout обращаются к «чужому» React, и контекст между экземплярами не передаётся. Правило: react и react-dom объявляются shared с singleton: true и у хоста, и у remote, а версии согласуются."
+  type: find-bug
+  language: ts
+  code: |-
+    federation({
+      name: 'host',
+      remotes: {
+        checkout:
+          'https://checkout.example.com/remoteEntry.js',
+      },
+      shared: {
+        'date-fns': {},
+      },
+    });
+  bugLines:
+    - 7
+    - 8
+  causes:
+    - react и react-dom не объявлены shared singleton — remote загружает свой экземпляр React
+    - remoteEntry.js должен лежать на том же домене, что и хост
+    - date-fns нельзя делать общей зависимостью — это и ломает хуки
+    - name хоста должен совпадать с ключом checkout в remotes
+  answer: 0
+- id: micro-frontends-remote-fallback
+  skill: micro-frontends-resilience
+  question: micro-frontends
+  difficulty: 2
+  prompt: "Допишите слот для удалённого модуля: пока он грузится, показывается спиннер, а если remote недоступен — заглушка вместо белого экрана."
+  explanation: "Удалённый модуль может не загрузиться: его деплоят отдельно, он может лежать или отдавать ошибку. lazy делает импорт асинхронным. Suspense показывает спиннер на время загрузки. ErrorBoundary (например, из react-error-boundary) снаружи ловит ошибку импорта и рендерит fallback. Падение remote не должно ронять хост."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const Checkout = ___(() => import('checkout/App'));
+
+    export function CheckoutSlot() {
+      return (
+        <___ fallback={<CheckoutUnavailable />}>
+          <___ fallback={<Spinner />}>
+            <Checkout />
+          </___>
+        </___>
+      );
+    }
+  tokens:
+    - lazy
+    - ErrorBoundary
+    - Suspense
+    - Suspense
+    - ErrorBoundary
+  decoys:
+    - Activity
+    - StrictMode
+    - memo
+    - use
+
+# project-structure: принято из черновика 2026-10-11
+- id: project-structure-by-feature-quiz
+  skill: feature-based-structure
+  question: project-structure
+  difficulty: 2
+  prompt: Почему в растущем React-проекте код группируют по фичам, а не по типам файлов (`components/`, `hooks/`, `utils/`)?
+  explanation: "Главный критерий — colocation: код, который меняется вместе, лежит рядом. Фича с публичным API (`index.ts`) — это граница: снаружи видно только то, что экспортировано. Направление зависимостей: pages → features → entities → shared."
+  type: quiz
+  options:
+    - label: "Код, который меняется вместе, лежит рядом: правка фичи затрагивает одну папку, а у фичи есть явная граница и публичный API"
+      why: Верно. При группировке по типам одна задача размазана по пяти директориям, а связи между файлами неочевидны.
+    - label: "Так быстрее сборка: бандлер лучше делает tree-shaking, когда файлы одной фичи лежат в одной папке"
+      why: Бандлер смотрит на граф импортов, а не на папки. Структура влияет на сборку косвенно, например через barrel-файлы, но цель у неё другая.
+    - label: React требует, чтобы кастомный хук лежал в той же папке, что и компонент, который его вызывает
+      why: "Такого требования нет: React не знает о файловой структуре. Хуки можно импортировать откуда угодно."
+    - label: "Так проще переиспользовать: любой файл любой фичи можно импортировать напрямую из другой фичи"
+      why: "Наоборот: внутренности фичи закрыты, а наружу выходит только публичный API. Общий код выносят в `shared`."
+  answer: 0
+- id: project-structure-upward-import
+  skill: layer-dependency-direction
+  question: project-structure
+  difficulty: 2
+  prompt: Найдите строку, которая нарушает архитектуру слоёв (pages → features → entities → shared).
+  explanation: "Сущность `product` импортирует фичу `cart`, то есть нижний слой зависит от верхнего. Это ведёт к циклам, и карточку уже нельзя переиспользовать без корзины. Решение: карточка принимает слот (`actions?: ReactNode`), а `AddToCart` в неё подставляет страница или виджет."
+  type: find-bug
+  language: tsx
+  code: |-
+    // entities/product/ui/ProductCard.tsx
+    import { Card } from '@/shared/ui';
+    import { formatPrice } from '@/shared/lib';
+    import { AddToCart } from '@/features/cart';
+    import type { Product } from '../model/types';
+    type Props = { product: Product };
+    export function ProductCard({ product }: Props) {
+      return (
+        <Card title={product.name}>
+          {formatPrice(product.price)}
+          <AddToCart productId={product.id} />
+        </Card>
+      );
+    }
+  bugLines:
+    - 4
+  causes:
+    - "Сущность (entities) импортирует фичу (features): нижний слой зависит от верхнего"
+    - Относительный импорт `../model/types` внутри слайса запрещён, нужен алиас `@/`
+    - Импорт из `@/shared/ui` без указания файла — это запрещённый глубокий импорт
+    - "`import type` нельзя использовать для типов из соседнего сегмента"
+  answer: 0
+- id: project-structure-mvp-choice
+  skill: structure-scaling
+  question: project-structure
+  difficulty: 2
+  prompt: "MVP: 8 экранов, 2 разработчика, через три месяца продукт могут закрыть или переписать. С какой структуры начать?"
+  explanation: "Структура растёт вместе с проектом. Пока фич мало, плоские папки по типам не мешают. Слои, публичные API и линтер границ окупаются, когда растут команда и число фич, и вводить их лучше постепенно: по одной фиче."
+  type: choose-tool
+  options:
+    - label: "Плоская структура: `components/`, `pages/`, `hooks/`, `lib/` и алиас `@/`"
+      why: "Лучший выбор для маленького проекта: ноль накладных расходов, а когда фичи начнут разрастаться, их можно выделить по одной."
+    - label: Полный Feature-Sliced Design со всеми слоями и проверкой steiger
+      why: Подходит для долгоживущего проекта с несколькими командами. На MVP из 8 экранов это преждевременное дробление и лишние церемонии.
+    - label: Монорепо с отдельным пакетом на каждую фичу
+      why: Оправдано, когда фичи делят между командами или приложениями. Здесь это сложная сборка и версионирование без выгоды.
+    - label: Все компоненты в одном каталоге без подпапок и алиасов
+      why: "Работает разве что для прототипа на пару дней: без страниц, хуков и утилит по отдельности навигация быстро превращается в свалку."
+  answer: 0
+- id: project-structure-extract-feature-recipe
+  skill: feature-extraction-refactor
+  question: project-structure
+  difficulty: 2
+  prompt: Проект вырос, файлы корзины разбросаны по `components/`, `hooks/`, `utils/`. Соберите алгоритм выделения фичи `cart`.
+  explanation: Мигрируйте по одной фиче, а не всё разом. Сначала соберите код рядом, затем закройте его публичным API и переведите потребителей на него. В конце закрепите границу линтером (eslint-plugin-boundaries или steiger), иначе глубокие импорты вернутся.
+  type: order
+  kind: recipe
+  steps:
+    - Найти все файлы корзины в `components/`, `hooks/`, `utils/` и их потребителей
+    - Перенести их в `features/cart/` по сегментам ui/model/api вместе с тестами
+    - "Описать публичный API в `features/cart/index.ts`: экспортировать только нужное снаружи"
+    - Переписать внешние импорты на `@/features/cart` вместо путей к внутренним файлам
+    - Включить в CI правило линтера против глубоких импортов и импортов вверх по слоям
+
+# prop-drilling: принято из черновика 2026-10-11
+- id: prop-drilling-definition-quiz
+  skill: prop-drilling-solutions
+  question: prop-drilling
+  difficulty: 2
+  prompt: Что такое prop drilling и с чего обычно стоит начинать борьбу с ним?
+  explanation: "Суть drilling — транзитные компоненты, которые лишь пробрасывают чужие данные. Решения идут по возрастанию тяжести: композиция (children, слоты), затем Context, внешний стор, URL. Серверные данные берут из кэша TanStack Query. Явная передача на 2–3 уровня — норма."
+  type: quiz
+  options:
+    - label: "Это передача данных через компоненты, которым они не нужны. Сначала стоит попробовать композицию: children и слоты"
+      why: Верно. Если передать готовый элемент, промежуточный Layout перестаёт знать о user. Зависимости остаются явными, а новых механизмов не появляется.
+    - label: Это любая передача props глубже одного уровня, и её стоит сразу выносить в Context
+      why: "Передать props на 2–3 уровня нормально: это явно и просто. Ранний уход в Context прячет зависимости, а такие связи сложнее отследить и протестировать."
+    - label: "Это проблема производительности: каждый проброшенный prop вызывает лишний рендер, и лечится она через React.memo"
+      why: Главная беда drilling — связанность и шум в коде, а не скорость. React.memo не уберёт транзитные props, промежуточные компоненты всё равно будут о них знать.
+    - label: Это подъём данных от ребёнка к родителю через цепочку колбэков, и решается он глобальным стором
+      why: Подъём состояния — другая техника. Drilling — передача вниз через лишние уровни, и стор для неё скорее крайняя мера, чем первое решение.
+  answer: 0
+- id: prop-drilling-slot-composition
+  skill: composition-slots
+  question: prop-drilling
+  difficulty: 2
+  prompt: Допишите Layout со слотами так, чтобы он не знал о user, а UserMenu и Feed получали user напрямую.
+  explanation: "Slot-паттерн: компонент принимает готовые элементы (ReactNode) в именованных props и в children, а сам только расставляет их по местам. Данные передаются там, где элемент создаётся, поэтому промежуточный уровень от них не зависит."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function Layout(props: {
+      sidebar: ReactNode;
+      children: ReactNode;
+    }) {
+      return (
+        <div className="layout">
+          <aside>{props.___}</aside>
+          <main>{props.___}</main>
+        </div>
+      );
+    }
+    <Layout ___={<UserMenu user={user} />}>
+      <Feed user={user} />
+    </Layout>
+  tokens:
+    - sidebar
+    - children
+    - sidebar
+  decoys:
+    - user
+    - slot
+    - render
+    - Sidebar
+- id: prop-drilling-children-no-rerender
+  skill: composition-rerender-bailout
+  question: prop-drilling
+  difficulty: 3
+  prompt: StrictMode и React Compiler выключены. Приложение смонтировали, затем один раз кликнули по тексту feed. Что окажется в консоли?
+  explanation: "Элемент <Feed /> создаётся в рендере App и приходит в Layout через children. Когда меняется состояние Layout, App не перерендеривается, и children остаётся тем же объектом. React видит неизменный элемент и пропускает Feed. Так композиция помогает с производительностью: состояние меняется, а переданные извне части не рендерятся заново."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Feed() {
+      console.log('Feed');
+      return <p>feed</p>;
+    }
+    function Layout({ children }: PropsWithChildren) {
+      const [open, setOpen] = useState(false);
+      console.log('Layout');
+      const toggle = () => setOpen(!open);
+      return <div onClick={toggle}>{children}</div>;
+    }
+    function App() {
+      console.log('App');
+      return <Layout><Feed /></Layout>;
+    }
+  options:
+    - App → Layout → Feed → Layout
+    - App → Layout → Feed → Layout → Feed
+    - App → Layout → Feed → App → Layout → Feed
+    - App → Layout → Feed → Feed
+  answer: 0
+- id: prop-drilling-catalog-filters
+  skill: url-state-choice
+  question: prop-drilling
+  difficulty: 2
+  prompt: Фильтры каталога (категория, цена, сортировка) нужны панели фильтров, списку товаров и счётчику в шапке на разной глубине. Фильтры должны переживать перезагрузку, а ссылку можно отправить коллеге. Что выбрать?
+  explanation: Сначала определите, кому принадлежит состояние. Фильтры, выбор и пагинация, которыми делятся ссылкой, хранят в URL. Редко меняющиеся глобальные данные кладут в Context, часто меняющиеся — в стор с селекторами, серверные данные — в кэш TanStack Query.
+  type: choose-tool
+  options:
+    - label: Search params в URL (useSearchParams)
+      why: "Лучший выбор. URL сам по себе глобален: любой компонент читает фильтры без пробрасывания, состояние переживает перезагрузку, а ссылкой можно поделиться."
+    - label: Context с useState в корне страницы
+      why: Избавит от drilling, но после перезагрузки фильтры потеряются, а поделиться ссылкой не выйдет. Context хорош для темы, локали и текущего пользователя.
+    - label: Zustand-стор с селекторами
+      why: Подходит для часто меняющегося клиентского состояния, например редактора или корзины. Без отдельной синхронизации с URL ни перезагрузку, ни ссылку стор не переживёт.
+    - label: TanStack Query
+      why: Нужен для серверных данных. Сами товары можно грузить через useQuery с фильтрами в ключе, но хранить фильтры как источник истины в нём неуместно.
+  answer: 0
+
+# system-design-autocomplete: принято из черновика 2026-10-11
+- id: system-design-autocomplete-first-step
+  skill: frontend-system-design-structure
+  question: system-design-autocomplete
+  difficulty: 2
+  prompt: "Интервьюер просит: «Спроектируйте компонент автокомплита». С чего лучше начать ответ?"
+  explanation: "В frontend system design оценивают ход рассуждений: требования → API → поток данных → состояния UI → доступность → производительность → краевые случаи и тесты. Уточняющие вопросы задают рамки, и все дальнейшие компромиссы объясняются через них."
+  type: quiz
+  options:
+    - label: "Задать уточняющие вопросы и зафиксировать требования: источник данных, минимум символов, задержка, клавиатура, мобильные, нагрузка"
+      why: "Верно. Требования определяют всё остальное: нужен ли кэш, debounce, виртуализация, какой бюджет по задержке. Это и показывает уровень senior."
+    - label: Сразу написать хук с debounce и fetch — так видно практический навык
+      why: "Это главный подводный камень: код без требований может решать не ту задачу, а гонки, кэш и доступность всплывут слишком поздно."
+    - label: Выбрать готовую библиотеку (Downshift, React Aria) и объяснить, почему она
+      why: Библиотека — нормальное решение, но выбирать её стоит после требований. Иначе неясно, какие возможности и ограничения важны.
+    - label: "Начать с оптимизаций: виртуализация списка и кэш по префиксам"
+      why: "Преждевременно: без требований неизвестно, будет ли список длинным и окупится ли сложный кэш. Оптимизации обсуждают ближе к концу."
+  answer: 0
+- id: system-design-autocomplete-answer-plan
+  skill: frontend-system-design-structure
+  question: system-design-autocomplete
+  difficulty: 2
+  prompt: Расставьте этапы ответа на system design «автокомплит» в правильном порядке.
+  explanation: "Каждый шаг опирается на предыдущий. API задают требования, поток данных реализует API, состояния UI вытекают из потока данных. Доступность — отдельный обязательный этап, а не «если останется время»: для combobox это главная сложность."
+  type: order
+  kind: recipe
+  steps:
+    - Уточнить функциональные и нефункциональные требования
+    - "Описать API компонента: fetchSuggestions, renderItem, onSelect, minChars"
+    - "Спроектировать поток данных: debounce, отмена устаревших запросов, кэш"
+    - "Перечислить состояния UI: пусто, загрузка, результаты, ошибка, нет результатов"
+    - "Продумать доступность: паттерн combobox, клавиатура, aria-live"
+    - Обсудить производительность, краевые случаи и тестирование
+- id: system-design-autocomplete-query-flow
+  skill: autocomplete-data-flow
+  question: system-design-autocomplete
+  difficulty: 2
+  prompt: "Допишите поток данных автокомплита: кэш по запросу, отмена устаревших запросов и список без мигания."
+  explanation: "В ключе — дебаунсенный query: так каждый запрос кэшируется отдельно, а queryFn согласован с ключом. Если передать signal в fetch, TanStack Query отменит запрос, который стал не нужен до ответа. keepPreviousData показывает старый список, пока грузится новый."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const query = useDebouncedValue(input.trim(), 250);
+
+    const { data = [], isFetching } = useQuery({
+      queryKey: ['suggest', ___],
+      queryFn: ({ ___ }) =>
+        fetchSuggestions(query, signal),
+      enabled: query.length >= minChars,
+      staleTime: 60_000,
+      placeholderData: ___,
+    });
+  tokens:
+    - query
+    - signal
+    - keepPreviousData
+  decoys:
+    - input
+    - abort
+    - initialData
+- id: system-design-autocomplete-ime-enter
+  skill: autocomplete-ime-input
+  question: system-design-autocomplete
+  difficulty: 3
+  prompt: "Пользователи с японской раскладкой жалуются: Enter, которым они подтверждают иероглифы в IME, сразу выбирает подсказку. Фрагмент обработчика поля (active всегда валиден, поле не внутри form). Где ошибка?"
+  explanation: "Пока идёт IME-композиция, Enter подтверждает кандидата, а не отправляет ввод. Обработчик должен игнорировать клавиши при `e.nativeEvent.isComposing`, а для Safari часто ещё проверяют `keyCode === 229`. Правило: в любом поле с горячими клавишами учитывать события composition."
+  type: find-bug
+  language: tsx
+  code: |-
+    function onKeyDown(e: React.KeyboardEvent) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setActive((i) => Math.min(i + 1, last));
+      } else if (e.key === 'Enter') {
+        onSelect(items[active]);
+      } else if (e.key === 'Escape') {
+        setOpen(false);
+      }
+    }
+  bugLines:
+    - 5
+    - 6
+  causes:
+    - "Enter во время IME-композиции обрабатывается как выбор: нет проверки e.nativeEvent.isComposing"
+    - В ветке Enter не хватает e.preventDefault() — браузер сам подтверждает подсказку
+    - При IME-вводе keydown не срабатывает, обработчик нужно повесить на onKeyPress
+    - Функциональное обновление setActive запаздывает, поэтому Enter выбирает не тот элемент
+  answer: 0

@@ -1,0 +1,562 @@
+# accessibility: принято из черновика 2026-10-11
+- id: accessibility-semantics-first
+  skill: a11y-semantic-html
+  question: accessibility
+  difficulty: 2
+  prompt: С чего начинать доступность React-компонента и какую роль в ней играет ARIA?
+  explanation: "Порядок такой: семантический HTML, затем ARIA для пробелов (кнопки-иконки, live-регионы, связь поля с ошибкой), затем управление фокусом в SPA. Проверка — клавиатурой, скринридером, axe и eslint-plugin-jsx-a11y."
+  type: quiz
+  options:
+    - label: "С семантического HTML: button, a href, label, заголовки и landmarks. ARIA — только там, где HTML не хватает, плюс управление фокусом"
+      why: Верно. Нативные элементы бесплатно дают роль, фокус, Enter/Space и имя. ARIA дополняет семантику, но поведения не добавляет.
+    - label: "Добавить role и aria-атрибуты ко всем интерактивным элементам: чем больше ARIA, тем доступнее интерфейс"
+      why: ARIA меняет только то, что объявляется скринридеру, но не добавляет фокус и клавиатуру. Лишняя или неверная ARIA часто хуже, чем никакой.
+    - label: "Подключить axe в CI: если проверка зелёная, приложение доступно"
+      why: "Автоматика ловит лишь часть проблем: контраст, alt, имена. Логичность порядка фокуса, ловушки и понятность объявлений проверяют вручную."
+    - label: Расставить tabIndex на кликабельные элементы, чтобы всё стало доступно с клавиатуры
+      why: tabIndex на div не даёт ни Enter/Space, ни роли, а tabIndex > 0 ломает естественный порядок фокуса.
+  answer: 0
+- id: accessibility-div-icon-button
+  skill: a11y-semantic-html
+  question: accessibility
+  difficulty: 2
+  prompt: Пользователь клавиатуры и скринридера не может закрыть панель. Найдите проблемные строки.
+  explanation: 'div не фокусируется, не обрабатывает Enter/Space и не имеет роли. У generic-элемента aria-label запрещён, и скринридеры его игнорируют. Правильный вариант: `<button type="button" aria-label="Закрыть">`, внутри иконка с aria-hidden. Правило: действие — это button, навигация — a href.'
+  type: find-bug
+  language: tsx
+  code: |-
+    function Toolbar({ onSave, onClose }: Props) {
+      return (
+        <div className="toolbar">
+          <button type="button" onClick={onSave}>Сохранить</button>
+          <div
+            className="icon-btn"
+            aria-label="Закрыть"
+            onClick={onClose}
+          >
+            <XIcon aria-hidden />
+          </div>
+        </div>
+      );
+    }
+  bugLines:
+    - 5
+    - 7
+  causes:
+    - Кликабельный div без роли не попадает в Tab-порядок и не реагирует на Enter/Space, а aria-label на div без роли игнорируется
+    - aria-hidden на XIcon скрывает от скринридера родительский элемент вместе с обработчиком
+    - "Кнопке «Сохранить» нужен aria-label: одного текста внутри недостаточно для доступного имени"
+    - type="button" мешает скринридеру распознать кнопку, его надо убрать
+  answer: 0
+- id: accessibility-modal-focus-recipe
+  skill: a11y-focus-management
+  question: accessibility
+  difficulty: 2
+  prompt: Расставьте шаги реализации доступной модалки по порядку.
+  explanation: Фокус нужно запомнить до открытия, перенести внутрь, удерживать там и вернуть после закрытия. Иначе клавиатурный пользователь теряется на странице. Нативный `<dialog>` с showModal() даёт фокус, Escape и inert-фон из коробки. Сложные случаи удобнее решать headless-библиотекой.
+  type: order
+  kind: recipe
+  steps:
+    - При клике по триггеру, ещё до открытия, запомнить элемент, который открыл модалку (document.activeElement)
+    - Отрендерить диалог с role="dialog", aria-modal и aria-labelledby на заголовок
+    - "Перенести фокус внутрь диалога: на первый интерактивный элемент или заголовок"
+    - Пока диалог открыт, удерживать Tab внутри (фон — inert) и закрывать по Escape
+    - После закрытия вернуть фокус на запомненный элемент
+- id: accessibility-custom-combobox
+  skill: a11y-complex-widgets
+  question: accessibility
+  difficulty: 2
+  prompt: Нужен комбобокс с автодополнением и асинхронной загрузкой опций в фирменном дизайне. Он должен полноценно работать с клавиатуры и со скринридером. Что выбрать?
+  explanation: "У сложных виджетов (комбобокс, меню, табы, датапикер) десятки нюансов: aria-activedescendant, стрелки, Home/End, объявления, мобильные скринридеры. Headless-библиотеки уже решили эти задачи и не навязывают стили."
+  type: choose-tool
+  options:
+    - label: "Headless-библиотека: React Aria ComboBox или Ariakit Combobox"
+      why: "Лучший выбор: готовые роли, клавиатурная навигация и объявления для скринридеров протестированы, а стили полностью ваши."
+    - label: Самописный комбобокс на div с role и aria-атрибутами
+      why: Оправдан, только если библиотеки нельзя использовать. Паттерн ARIA для комбобокса сложный, и легко упустить клавиши, фокус или поддержку конкретных скринридеров.
+    - label: Нативный <select>
+      why: Максимально доступен и хорош для короткого фиксированного списка, но не поддерживает ввод с автодополнением и плохо стилизуется.
+    - label: <input list> + <datalist>
+      why: Годится для простых подсказок без особых требований к виду. Внешний вид списка и асинхронное поведение почти не контролируются и отличаются в разных браузерах.
+  answer: 0
+
+# error-boundaries: принято из черновика 2026-10-11
+- id: error-boundaries-what-is-caught
+  skill: error-boundary-scope
+  question: error-boundaries
+  difficulty: 2
+  prompt: Какие ошибки перехватывает Error Boundary, а какие пролетают мимо него?
+  explanation: "Boundary работает внутри цикла рендера React: если ошибка случилась при рендере или коммите, React знает, какое поддерево заменить на fallback. Обработчики событий и промисы выполняются позже, вне этого цикла. Для них нужен try/catch и state или showBoundary(error). Отклонённый промис, прочитанный через use(), попадает в boundary."
+  type: quiz
+  options:
+    - label: Ловит ошибки рендера, жизненного цикла и эффектов потомков. Не ловит — в обработчиках, async-коде, SSR и в самом себе
+      why: Верно. Ловятся только ошибки, возникшие, пока React рендерит или коммитит дерево. Код, вызванный позже (клик, setTimeout, then), выполняется вне этого процесса.
+    - label: Ловит любые ошибки внутри своего поддерева, включая обработчики событий и отклонённые промисы
+      why: Частое заблуждение. Обработчик и промис выполняются вне рендера, и React не может связать такую ошибку с поддеревом, поэтому fallback не появится.
+    - label: Ловит ошибки только у дочерних компонентов-классов, функциональные компоненты нужно оборачивать отдельно
+      why: Неверно. Сам boundary должен быть классом, но ловит он ошибки любых потомков, в том числе функциональных компонентов.
+    - label: Ловит ошибки в обработчиках событий, но не в useEffect, потому что эффекты асинхронны
+      why: Всё наоборот. Ошибку в эффекте React выполняет в рамках коммита и передаёт в boundary, а ошибку в обработчике — нет.
+  answer: 0
+- id: error-boundaries-async-handler-throw
+  skill: error-boundary-scope
+  question: error-boundaries
+  difficulty: 2
+  prompt: Автор ожидает, что при неудачном сохранении появится fallback. Но fallback не появляется. Найдите строку с проблемой.
+  explanation: "throw внутри async-обработчика превращается в отклонённый промис вне рендера, и boundary его не видит. Ошибку нужно поймать самому: показать сообщение через state или передать её в boundary через showBoundary(error) из useErrorBoundary()."
+  type: find-bug
+  language: tsx
+  code: |-
+    function SaveButton({ data }: { data: Draft }) {
+      const handleClick = async () => {
+        const res = await fetch('/api/save', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error('Save failed');
+      };
+      return <button onClick={handleClick}>Save</button>;
+    }
+
+    <ErrorBoundary fallback={<p>Ошибка</p>}>
+      <SaveButton data={draft} />
+    </ErrorBoundary>;
+  bugLines:
+    - 7
+  causes:
+    - Ошибка выброшена в асинхронном обработчике события, вне рендера, — boundary такие ошибки не перехватывает
+    - У ErrorBoundary нет пропа fallback, нужно передавать FallbackComponent
+    - Перед проверкой res.ok нужно вызвать res.json(), иначе ошибка не сформируется
+    - SaveButton не считается потомком boundary, потому что передан через children
+  answer: 0
+- id: error-boundaries-class-implementation
+  skill: error-boundary-class-api
+  question: error-boundaries
+  difficulty: 2
+  prompt: "Допишите классовый Error Boundary: переключение на fallback, логирование и обычный рендер потомков."
+  explanation: Статический getDerivedStateFromError вызывается во время рендера и возвращает новый state для показа fallback. componentDidCatch вызывается в коммите и подходит для побочных эффектов вроде логирования. Хуков-аналогов этих методов нет, поэтому boundary пишут классом или берут react-error-boundary.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    class Boundary extends Component<Props, State> {
+      state: State = { hasError: false };
+      static ___(error: Error) {
+        return { hasError: true };
+      }
+      ___(error: Error, info: ErrorInfo) {
+        logToSentry(error, info.componentStack);
+      }
+      render() {
+        if (this.state.hasError) return this.props.fallback;
+        return this.props.___;
+      }
+    }
+  tokens:
+    - getDerivedStateFromError
+    - componentDidCatch
+    - children
+  decoys:
+    - getDerivedStateFromProps
+    - componentDidUpdate
+    - onError
+    - render
+- id: error-boundaries-async-to-fallback
+  skill: error-boundary-async-errors
+  question: error-boundaries
+  difficulty: 2
+  prompt: Виджет внутри ErrorBoundary (react-error-boundary) загружает данные по кнопке «Обновить». При сетевой ошибке нужно показать тот же fallback с кнопкой «Повторить», что и при ошибках рендера. Что выбрать?
+  explanation: "Boundary не видит асинхронные ошибки, но их можно передать в него вручную: поймать в catch и вызвать showBoundary(error). Тогда fallback, resetErrorBoundary и onError работают одинаково для ошибок рендера и сети. Глобальные обработчики подходят для логирования, а не для UI конкретного виджета."
+  type: choose-tool
+  options:
+    - label: useErrorBoundary().showBoundary(error) в catch
+      why: "Лучший вариант. Ошибка передаётся в ближайший boundary: показывается общий fallback, срабатывает onError, а кнопка «Повторить» сбрасывает состояние через resetErrorBoundary."
+    - label: try/catch и локальный state error с инлайн-сообщением
+      why: Подходит, если нужно мягкое сообщение рядом с кнопкой без замены всего виджета. Но тогда это отдельный UI, а не общий fallback.
+    - label: window.addEventListener('unhandledrejection')
+      why: Годится для глобального логирования необработанных промисов. Отрисовать fallback конкретного виджета через него нельзя.
+    - label: Опция onUncaughtError в createRoot
+      why: Нужна для централизованного логирования в React 19. Ошибки из обработчиков сюда не попадают, и запасной UI в нужном месте эта опция не показывает.
+  answer: 0
+
+# error-handling-strategy: принято из черновика 2026-10-11
+- id: error-handling-strategy-layers-quiz
+  skill: error-handling-architecture
+  question: error-handling-strategy
+  difficulty: 3
+  prompt: Какой подход к обработке ошибок на уровне приложения правильный?
+  explanation: "Единого места, где ловятся все ошибки, нет. Поэтому ошибки сначала классифицируют: бизнес, сеть, авторизация, рендер, чанк. Каждый тип перехватывают на своём уровне, а сбои отправляют в мониторинг с source maps, релизом и пользователем. Ожидаемые ошибки в мониторинг не идут."
+  type: quiz
+  options:
+    - label: "Классифицировать ошибки и ловить каждый тип на своём уровне: границы, http-клиент, глобальные обработчики, мониторинг с контекстом"
+      why: "Верно. Слои закрывают разные дыры: границы ловят рендер, клиент — 401 и повторы, глобальные обработчики — остальное, мониторинг показывает картину."
+    - label: Один Error Boundary в корне плюс Sentry — этого хватит, он поймает все ошибки приложения
+      why: Граница не ловит ошибки в обработчиках событий и асинхронном коде. К тому же падение одного виджета заменит fallback-ом весь экран.
+    - label: Отправлять в мониторинг каждую ошибку, включая валидацию, чтобы ничего не упустить
+      why: «Email занят» — ожидаемый сценарий, а не сбой. Такой шум прячет реальные проблемы и обесценивает алерты по росту ошибок.
+    - label: Оборачивать каждый вызов API в компоненте в try/catch и показывать toast
+      why: Логика дублируется по всему коду, и нет единой политики для 401, повторов и сетевых ошибок. Это задача http-клиента и библиотеки данных.
+  answer: 0
+- id: error-handling-strategy-chunk-load
+  skill: chunk-load-error-recovery
+  question: error-handling-strategy
+  difficulty: 2
+  prompt: После деплоя у пользователей с давно открытой вкладкой переход на lazy-маршрут падает с ошибкой загрузки чанка. Как обработать?
+  explanation: После деплоя хеши файлов меняются, и старых чанков на сервере уже нет. Помогает только загрузка нового index.html. Ловите ошибку в границе маршрута (в Vite есть ещё событие `vite:preloadError`) и предлагайте перезагрузку. Флаг в sessionStorage защитит от цикла перезагрузок.
+  type: choose-tool
+  options:
+    - label: Error Boundary маршрута распознаёт ошибку загрузки чанка и предлагает перезагрузить страницу
+      why: Лучший вариант. Перезагрузка подтягивает новый манифест и актуальные чанки, а остальное приложение продолжает работать.
+    - label: Повторять import() с экспоненциальным backoff
+      why: Это помогает при временном сбое сети. Но удалённый после деплоя файл будет отдавать 404 при каждой попытке.
+    - label: Показывать toast из глобального window.onerror
+      why: Ошибка попадёт в лог, но пользователь останется на сломанном экране без способа восстановиться.
+    - label: Отказаться от code splitting и собрать один бандл
+      why: Проблема исчезнет, но вырастут размер загрузки и время старта. Оправдано разве что для маленьких приложений.
+  answer: 0
+- id: error-handling-strategy-event-handler
+  skill: event-handler-errors
+  question: error-handling-strategy
+  difficulty: 2
+  prompt: Автор ожидает, что при неудачном сохранении появится SaveError. Найдите строку, на которой это ожидание не оправдается.
+  explanation: "Error Boundary ловит ошибки рендера, а не обработчиков событий и асинхронного кода. Здесь ошибка уйдёт в `unhandledrejection`, и пользователь ничего не увидит. Варианты исправления: try/catch с состоянием ошибки и отчётом в мониторинг, `showBoundary` из react-error-boundary или Action в `startTransition` — в React 19 такие ошибки доходят до границы."
+  type: find-bug
+  language: tsx
+  code: |-
+    function SaveButton() {
+      const save = async () => {
+        const res = await fetch('/api/save', {
+          method: 'POST',
+        });
+        if (!res.ok) throw new Error('Save failed');
+      };
+      return (
+        <ErrorBoundary fallback={<SaveError />}>
+          <button onClick={save}>Сохранить</button>
+        </ErrorBoundary>
+      );
+    }
+  bugLines:
+    - 6
+  causes:
+    - Error Boundary не ловит ошибки из обработчиков событий и async-кода — ошибка станет unhandled rejection
+    - ErrorBoundary нельзя объявлять в том же компоненте, где находится кнопка
+    - "Проверка res.ok лишняя: fetch сам отклоняет промис при HTTP-ошибке"
+    - Бросать нужно Response, а не Error, иначе граница его не распознает
+  answer: 0
+- id: error-handling-strategy-query-client
+  skill: api-error-policy
+  question: error-handling-strategy
+  difficulty: 2
+  prompt: "Настройте QueryClient: toast только при неудачном фоновом обновлении и без повторов для 4xx."
+  explanation: "`onError` в QueryCache срабатывает один раз на запрос, а не в каждом компоненте. Если данные уже есть, значит не удалось фоновое обновление: хватит toast. Если данных нет, ошибку покажет состояние запроса или граница. Функция `retry` не повторяет клиентские ошибки 4xx: повтор не исправит 404 или ошибку валидации."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const queryClient = new QueryClient({
+      queryCache: new ___({
+        onError: (error, query) => {
+          if (query.state.___ !== undefined) {
+            toast.error('Не удалось обновить данные');
+          }
+        },
+      }),
+      defaultOptions: {
+        queries: {
+          ___: (count, err) => !isClientError(err) && count < 3,
+        },
+      },
+    });
+  tokens:
+    - QueryCache
+    - data
+    - retry
+  decoys:
+    - MutationCache
+    - error
+    - retryDelay
+    - status
+
+# security-advanced: принято из черновика 2026-10-11
+- id: security-advanced-beyond-xss
+  skill: react-threat-model
+  question: security-advanced
+  difficulty: 3
+  prompt: "Коллега говорит: «React экранирует всё в JSX, значит фронтенд защищён». Что ответить?"
+  explanation: "Автоэкранирование закрывает только часть XSS. Угрозы современного приложения шире: утечки секретов в бандл, незащищённые Server Functions и API, CSRF, open redirect, цепочка поставок, кликджекинг. Защита многоуровневая: CSP с nonce, заголовки, проверки на сервере, аудит зависимостей, минимальные привилегии."
+  type: quiz
+  options:
+    - label: "Экранирование закрывает лишь часть XSS: остаются секреты в бандле, открытые Server Functions, CSRF, зависимости, open redirect"
+      why: "Верно. Большинство этих угроз вообще не про рендер JSX, поэтому нужна защита на нескольких уровнях: сервер, заголовки, сборка, зависимости."
+    - label: Достаточно добавить CSP — она закрывает все угрозы клиентского приложения
+      why: CSP снижает ущерб от XSS и сторонних скриптов, но не защитит Server Function без авторизации, секрет в бандле или CSRF-запрос.
+    - label: Server Functions не видны клиенту, поэтому достаточно защитить страницы, которые их вызывают
+      why: Server Function — это публичный POST-эндпоинт. Его можно вызвать напрямую, минуя UI, поэтому проверки нужны внутри каждой функции.
+    - label: Секреты в переменных окружения в безопасности, если не коммитить .env в репозиторий
+      why: Переменные с префиксом VITE_ или NEXT_PUBLIC_ подставляются в JS-бандл при сборке, и их видит любой пользователь.
+  answer: 0
+- id: security-advanced-server-action-idor
+  skill: server-functions-authz
+  question: security-advanced
+  difficulty: 2
+  prompt: Server Function удаляет пост. Найдите уязвимость.
+  explanation: "Аутентификация (кто ты) ≠ авторизация (можно ли тебе это). Любой залогиненный пользователь может отправить чужой postId и удалить чужой пост (IDOR). Исправление: `where: { id: postId, authorId: session.user.id }` или явная проверка владельца. Ещё стоит валидировать вход (например, zod): типы TS в рантайме не проверяются."
+  type: find-bug
+  language: tsx
+  code: |-
+    'use server';
+
+    export async function deletePost(postId: string) {
+      const session = await auth();
+      if (!session) throw new Error('Unauthorized');
+      await db.post.delete({
+        where: { id: postId },
+      });
+      revalidatePath('/posts');
+    }
+  bugLines:
+    - 6
+    - 7
+  causes:
+    - "Нет авторизации: проверяется только факт входа, но не то, что пост принадлежит пользователю"
+    - "'use server' скрывает функцию от клиента, поэтому проверка сессии вообще избыточна"
+    - revalidatePath нужно вызывать до удаления, иначе кэш устареет
+    - postId должен иметь тип number, иначе удаление не сработает
+  answer: 0
+- id: security-advanced-csp-nonce
+  skill: csp-headers
+  question: security-advanced
+  difficulty: 3
+  prompt: "Допишите CSP в middleware: скрипты только с nonce (и подгруженные ими), без unsafe-inline, плюс защита от кликджекинга."
+  explanation: "`'nonce-…'` разрешает только скрипты с этим одноразовым атрибутом, а `'strict-dynamic'` передаёт доверие скриптам, которые они загрузят. Nonce генерируется заново на каждый запрос. `frame-ancestors 'none'` запрещает встраивать страницу во фрейм — это защита от кликджекинга (`frame-src` управляет фреймами внутри страницы)."
+  type: fill-tokens
+  language: ts
+  code: |-
+    const nonce = btoa(crypto.randomUUID());
+    const csp = [
+      `script-src 'nonce-${___}' '___'`,
+      `object-src 'none'`,
+      `base-uri 'none'`,
+      `___ 'none'`,
+    ].join('; ');
+    res.headers.set('Content-Security-Policy', csp);
+  tokens:
+    - nonce
+    - strict-dynamic
+    - frame-ancestors
+  decoys:
+    - unsafe-inline
+    - unsafe-eval
+    - frame-src
+    - csp
+- id: security-advanced-secret-in-bundle
+  skill: client-secrets-leak
+  question: security-advanced
+  difficulty: 2
+  prompt: В SPA на Vite секретный ключ платёжного API лежит в VITE_PAYMENT_KEY, и браузер напрямую вызывает провайдера. Как исправить?
+  explanation: Всё, что попало в клиентский бандл или в браузер, публично. Секрет должен жить только на сервере, в переменной без публичного префикса. Клиент обращается к своему эндпоинту, а тот проверяет сессию и права. В Next.js модуль с ключом стоит дополнительно пометить `import 'server-only'`. После утечки ключ обязательно нужно перевыпустить.
+  type: choose-tool
+  options:
+    - label: Перенести вызов провайдера на сервер (API-роут или Server Function), ключ хранить в env без публичного префикса
+      why: Верно. Ключ не покидает сервер, эндпоинт проверяет сессию и права, к нему можно добавить rate limiting.
+    - label: Обфусцировать ключ в бандле (base64, разбиение на части)
+      why: "Обфускация не даёт секретности: ключ восстанавливается за минуту через DevTools или по сетевым запросам."
+    - label: Отдавать ключ с сервера после логина и держать его только в памяти
+      why: Ключ всё равно окажется у любого залогиненного пользователя. Подход годится только для короткоживущих токенов с узкими правами, которые выдаёт провайдер.
+    - label: Ограничить ключ по домену или Referer в кабинете провайдера
+      why: Подходит для публичных ключей (publishable key, карты). Referer легко подделать вне браузера, поэтому секретный ключ так не защитить.
+  answer: 0
+
+# spa-auth: принято из черновика 2026-10-11
+- id: spa-auth-client-checks-ux-only
+  skill: spa-auth-server-authorization
+  question: spa-auth
+  difficulty: 2
+  prompt: В админке кнопка «Удалить пользователя» скрыта от обычных ролей, а маршрут /admin обёрнут в RequireAuth с проверкой роли. Этого достаточно для защиты?
+  explanation: "Клиентский код целиком у пользователя: его можно изменить, а API — вызвать напрямую через curl. Поэтому RequireAuth, скрытые кнопки и роли в UI нужны только для удобства. Право на каждое действие проверяет сервер по сессии или токену при каждом запросе."
+  type: quiz
+  options:
+    - label: "Нет: проверки на клиенте — только UX, сервер обязан проверять права на каждый запрос к API"
+      why: Верно. Запрос DELETE можно отправить в обход интерфейса, поэтому решение о доступе принимает только сервер.
+    - label: "Да, если роль хранится в httpOnly cookie: JS её не прочитает и не подменит"
+      why: httpOnly защищает cookie от чтения при XSS, но не от прямых запросов к API. Для них проверка на клиенте просто не выполняется.
+    - label: Да, если сборка минифицирована и роли не видны в исходниках
+      why: Минификация не защищает. Код всё равно можно прочитать и изменить в DevTools, а API доступен напрямую.
+    - label: Нужно дополнительно проверять роль в loader маршрута — тогда клиентская защита станет полной
+      why: Loader тоже выполняется в браузере пользователя. Он улучшает UX, например убирает мерцание, но не заменяет проверку на сервере.
+  answer: 0
+- id: spa-auth-require-auth-flicker
+  skill: spa-auth-protected-routes
+  question: spa-auth
+  difficulty: 2
+  prompt: Залогиненного пользователя после перезагрузки на защищённой странице выкидывает на /login. Найдите причину.
+  explanation: "Пока запрос /me в полёте, user ещё undefined, и обёртка сразу делает редирект. Правило: у защищённого маршрута три состояния — загрузка, гость, пользователь. Сначала `if (isLoading) return <Spinner />`, и только потом проверка !user."
+  type: find-bug
+  language: tsx
+  code: |-
+    function RequireAuth({ children }: Props) {
+      const { user, isLoading } = useCurrentUser();
+      const location = useLocation();
+
+      if (!user) {
+        return (
+          <Navigate to="/login" replace
+            state={{ from: location }} />
+        );
+      }
+      return children;
+    }
+  bugLines:
+    - 5
+  causes:
+    - "Нет проверки isLoading: пока запрос текущего пользователя не завершён, user пуст, и срабатывает редирект"
+    - replace в Navigate стирает историю, поэтому сессия теряется
+    - "Передавать location в state нельзя: объект не сериализуется"
+    - children нужно обернуть во фрагмент, иначе компонент не отрендерится
+  answer: 0
+- id: spa-auth-single-refresh-interceptor
+  skill: spa-auth-token-refresh
+  question: spa-auth
+  difficulty: 3
+  prompt: "API на другом поддомене, сессия в cookie. Допишите обёртку над fetch: при истёкшем токене все параллельные запросы должны дождаться одного refresh и повторить запрос."
+  explanation: "Общий промис и `??=` дают ровно один refresh на всю пачку упавших запросов. `finally` сбрасывает промис при любом исходе, чтобы следующий 401 запустил новый refresh. `credentials: 'include'` нужен, чтобы cookie ушла на другой origin."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    let refreshing: Promise<void> | null = null;
+    async function request(url: string, init?: RequestInit) {
+      const opts: RequestInit = { ...init, credentials: 'include' };
+      let res = await fetch(url, opts);
+      if (res.status === ___) {
+        refreshing ___ fetch('https://api.example.com/auth/refresh', {
+          method: 'POST', credentials: '___',
+        }).then(() => undefined)
+          .___(() => { refreshing = null; });
+        await refreshing;
+        res = await fetch(url, opts);
+      }
+      return res;
+    }
+  tokens:
+    - "401"
+    - ??=
+    - include
+    - finally
+  decoys:
+    - "403"
+    - =
+    - same-origin
+    - catch
+- id: spa-auth-refresh-token-storage
+  skill: spa-token-storage
+  question: spa-auth
+  difficulty: 2
+  prompt: "SPA с долгой сессией: пользователь не должен перелогиниваться после перезагрузки вкладки, а при XSS refresh-токен не должен утечь. Где хранить refresh-токен?"
+  explanation: "Схема по умолчанию: refresh-токен или сессия — в httpOnly Secure SameSite cookie, короткий access-токен — в памяти JS. Цена такого выбора — защита от CSRF: помогают SameSite и CSRF-токен. Для OAuth добавьте PKCE или BFF."
+  type: choose-tool
+  options:
+    - label: httpOnly Secure SameSite cookie
+      why: "Лучший выбор. JS не может прочитать cookie, поэтому XSS её не украдёт, а после перезагрузки она сохраняется. Нужна защита от CSRF: SameSite и CSRF-токен."
+    - label: localStorage
+      why: Переживает перезагрузку и прост в использовании, но любой внедрённый скрипт прочитает токен. Допустим лишь при низких требованиях к безопасности.
+    - label: Переменная в памяти (замыкание или стор)
+      why: Хорошее место для короткого access-токена, но после перезагрузки он пропадает. Без cookie-сессии пользователю придётся логиниться заново.
+    - label: sessionStorage
+      why: Живёт только в пределах вкладки и так же доступен JS при XSS. Безопасности не добавляет, а новые вкладки остаются без сессии.
+  answer: 0
+
+# xss: принято из черновика 2026-10-11
+- id: xss-react-escaping-quiz
+  skill: xss-react-escaping
+  question: xss
+  difficulty: 2
+  prompt: Какое утверждение о защите React-приложения от XSS верно?
+  explanation: "Правило: `{}` в JSX безопасен, потому что React экранирует строки. Всё, что обходит экранирование, требует ручной защиты: `dangerouslySetInnerHTML`, `innerHTML` через ref, URL в `href`/`src`, сериализация состояния при SSR, spread чужих props. HTML санитизируют (DOMPurify), у URL проверяют схему по белому списку, а CSP — вторая линия защиты."
+  type: quiz
+  options:
+    - label: React экранирует строки в `{}`, но `dangerouslySetInnerHTML`, `innerHTML` через ref и URL в `href`/`src` нужно защищать вручную
+      why: Верно. Экранирование работает только при обычной вставке значений в JSX. React 19 блокирует `javascript:` в `href`, но полагаться на это не стоит.
+    - label: React экранирует всё, включая `dangerouslySetInnerHTML`, поэтому на клиенте санитизация не нужна
+      why: Неверно. `dangerouslySetInnerHTML` специально вставляет HTML как есть — отсюда и слово dangerously в названии.
+    - label: Достаточно настроить строгую CSP — тогда санитизировать HTML уже не нужно
+      why: "CSP — вторая линия: она блокирует часть внедрённых скриптов, но не HTML-инъекции вроде фишинговых форм и не спасает при ошибках в политике. Основная защита — санитизация."
+    - label: Достаточно очистить HTML на сервере при сохранении — на клиенте проверять ничего не нужно
+      why: "Данные могут попасть в базу в обход этой очистки: старые записи, импорт, другие сервисы. URL может оказаться опасным в другом контексте. Защищать нужно там, где данные выводятся."
+  answer: 0
+- id: xss-unchecked-href
+  skill: xss-url-schemes
+  question: xss
+  difficulty: 2
+  prompt: В карточке комментария осталась XSS-уязвимость. Найдите строку.
+  explanation: "Экранирование в `{}` не проверяет схему URL: значение `javascript:alert(1)` в `href` — валидная строка. Современный React блокирует такие ссылки, но полагаться на это не стоит. Пропускайте URL через `safeUrl` с белым списком протоколов (`http:`, `https:`, `mailto:`)."
+  type: find-bug
+  language: tsx
+  code: |-
+    function CommentCard({ comment }: Props) {
+      return (
+        <article>
+          <h3>{comment.author}</h3>
+          <a href={comment.authorSite}>Сайт автора</a>
+          <div
+            dangerouslySetInnerHTML={{
+              __html: DOMPurify.sanitize(comment.html),
+            }}
+          />
+        </article>
+      );
+    }
+  bugLines:
+    - 5
+  causes:
+    - URL от пользователя попадает в `href` без проверки схемы — возможен `javascript:`
+    - "`{comment.author}` не экранируется, и HTML в имени автора выполнится"
+    - "`DOMPurify.sanitize` нужно вызывать в useEffect, а не во время рендера"
+    - Санитизированный HTML нужно вставлять через ref.innerHTML, а не через `dangerouslySetInnerHTML`
+  answer: 0
+- id: xss-safe-url-and-sanitize
+  skill: xss-sanitize-and-validate
+  question: xss
+  difficulty: 2
+  prompt: Допишите проверку схемы URL и безопасную вставку пользовательского HTML.
+  explanation: "`new URL` разбирает адрес, в том числе относительный (с базой `location.origin`). По `protocol` его сверяют с белым списком, а при ошибке парсинга возвращают `#`. HTML пропускают через `DOMPurify.sanitize` и только потом кладут в `__html`. Белый список надёжнее, чем поиск опасных шаблонов."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function safeUrl(url: string) {
+      try {
+        const { ___ } = new URL(url, location.origin);
+        return ['http:', 'https:'].includes(protocol)
+          ? url
+          : '#';
+      } catch {
+        return '#';
+      }
+    }
+
+    const clean = DOMPurify.___(comment.html);
+    <div dangerouslySetInnerHTML={{ ___: clean }} />
+  tokens:
+    - protocol
+    - sanitize
+    - __html
+  decoys:
+    - origin
+    - escape
+    - html
+    - innerHTML
+- id: xss-markdown-comments
+  skill: xss-user-html
+  question: xss
+  difficulty: 2
+  prompt: "Пользователи пишут комментарии в Markdown: нужны ссылки, списки и жирный текст. Вы рендерите Markdown в HTML-строку через marked и выводите её. Как защититься от XSS?"
+  explanation: Если пользовательский HTML нужно отрендерить, санитизируйте результат перед вставкой. Можно и отключить сырой HTML в рендерере, но ссылки всё равно проверяют. Самописные регулярки обходятся, CSP — только страховка. Если форматирование не нужно, выводите обычный текст через `{}`.
+  type: choose-tool
+  options:
+    - label: Пропустить HTML от marked через `DOMPurify.sanitize` и только потом передать в `dangerouslySetInnerHTML`
+      why: Лучший вариант. DOMPurify удаляет скрипты, обработчики вроде `onerror` и ссылки `javascript:`, а безопасное форматирование сохраняет.
+    - label: Удалять теги `<script>` регулярным выражением перед вставкой
+      why: Обходится через `<img onerror>`, `<a href="javascript:...">` и хитрую разметку. Регулярки годятся для валидации формата, но не для санитизации HTML.
+    - label: Настроить строгую CSP с nonce и вставлять HTML как есть
+      why: CSP стоит включить как вторую линию защиты. Но она не спасёт от внедрённых форм и ссылок, а при ошибке в политике не защитит вовсе.
+    - label: Выводить исходный Markdown через `{comment.body}` без рендеринга
+      why: Безопасно, но пользователь увидит сырые `**` и `[]()`. Подходит, когда форматирование не требуется.
+  answer: 0
