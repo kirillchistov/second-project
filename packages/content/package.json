@@ -11,7 +11,7 @@
   },
   "scripts": {
     "bundle": "node scripts/bundle.ts",
-    "generate": "node scripts/generate.ts",
+    "generate": "node --env-file-if-exists=../../.env scripts/generate.ts",
     "approve": "node scripts/approve.ts"
   },
   "dependencies": {

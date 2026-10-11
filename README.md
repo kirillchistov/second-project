@@ -105,7 +105,7 @@ npm run generate -w @rr/content -- --only keys,rules-of-hooks
 npm run generate -w @rr/content -- --topic hooks --concurrency 3
 ```
 
-Нужен ключ: `ANTHROPIC_API_KEY` или профиль `ant auth login`. В конце скрипт печатает расход токенов и стоимость.
+Ключ: скопируйте `.env.example` в `.env` в корне репозитория и впишите `ANTHROPIC_API_KEY` (файл в `.gitignore`, в приложение ключ не попадает). Подойдёт и переменная окружения или профиль `ant auth login`. В конце скрипт печатает расход токенов и стоимость.
 
 Черновики появляются в `packages/content/exercises/drafts/<slug>.yaml` с замечаниями ревьюера в комментариях.
 Вычитайте и поправьте их, затем перенесите в банк:

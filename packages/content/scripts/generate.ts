@@ -10,7 +10,7 @@
  * Результат — exercises/drafts/<slug>.yaml с замечаниями ревьюера в комментариях. В банк упражнения попадают
  * только после вычитки человеком: npm run approve -w @rr/content.
  *
- * Ключ: ANTHROPIC_API_KEY или профиль `ant auth login`.
+ * Ключ: ANTHROPIC_API_KEY в .env в корне репозитория (см. .env.example), в окружении или профиль `ant auth login`.
  */
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
