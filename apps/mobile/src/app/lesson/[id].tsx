@@ -27,6 +27,12 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+/** Урок мог открыться первым экраном (по ссылке или после перезагрузки) — тогда возвращаться некуда, идём на путь. */
+function leave() {
+  if (router.canGoBack()) router.back();
+  else router.replace('/');
+}
+
 export default function LessonScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const c = useColors();
@@ -81,7 +87,7 @@ export default function LessonScreen() {
         <Text style={[styles.face, { color: c.text }]}>{fibiFace('proud')}</Text>
         <Text style={[styles.title, { color: c.text }]}>Повторять пока нечего</Text>
         <Text style={[styles.muted, { color: c.textMuted }]}>Пройди урок на пути — навыки появятся здесь, когда придёт время их освежить.</Text>
-        <Button title="Назад" onPress={() => router.back()} style={styles.wide} />
+        <Button title="Назад" onPress={leave} style={styles.wide} />
       </View>
     );
   }
@@ -105,7 +111,7 @@ export default function LessonScreen() {
         {saveFailed && (
           <Text style={[styles.muted, { color: c.danger }]}>Не удалось сохранить прогресс урока. Попробуй пройти его ещё раз.</Text>
         )}
-        <Button title="Готово" onPress={() => router.back()} disabled={!saved && !saveFailed} style={styles.wide} />
+        <Button title="Готово" onPress={leave} disabled={!saved && !saveFailed} style={styles.wide} />
       </View>
     );
   }
@@ -118,7 +124,7 @@ export default function LessonScreen() {
   return (
     <View style={[styles.root, { backgroundColor: c.bg, paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Закрыть урок" onPress={() => router.back()} hitSlop={12}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Закрыть урок" onPress={leave} hitSlop={12}>
           <Ionicons name="close" size={28} color={c.textMuted} />
         </Pressable>
         <ProgressBar value={sessionProgress(state)} />
