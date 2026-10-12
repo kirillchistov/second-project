@@ -1,7 +1,9 @@
+import { CodeToolbar } from '@/components/CodeToolbar';
 import { Button, Prompt } from '@/components/ui';
+import { useCodeFontSize } from '@/lib/codeFont';
 import { MONO, useColors } from '@/lib/theme';
 import { GAP } from '@rr/content';
-import { checkAnswer, shuffle } from '@rr/core';
+import { checkAnswer, longestLine, shuffle } from '@rr/core';
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -11,6 +13,9 @@ import type { ExerciseProps } from './types';
 export function FillTokensExercise({ exercise, revealed, onSubmit }: ExerciseProps<'fill-tokens'>) {
   const c = useColors();
   const parts = exercise.code.trimEnd().split(GAP);
+  // Пропуск на экране шире «___»: в нём окажется самый длинный токен с отступами
+  const widest = Math.max(4, ...[...exercise.tokens, ...exercise.decoys].map((t) => t.length)) + 2;
+  const { size, mode, onLayout } = useCodeFontSize(longestLine(exercise.code.trimEnd().split(GAP).join('x'.repeat(widest))), { px: 28 });
   const [chips] = useState(() => shuffle([...exercise.tokens, ...exercise.decoys]).map((text, id) => ({ id, text })));
   // для каждого пропуска — id фишки или null
   const [filled, setFilled] = useState<(number | null)[]>(() => exercise.tokens.map(() => null));
@@ -29,9 +34,10 @@ export function FillTokensExercise({ exercise, revealed, onSubmit }: ExercisePro
   return (
     <View style={styles.root}>
       <Prompt label="Заполни пропуски" text={exercise.prompt} />
-      <View style={[styles.codeBox, { backgroundColor: c.codeBg, borderColor: c.border }]}>
+      <CodeToolbar size={size} mode={mode} />
+      <View onLayout={onLayout} style={[styles.codeBox, { backgroundColor: c.codeBg, borderColor: c.border }]}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <Text style={[styles.code, { color: c.text }]}>
+          <Text style={[styles.code, { color: c.text, fontSize: size, lineHeight: Math.round(size * 1.8) }]}>
             {parts.map((part, i) => (
               <Text key={i}>
                 {part}
@@ -87,7 +93,7 @@ export function FillTokensExercise({ exercise, revealed, onSubmit }: ExercisePro
 const styles = StyleSheet.create({
   root: { gap: 16 },
   codeBox: { borderWidth: 1, borderRadius: 12, padding: 12 },
-  code: { fontFamily: MONO, fontSize: 13, lineHeight: 24 },
+  code: { fontFamily: MONO },
   gap: { fontFamily: MONO, fontWeight: '700' },
   keyboard: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
   chip: { borderWidth: 2, borderBottomWidth: 4, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14 },

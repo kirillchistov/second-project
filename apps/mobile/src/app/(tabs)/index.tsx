@@ -29,7 +29,7 @@ export default function PathScreen() {
   const xpToday = activity.get(today) ?? 0;
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: c.bg }]} edges={['top']}>
+    <SafeAreaView style={[styles.root, { backgroundColor: c.bg }]} edges={['top', 'left', 'right']}>
       <View style={[styles.header, { borderBottomColor: c.border }]}>
         <View style={styles.headerStat}>
           <Ionicons name="flame" size={22} color={streak > 0 ? c.warning : c.textMuted} />

@@ -1,6 +1,7 @@
 import { Button, OptionCard, Prompt } from '@/components/ui';
+import { useCodeFont } from '@/lib/codeFont';
 import { MONO, useColors } from '@/lib/theme';
-import { checkAnswer, shuffle } from '@rr/core';
+import { CODE_FONT, checkAnswer, shuffle } from '@rr/core';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { ExerciseProps } from './types';
@@ -24,6 +25,9 @@ function shuffledPieces(items: string[], correct: string[]): Piece[] {
 export function ArrangeExercise({ exercise, revealed, onSubmit }: ExerciseProps<'order' | 'parsons'>) {
   const c = useColors();
   const isCode = exercise.type === 'parsons';
+  // Строки Parsons переносятся внутри карточек, вписывать их не нужно — берём только ручной кегль
+  const font = useCodeFont();
+  const mono = [styles.mono, { fontSize: font.mode === 'manual' ? font.size : CODE_FONT.default }];
   const correct = isCode ? exercise.lines : exercise.steps;
   const [pool] = useState(() => shuffledPieces(isCode ? [...exercise.lines, ...exercise.distractors] : exercise.steps, correct));
   const [answer, setAnswer] = useState<number[]>([]);
@@ -45,7 +49,7 @@ export function ArrangeExercise({ exercise, revealed, onSubmit }: ExerciseProps<
             <OptionCard key={id} state={state} disabled={revealed} onPress={() => setAnswer(answer.filter((a) => a !== id))}>
               <View style={styles.row}>
                 {!isCode && <Text style={[styles.index, { color: c.textMuted }]}>{i + 1}</Text>}
-                <Text style={[styles.text, { color: c.text }, isCode && styles.mono]}>{display(piece.text)}</Text>
+                <Text style={[styles.text, { color: c.text }, isCode && mono]}>{display(piece.text)}</Text>
               </View>
             </OptionCard>
           );
@@ -58,7 +62,7 @@ export function ArrangeExercise({ exercise, revealed, onSubmit }: ExerciseProps<
             .filter((p) => !answer.includes(p.id))
             .map((p) => (
               <OptionCard key={p.id} onPress={() => setAnswer([...answer, p.id])}>
-                <Text style={[styles.text, { color: c.text }, isCode && styles.mono]}>{display(p.text)}</Text>
+                <Text style={[styles.text, { color: c.text }, isCode && mono]}>{display(p.text)}</Text>
               </OptionCard>
             ))}
         </View>

@@ -1,4 +1,5 @@
 export * from './check.ts';
+export * from './codeFont.ts';
 export * from './format.ts';
 export * from './grading.ts';
 export * from './interview.ts';

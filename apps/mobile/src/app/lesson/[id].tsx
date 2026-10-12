@@ -24,7 +24,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useReducer, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /** Урок мог открыться первым экраном (по ссылке или после перезагрузки) — тогда возвращаться некуда, идём на путь. */
@@ -37,6 +37,10 @@ export default function LessonScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const c = useColors();
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  // В ландшафте вырез камеры сбоку: боковые отступы из safe area, панель разбора — не выше трети экрана
+  const sides = { paddingLeft: insets.left, paddingRight: insets.right };
+  const feedbackMaxHeight = Math.min(220, height * 0.3);
   const progress = useProgress();
   const now = useNow();
   const isReview = id === 'review';
@@ -83,7 +87,7 @@ export default function LessonScreen() {
 
   if (items.length === 0) {
     return (
-      <View style={[styles.center, { backgroundColor: c.bg, paddingTop: insets.top, paddingBottom: insets.bottom + 24 }]}>
+      <View style={[styles.center, sides, { backgroundColor: c.bg, paddingTop: insets.top, paddingBottom: insets.bottom + 24 }]}>
         <Text style={[styles.face, { color: c.text }]}>{fibiFace('proud')}</Text>
         <Text style={[styles.title, { color: c.text }]}>Повторять пока нечего</Text>
         <Text style={[styles.muted, { color: c.textMuted }]}>Пройди урок на пути — навыки появятся здесь, когда придёт время их освежить.</Text>
@@ -95,7 +99,7 @@ export default function LessonScreen() {
   if (state.phase === 'done') {
     const streak = currentStreak(progress.activity.keys(), localDay(now));
     return (
-      <View style={[styles.center, { backgroundColor: c.bg, paddingTop: insets.top, paddingBottom: insets.bottom + 24 }]}>
+      <View style={[styles.center, sides, { backgroundColor: c.bg, paddingTop: insets.top, paddingBottom: insets.bottom + 24 }]}>
         <Text style={[styles.face, { color: c.text }]}>{fibiFace(saved?.perfect ? 'proud' : 'happy')}</Text>
         <Text style={[styles.title, { color: c.text }]}>
           {isReview ? 'Повторение завершено' : saved?.perfect ? 'Идеальный коммит!' : 'Коммит принят'}
@@ -122,7 +126,7 @@ export default function LessonScreen() {
   const repeat = item ? state.results[item.id] !== undefined && !revealed : false;
 
   return (
-    <View style={[styles.root, { backgroundColor: c.bg, paddingTop: insets.top }]}>
+    <View style={[styles.root, sides, { backgroundColor: c.bg, paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Pressable accessibilityRole="button" accessibilityLabel="Закрыть урок" onPress={leave} hitSlop={12}>
           <Ionicons name="close" size={28} color={c.textMuted} />
@@ -143,7 +147,7 @@ export default function LessonScreen() {
           <Text style={[styles.feedbackTitle, { color: state.last.correct ? c.success : c.danger }]}>
             {fibiFace(state.last.correct ? 'happy' : 'sad')}  {fibiLine(state.last.correct, state.combo, state.position)}
           </Text>
-          <ScrollView style={styles.feedbackScroll}>
+          <ScrollView style={{ maxHeight: feedbackMaxHeight }}>
             {!state.last.correct && (
               <Text style={[styles.feedbackAnswer, { color: c.text }]}>Правильно: {correctAnswerText(graded)}</Text>
             )}
@@ -178,7 +182,6 @@ const styles = StyleSheet.create({
   content: { padding: 16 },
   repeat: { fontWeight: '700', fontSize: 13, textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 },
   feedback: { padding: 16, gap: 10, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
-  feedbackScroll: { maxHeight: 220 },
   feedbackTitle: { fontSize: 18, fontWeight: '800' },
   feedbackAnswer: { fontSize: 15, lineHeight: 21, fontWeight: '600', marginBottom: 6 },
   feedbackText: { fontSize: 15, lineHeight: 21 },

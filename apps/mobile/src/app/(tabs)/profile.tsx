@@ -103,7 +103,7 @@ export default function ProfileScreen() {
   ];
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: c.bg }]} edges={['top']}>
+    <SafeAreaView style={[styles.root, { backgroundColor: c.bg }]} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={[styles.title, { color: c.text }]}>Профиль</Text>
         <View style={[styles.panel, { backgroundColor: c.surface, borderColor: c.border }]}>

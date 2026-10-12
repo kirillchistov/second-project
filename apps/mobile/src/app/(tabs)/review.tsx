@@ -23,7 +23,7 @@ export default function ReviewScreen() {
   const total = backlog.length + due;
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: c.bg }]} edges={['top']}>
+    <SafeAreaView style={[styles.root, { backgroundColor: c.bg }]} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={[styles.title, { color: c.text }]}>Повторение</Text>
 
