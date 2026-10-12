@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:pages": "vite --mode pages",
     "build": "vite build",
-    "preview": "vite preview"
+    "build:pages": "vite build --mode pages && node scripts/pages-spa.mjs",
+    "preview": "vite preview",
+    "preview:pages": "vite preview --mode pages"
   },
   "dependencies": {
     "@rr/content": "*",

@@ -27,7 +27,9 @@ npm run dev
 | Команда | Что делает |
 |---|---|
 | `npm run dev` | dev-сервер веб-версии (Vite) |
+| `npm run dev:pages` | демо-путь для GitHub Pages: уроки в браузере, прогресс в localStorage |
 | `npm run build` | проверка типов всего монорепо и production-сборка веба в `apps/web/dist/` |
+| `npm run build:pages` | статическая сборка демо; `VITE_BASE` задаёт подкаталог (`/имя-репозитория/`) |
 | `npm test` | тесты Vitest во всех пакетах |
 | `npm run check` | типы + oxlint + тесты |
 | `npm run bundle:content` | JSON-бандл контента для мобильного приложения → `packages/content/dist/content.json` |
@@ -151,6 +153,25 @@ npm run radar -w @rr/content -- --no-generate   # только отчёт
 
 Веб-версия — статическое SPA в `apps/web`. В настройках проекта на Vercel укажите **Root Directory** `apps/web`:
 Vercel сам определит Vite и npm workspaces, а `apps/web/vercel.json` перенаправит все пути на `index.html`.
+Эта сборка — каталог, тренировка и мок-собеседование. Демо-путь в неё не входит.
+
+## Демо на GitHub Pages
+
+Отдельный режим сборки (`vite --mode pages`) поднимает путь обучения из мобильного приложения:
+юниты, уроки и все упражнения, которые проверяются без сети (`quiz`, предсказание вывода, поиск бага,
+сборка кода, пропуски, порядок, выбор инструмента). Голосовой проверки и API нет. Если у вопроса нет
+карточки с вариантами, остаётся сверка с эталоном и самооценка. Прогресс, стрик и повторения пишутся
+в `localStorage` (`rr-demo-progress`).
+
+```bash
+npm run dev:pages
+VITE_BASE=/react-refresher-app/ npm run build:pages
+```
+
+Workflow `.github/workflows/pages.yml` публикует `apps/web/dist` при пуше в `main`. В настройках репозитория
+нужен источник Pages **GitHub Actions**. Для проектного сайта база берётся из имени репозитория
+(`https://<owner>.github.io/<repo>/`); для сайта вида `<owner>.github.io` база — `/`.
+Неизвестные адреса отдаёт копия `index.html` как `404.html`, чтобы обновление страницы урока не ломалось.
 
 ## Источники
 
