@@ -1,3 +1,4 @@
+import { QuestList } from '@/components/Quests';
 import { ProgressBar } from '@/components/ui';
 import { PATH } from '@/lib/content';
 import { fibiFace } from '@/lib/fibi';
@@ -13,9 +14,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function PathScreen() {
   const c = useColors();
-  const { activity, cards } = useProgress();
+  const { activity, cards, frozenDays, stash, quests } = useProgress();
   const today = localDay(useNow());
-  const streak = currentStreak(activity.keys(), today);
+  const streak = currentStreak(activity.keys(), today, frozenDays);
   const xpToday = activity.get(today) ?? 0;
 
   return (
@@ -24,6 +25,14 @@ export default function PathScreen() {
         <View style={styles.headerStat}>
           <Ionicons name="flame" size={22} color={streak > 0 ? c.warning : c.textMuted} />
           <Text style={[styles.headerValue, { color: streak > 0 ? c.warning : c.textMuted }]}>{streak}</Text>
+        </View>
+        <View
+          style={styles.headerStat}
+          accessible
+          accessibilityLabel={`Заморозок стрика в запасе: ${stash}. Пропущенный день закроется автоматически.`}
+        >
+          <Ionicons name="snow" size={20} color={stash > 0 ? c.accent : c.textMuted} />
+          <Text style={[styles.headerValue, { color: stash > 0 ? c.accent : c.textMuted }]}>{stash}</Text>
         </View>
         <View style={styles.goal}>
           <Text style={[styles.goalText, { color: c.textMuted }]}>
@@ -35,6 +44,7 @@ export default function PathScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        <QuestList quests={quests} />
         {PATH.map((unit) => (
           <Unit key={unit.id} unit={unit} hasSkill={(skill) => cards.has(skill)} c={c} />
         ))}

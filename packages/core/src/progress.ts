@@ -33,16 +33,44 @@ export function addDays(day: string, delta: number): string {
 /**
  * Текущий стрик — сколько дней подряд была активность.
  * Если сегодня ещё не занимались, стрик не сгорает до конца дня: считаем от вчера.
+ * Замороженные дни (`git stash`) держат серию, но не прибавляются к ней.
  */
-export function currentStreak(activeDays: Iterable<string>, today: string): number {
+export function currentStreak(activeDays: Iterable<string>, today: string, frozenDays: Iterable<string> = []): number {
   const days = new Set(activeDays);
+  const frozen = new Set(frozenDays);
   let day = days.has(today) ? today : addDays(today, -1);
   let streak = 0;
-  while (days.has(day)) {
-    streak++;
+  while (days.has(day) || frozen.has(day)) {
+    if (days.has(day)) streak++;
     day = addDays(day, -1);
   }
   return streak;
+}
+
+/** Сколько заморозок можно держать в запасе */
+export const STASH_MAX = 2;
+
+/**
+ * Какие пропущенные дни закрыть заморозками. Пропуск — дни между последним днём серии и сегодня, не включая сегодня:
+ * сегодня ещё можно позаниматься. Если заморозок не хватает на весь пропуск, серия всё равно потеряна —
+ * заморозки не тратим. Нечего защищать (серии не было) — тоже не тратим.
+ */
+export function planFreezes(opts: {
+  activeDays: Iterable<string>;
+  frozenDays: Iterable<string>;
+  today: string;
+  available: number;
+}): string[] {
+  const covered = new Set([...opts.activeDays, ...opts.frozenDays]);
+  const missed: string[] = [];
+  let day = addDays(opts.today, -1);
+  // Пропуск длиннее запаса заморозок не спасти — дальше не ищем
+  while (!covered.has(day) && missed.length <= opts.available) {
+    missed.unshift(day);
+    day = addDays(day, -1);
+  }
+  if (missed.length === 0 || missed.length > opts.available) return [];
+  return currentStreak(opts.activeDays, day, opts.frozenDays) > 0 ? missed : [];
 }
 
 /** Самая длинная серия за всё время. */

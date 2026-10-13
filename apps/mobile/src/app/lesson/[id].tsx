@@ -10,7 +10,9 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import {
   correctAnswerText,
   currentItem,
+  CHEST_XP,
   currentStreak,
+  QUEST_XP,
   lessonItems,
   localDay,
   reviewItems,
@@ -97,7 +99,7 @@ export default function LessonScreen() {
   }
 
   if (state.phase === 'done') {
-    const streak = currentStreak(progress.activity.keys(), localDay(now));
+    const streak = currentStreak(progress.activity.keys(), localDay(now), progress.frozenDays);
     return (
       <View style={[styles.center, sides, { backgroundColor: c.bg, paddingTop: insets.top, paddingBottom: insets.bottom + 24 }]}>
         <Text style={[styles.face, { color: c.text }]}>{fibiFace(saved?.perfect ? 'proud' : 'happy')}</Text>
@@ -110,6 +112,26 @@ export default function LessonScreen() {
             <Stat label="XP" value={`+${saved.xp}`} color={c.warning} />
             <Stat label="С первой попытки" value={`${Math.round(saved.accuracy * 100)}%`} color={c.success} />
             <Stat label="Стрик" value={`${streak} дн.`} color={c.accent} />
+          </View>
+        )}
+        {saved && (saved.quests.length > 0 || saved.chest) && (
+          <View style={[styles.rewards, { borderColor: c.border, backgroundColor: c.surface }]}>
+            {saved.quests.map((q) => (
+              <View key={q.id} style={styles.reward}>
+                <Ionicons name="checkmark-circle" size={20} color={c.success} />
+                <Text style={[styles.rewardText, { color: c.text }]}>{q.title}</Text>
+                <Text style={[styles.rewardXp, { color: c.warning }]}>+{QUEST_XP} XP</Text>
+              </View>
+            ))}
+            {saved.chest && (
+              <View style={styles.reward}>
+                <Ionicons name="gift" size={20} color={c.accent} />
+                <Text style={[styles.rewardText, { color: c.text }]}>
+                  {saved.chest === 'stash' ? 'Сундук: +1 git stash — заморозка стрика на пропущенный день' : 'Сундук: запас заморозок полон'}
+                </Text>
+                {saved.chest === 'xp' && <Text style={[styles.rewardXp, { color: c.warning }]}>+{CHEST_XP} XP</Text>}
+              </View>
+            )}
           </View>
         )}
         {saveFailed && (
@@ -190,6 +212,10 @@ const styles = StyleSheet.create({
   hash: { fontFamily: 'Menlo', fontSize: 14 },
   muted: { fontSize: 16, lineHeight: 22, textAlign: 'center' },
   stats: { flexDirection: 'row', gap: 10, marginVertical: 12 },
+  rewards: { alignSelf: 'stretch', borderWidth: 1, borderRadius: 14, padding: 12, gap: 10, marginBottom: 12 },
+  reward: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  rewardText: { flex: 1, fontSize: 14, fontWeight: '600' },
+  rewardXp: { fontSize: 14, fontWeight: '800' },
   stat: { borderWidth: 2, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 10, alignItems: 'center', minWidth: 96 },
   statValue: { fontSize: 22, fontWeight: '800' },
   statLabel: { fontSize: 12, textAlign: 'center' },
