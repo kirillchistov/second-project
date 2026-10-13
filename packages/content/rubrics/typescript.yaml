@@ -73,6 +73,81 @@
     - Утверждение, что TypeScript сам выводит кортеж из `return [a, b]` в кастомном хуке и `as const` не нужен.
     - Утверждение, что `useRef<T>()` без аргумента корректен в типах React 19. На деле аргумент обязателен.
     - Утверждение, что набор независимых флагов `isLoading`/`error`/`data` типобезопасен так же, как discriminated union. На деле флаги допускают противоречивые комбинации, например `isLoading && error && data`.
+- question: typescript-utility-types
+  points:
+    - id: derive-not-duplicate
+      text: "Утилитарные типы строят новые типы из существующих, чтобы не дублировать их вручную: один источник истины, изменения исходного типа распространяются автоматически"
+      weight: 3
+    - id: core-utilities-usage
+      text: "Называет основные утилиты с применением: `Partial`/`Required` для форм редактирования и опций, `Pick`/`Omit` для превью, DTO и обёрток, `Record` для словарей и конфигов"
+      weight: 3
+    - id: react-component-props
+      text: "`ComponentProps<typeof X>` и `ComponentPropsWithoutRef<'button'>` берут тип props у чужого компонента или HTML-элемента, например для своей кнопки поверх нативной `button`"
+      weight: 2
+    - id: infer-from-code
+      text: "Тип выводится из кода через `typeof` + `ReturnType`/`Parameters`, а `Awaited` разворачивает Promise: `Awaited<ReturnType<typeof fetchUser>>`"
+      weight: 2
+    - id: record-union-exhaustive
+      text: "`Record` с ключом-объединением заставляет компилятор проверить, что ни один вариант не забыт; `Extract`/`Exclude` выбирают варианты из объединения"
+      weight: 1
+    - id: pitfalls-omit-partial
+      text: "Знает подводные камни: `Omit` на объединении схлопывает варианты (нужен распределяющий условный тип), `Partial` неглубокий — вложенные поля остаются обязательными"
+      weight: 1
+  misconceptions:
+    - "`Partial` делает необязательными и вложенные объекты рекурсивно"
+    - "`Omit<A | B, 'x'>` сохраняет различия вариантов объединения так же, как применение `Omit` к каждому варианту отдельно"
+    - "`ReturnType` у async-функции возвращает сам результат, а не `Promise` — `Awaited` не нужен"
+    - "`ComponentProps<typeof X>` можно передать сам компонент без `typeof` (`ComponentProps<X>`)"
+- question: satisfies-and-const
+  points:
+    - id: as-const-narrow-readonly
+      text: "`as const` сужает значение до литеральных типов и делает его `readonly`: `'primary'` вместо `string`, кортеж вместо массива"
+      weight: 3
+    - id: satisfies-checks-keeps-type
+      text: "`satisfies T` проверяет, что значение совместимо с `T`, но сохраняет точный выведенный тип значения, в отличие от аннотации `: T`, которая расширяет тип до `T` и теряет детали (например, конкретные ключи)"
+      weight: 3
+    - id: as-assertion-differs
+      text: "`as Type` — утверждение типа, которое отключает проверку (`{} as User` компилируется), тогда как `satisfies` реально проверяет (`{} satisfies User` — ошибка)"
+      weight: 2
+    - id: react-use-cases
+      text: "Приводит практический пример: `return [value, setValue] as const` в кастомном хуке для кортежа, тип-объединение из массива вариантов через `(typeof SIZES)[number]`, ключи TanStack Query или `satisfies Record<Variant, ComponentType>` для полноты карты компонентов"
+      weight: 2
+    - id: combine-both
+      text: Их можно комбинировать (`as const satisfies T`), чтобы получить и точные литералы, и проверку формы конфига
+      weight: 1
+    - id: readonly-pitfall
+      text: "Упоминает подводный камень: массив `as const` становится `readonly` и не передаётся в функцию, ожидающую изменяемый `string[]`"
+      weight: 1
+  misconceptions:
+    - "`satisfies` меняет или расширяет тип значения до `T`, как аннотация"
+    - "`as const` замораживает объект в рантайме, как `Object.freeze`"
+    - "`as Type` и `satisfies` эквивалентны — оба просто проверяют тип"
+    - "`as const` нужен только для примитивов и не влияет на массивы и вложенные объекты"
+- question: runtime-validation-zod
+  points:
+    - id: types-erased-at-runtime
+      text: Типы TypeScript стираются при компиляции и в рантайме ничего не проверяют, а внешние данные (ответ API, `localStorage`, URL, env, формы) по сути приходят как `unknown`
+      weight: 3
+    - id: schema-validates-and-infers-type
+      text: "Схема (Zod, Valibot, ArkType) проверяет данные на границе системы и выводит статический тип через `z.infer`, поэтому тип и проверка не расходятся: один источник истины"
+      weight: 3
+    - id: cast-is-not-validation
+      text: "`as User` или `JSON.parse(x) as Config` ничего не проверяет и просто верит данным на слово, фактически это тот же `any`"
+      weight: 2
+    - id: where-to-validate
+      text: "Валидировать нужно на границах: входящие данные сервера (тела запросов, параметры, Server Functions), ответы чужих API, формы, переменные окружения при старте"
+      weight: 2
+    - id: server-validation-mandatory
+      text: Проверка на сервере обязательна для защиты, потому что клиент может прислать что угодно; валидация только на клиенте ничего не защищает
+      weight: 2
+    - id: parse-vs-safeparse
+      text: "`parse` бросает `ZodError` с путём к полю, а `safeParse` возвращает результат без исключения и подходит для форм; ошибка контракта при этом всплывает понятно у границы, а не как `undefined is not a function` в глубине UI"
+      weight: 1
+  misconceptions:
+    - TypeScript проверяет типы данных в рантайме, поэтому ответ API, приведённый через `as User`, гарантированно соответствует типу
+    - Достаточно валидировать форму на клиенте, а сервер может доверять пришедшим данным
+    - "Аннотация `const data: User = await res.json()` проверяет структуру ответа"
+    - Схему валидации и TypeScript-тип нужно описывать и поддерживать отдельно вручную
 - question: typescript-advanced
   points:
     - id: generic-element-type
@@ -98,3 +173,28 @@
     - "`satisfies` работает так же, как аннотация типа `: Type`, и расширяет значение до объявленного типа"
     - Для проверки props в современном React стандартом остаются PropTypes или Flow, а не TypeScript в strict-режиме
     - Взаимоисключающие props можно выразить, просто сделав оба поля опциональными в одном объектном типе
+- question: typescript-at-scale
+  points:
+    - id: strict-flags-and-boundaries
+      text: Строгость обеспечивают `strict` плюс дополнительные флаги (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`), запрет `any` линтером и runtime-валидация внешних данных схемами на границах
+      weight: 3
+    - id: gradual-migration
+      text: "Миграцию делают постепенно: правила включают по папкам или файлам (`allowJs` + `checkJs`, переименование в `.ts` снизу вверх по графу зависимостей), а не одним коммитом"
+      weight: 3
+    - id: debt-metric-ci
+      text: "Долг отслеживают метрикой: счётчик `any` и `@ts-expect-error` в CI не должен расти; `@ts-expect-error` предпочтительнее `@ts-ignore`, потому что падает, когда ошибку исправили"
+      weight: 2
+    - id: project-references
+      text: "Скорость дают project references (`composite`) и инкрементальная сборка: `tsc -b` перепроверяет только изменившиеся части"
+      weight: 2
+    - id: typecheck-separate
+      text: Бандлеры (Vite, esbuild) только транслируют без проверки типов, поэтому типы проверяет отдельно `tsc --noEmit` в CI и редактор; для совместимости нужен `isolatedModules`
+      weight: 2
+    - id: slow-types-diagnostics
+      text: Тяжёлые типы (глубокие условные и рекурсивные, огромные объединения, вывод из больших объектов) замедляют проверку и IDE; их находят через `--extendedDiagnostics` и `--generateTrace`
+      weight: 1
+  misconceptions:
+    - Можно включить `strict` разом на большом проекте и быстро исправить ошибки через `as any` — это хуже исходного состояния
+    - Vite/esbuild при сборке проверяют типы, поэтому отдельный `tsc --noEmit` не нужен
+    - "`@ts-ignore` и `@ts-expect-error` равнозначны"
+    - Утверждение типа через `as` гарантирует соответствие реальным данным, поэтому валидация внешних данных не нужна

@@ -45,6 +45,31 @@
     - Vite в dev-режиме собирает весь проект в бандл, как webpack, просто оптимизированнее
     - Vite сам по себе даёт SSR, роутинг и загрузку данных так же, как фреймворк
     - Для любого React-приложения обязательно нужен SSR-фреймворк вроде Next.js
+- question: package-management
+  points:
+    - id: semver-ranges
+      text: "Версия по semver — `MAJOR.MINOR.PATCH`: `^1.4.2` допускает любую `1.x.x` не ниже `1.4.2`, а `~1.4.2` — только `1.4.x`"
+      weight: 3
+    - id: lockfile-pins-tree
+      text: Lock-файл (`package-lock.json`, `pnpm-lock.yaml`) фиксирует точные версии всего дерева зависимостей, включая транзитивные, и его коммитят в репозиторий приложения, чтобы у всех и в CI ставилось одно и то же
+      weight: 3
+    - id: deps-vs-devdeps
+      text: "`dependencies` нужны в рантайме, а `devDependencies` — только для разработки и сборки"
+      weight: 2
+    - id: install-vs-ci
+      text: "`npm install` может обновить lock-файл в пределах диапазонов, а `npm ci` ставит строго по lock-файлу и падает при расхождении, поэтому его используют в CI"
+      weight: 2
+    - id: peer-deps
+      text: "`peerDependencies` означают, что библиотека использует версию пакета (например, React), установленную приложением, чтобы не тащить свою копию; две копии React ломают хуки ошибкой «Invalid hook call»"
+      weight: 1
+    - id: semver-is-convention
+      text: "Semver — договорённость, а не гарантия: MINOR/PATCH иногда ломают API, защищают lock-файл и тесты; `overrides`/`resolutions` позволяют принудительно поменять версию транзитивной зависимости"
+      weight: 1
+  misconceptions:
+    - "`^1.4.2` и `~1.4.2` означают одно и то же или `^` разрешает переход на новую мажорную версию `2.x`"
+    - Lock-файл не нужно коммитить в приложении, достаточно диапазонов в `package.json`
+    - "`npm ci` обновляет зависимости до последних версий в пределах диапазонов и переписывает lock-файл"
+    - Удаление или ручная правка lock-файла — безопасный способ починить проблемы с установкой
 - question: forms
   points:
     - id: complexity-levels
@@ -120,6 +145,56 @@
     - Двойной вызов рендера или эффектов в разработке под StrictMode — это баг приложения, который нужно чинить
     - "`<Profiler onRender>` вообще не работает в production — на деле он работает в production-профилирующей сборке"
     - Owner stack в React 19 — это обычный стек вызовов JavaScript, а не цепочка компонентов, которые привели к ошибке
+- question: i18n
+  points:
+    - id: extract-to-dictionaries
+      text: Тексты выносят из компонентов в словари по ключам и подключают через библиотеку (`react-i18next`, FormatJS/`react-intl`, Lingui), в компоненте берут строку через `t`/хук
+      weight: 3
+    - id: icu-and-intl-formatting
+      text: Плюрализацию, числа, даты и валюты не собирают конкатенацией, а используют ICU-сообщения и встроенный `Intl` (`Intl.NumberFormat`, `Intl.DateTimeFormat`, `Intl.PluralRules`)
+      weight: 3
+    - id: interpolation-not-concat
+      text: Переменные подставляют интерполяцией внутри одного сообщения, потому что склейка `t('hello') + name` ломает языки с другим порядком слов
+      weight: 2
+    - id: locale-source-and-lazy-load
+      text: Язык определяют по URL (SEO, шаринг) или по cookie/профилю пользователя, а словари грузят лениво по языку и по namespaces
+      weight: 2
+    - id: ssr-hydration-locale
+      text: При SSR язык (и таймзона для дат) должны совпадать на сервере и клиенте, иначе будет ошибка гидрации
+      weight: 1
+    - id: rtl-and-process
+      text: 'Упоминает RTL (`dir="rtl"`, логические CSS-свойства вроде `margin-inline-start`) или процесс: извлечение ключей, проверка недостающих переводов в CI'
+      weight: 1
+  misconceptions:
+    - "В русском достаточно двух форм множественного числа: условие «1 или не 1» (на самом деле нужны `one`, `few`, `many`, иначе получится «5 товара»)"
+    - Числа, валюты и даты можно форматировать вручную конкатенацией строк, например `total + ' ₽'`, без `Intl`
+    - "Фразу можно собирать из нескольких переведённых кусков: порядок слов во всех языках одинаковый"
+    - Все словари всех языков нужно загружать в бандл сразу при старте приложения
+- question: bundling-tree-shaking
+  points:
+    - id: tree-shaking-esm-only
+      text: Tree-shaking удаляет неиспользуемые экспорты и работает только со статическими ES-модулями (`import`/`export`), а не с CommonJS
+      weight: 3
+    - id: code-splitting-on-demand
+      text: Code splitting делит бандл на чанки, которые загружаются по требованию через динамический `import()` (в React — `lazy` + `Suspense`), чаще всего по маршрутам
+      weight: 3
+    - id: side-effects-flag
+      text: "Для tree-shaking код не должен иметь побочных эффектов при импорте; флаг `sideEffects: false` в `package.json` разрешает выбрасывать неиспользуемые модули целиком, а CSS-импорты нужно оставлять в списке побочных эффектов"
+      weight: 2
+    - id: why-less-js
+      text: Цель — меньше JavaScript на старте, потому что его нужно не только скачать, но и распарсить и выполнить
+      weight: 2
+    - id: split-pitfalls
+      text: Слишком мелкое дробление создаёт водопад запросов между чанками; это смягчают через `modulepreload`/prefetch чанков следующего маршрута
+      weight: 1
+    - id: analyze-and-cache
+      text: Размер бандла анализируют инструментами вроде `rollup-plugin-visualizer`/`vite-bundle-analyzer` и проверяют бюджет в CI; вендорные чанки выносят отдельно для долгого кэширования
+      weight: 1
+  misconceptions:
+    - Tree-shaking одинаково работает с CommonJS-модулями (`require`/`module.exports`)
+    - "`import _ from 'lodash'` с последующим использованием одной функции попадёт в бандл только этой функцией"
+    - Чем мельче разбить бандл на чанки, тем всегда быстрее загрузка
+    - "`lazy` можно вызывать внутри компонента — это не влияет на состояние и поведение"
 - question: react-vs-others
   points:
     - id: react-rerender-model

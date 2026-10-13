@@ -560,3 +560,407 @@
     - label: Выводить исходный Markdown через `{comment.body}` без рендеринга
       why: Безопасно, но пользователь увидит сырые `**` и `[]()`. Подходит, когда форматирование не требуется.
   answer: 0
+
+# accessible-forms: принято из черновика 2026-10-13
+- id: accessible-forms-placeholder-label
+  skill: form-field-labels
+  question: accessible-forms
+  difficulty: 1
+  prompt: Дизайнер предлагает убрать подписи над полями и оставить только placeholder. Почему это плохая идея для доступности?
+  explanation: "У каждого поля должна быть видимая связанная подпись: `<label htmlFor={id}>` или поле внутри `<label>`. Placeholder — только подсказка о формате. Для стабильных id в переиспользуемых компонентах и при SSR берите `useId`."
+  type: quiz
+  options:
+    - label: Placeholder исчезает при вводе и часто плохо читается — это не подпись. Нужен связанный `<label>`
+      why: Верно. Начав ввод, пользователь забывает, что это за поле. Связанный label виден всегда, озвучивается скринридером и увеличивает зону клика.
+    - label: "Всё в порядке: скринридеры всегда читают placeholder как подпись поля"
+      why: "Поддержка неодинаковая, и это не решает главного: зрячий пользователь теряет подпись, как только начинает печатать."
+    - label: Достаточно добавить input-у aria-label с тем же текстом, что у placeholder
+      why: aria-label даёт имя только для скринридера. Визуально подпись всё равно исчезает при вводе, поэтому лучше видимый label.
+    - label: "Проблема только в контрасте: если сделать placeholder темнее, его можно оставить вместо label"
+      why: Контраст улучшит читаемость, но текст всё равно пропадёт при вводе и не станет надёжно связанной подписью.
+  answer: 0
+- id: accessible-forms-error-linking
+  skill: form-error-association
+  question: accessible-forms
+  difficulty: 1
+  prompt: Допишите поле так, чтобы подпись была связана с input, а скринридер озвучивал текст ошибки при фокусе на поле.
+  explanation: "`useId` даёт стабильный id, одинаковый на сервере и клиенте. `htmlFor` связывает label с полем. `aria-describedby` указывает на элемент с описанием: текст ошибки прочитается после имени поля, а `aria-invalid` сообщит, что значение неверно."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function EmailField({ error }: { error?: string }) {
+      const id = ___();
+      return (
+        <div>
+          <label ___={id}>Email</label>
+          <input
+            id={id}
+            aria-invalid={error ? true : undefined}
+            ___={error ? `${id}-err` : undefined}
+          />
+          {error && <p id={`${id}-err`}>{error}</p>}
+        </div>
+      );
+    }
+  tokens:
+    - useId
+    - htmlFor
+    - aria-describedby
+  decoys:
+    - useRef
+    - for
+    - aria-labelledby
+    - aria-label
+- id: accessible-forms-div-button
+  skill: form-keyboard-submit
+  question: accessible-forms
+  difficulty: 1
+  prompt: Пользователи, которые работают только с клавиатуры или со скринридером, жалуются, что не могут найти кнопку входа. Найдите строку с ошибкой.
+  explanation: 'У `div` нет фокуса по Tab, реакции на Enter и Space и роли кнопки. Нужен `<button type="submit">` внутри `<form>`: тогда отправка пойдёт через onSubmit — и по клику, и с клавиатуры. Правило: интерактивное — значит нативный элемент.'
+  type: find-bug
+  language: tsx
+  code: |-
+    function LoginForm({ onLogin }: Props) {
+      const [email, setEmail] = useState('');
+      return (
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          onLogin(email);
+        }}>
+          <label htmlFor="email">Email</label>
+          <input id="email" type="email" value={email}
+            onChange={(e) => setEmail(e.target.value)} />
+          <div onClick={() => onLogin(email)}>Войти</div>
+        </form>
+      );
+    }
+  bugLines:
+    - 11
+  causes:
+    - "«Кнопка» сделана из div с onClick: она не получает фокус по Tab, не реагирует на Enter и Space и не имеет роли button"
+    - e.preventDefault() в onSubmit блокирует навигацию по форме с клавиатуры
+    - htmlFor не работает с контролируемым input, поэтому скринридер не находит поле
+    - type="email" мешает скринридеру озвучить поле и кнопку после него
+  answer: 0
+- id: accessible-forms-failed-submit-recipe
+  skill: form-error-focus-flow
+  question: accessible-forms
+  difficulty: 2
+  prompt: Расставьте шаги доступной обработки неудачной отправки формы.
+  explanation: Отправка идёт через onSubmit формы, поэтому одинаково срабатывают клик и Enter. Ошибки показываются текстом рядом с полями и связываются с ними через aria-атрибуты. Фокус переводится на первое поле с ошибкой уже после рендера, когда его описание есть в DOM. Кнопку заранее не блокируем.
+  type: order
+  kind: recipe
+  steps:
+    - Пользователь жмёт Enter или `<button type="submit">` — срабатывает onSubmit формы
+    - Валидируем значения и собираем ошибки по полям
+    - Рендерим текст ошибки рядом с каждым полем и ставим aria-invalid и aria-describedby
+    - После рендера переводим фокус на первое поле с ошибкой
+    - Когда пользователь исправит значение, убираем текст ошибки и снимаем aria-invalid
+
+# csrf: принято из черновика 2026-10-13
+- id: csrf-why-it-works
+  skill: csrf-mechanism
+  question: csrf
+  difficulty: 2
+  prompt: У атакующего нет доступа к cookies жертвы. Почему CSRF-атака всё равно срабатывает?
+  explanation: "CSRF использует **автоматическую** отправку cookies браузером. Атакующему не нужно читать cookie или ответ, достаточно, чтобы запрос выполнился. Поэтому защищаются так, чтобы сервер мог отличить свой сайт от чужого: `SameSite`, проверка `Origin`/`Sec-Fetch-Site`, CSRF-токен."
+  type: quiz
+  options:
+    - label: Браузер сам прикрепляет cookies к запросу на сайт, и сервер не может отличить его от действия пользователя
+      why: Верно. Форма или ссылка на чужой странице ведёт на ваш домен, и браузер добавляет к запросу сессионную cookie. Для сервера это обычный запрос залогиненного пользователя.
+    - label: Чужой скрипт читает document.cookie и подставляет сессию в свой запрос
+      why: Это кража cookie через XSS, другая атака. Скрипт с чужого сайта не видит cookies вашего домена, а httpOnly-cookie не прочитать даже через XSS.
+    - label: Сервер неправильно настроил CORS и разрешил запросы с любого Origin
+      why: CORS управляет только чтением ответа. Простой кросс-сайтовый POST из формы уходит и выполняется при любых настройках CORS.
+    - label: Сайт работает без HTTPS, и атакующий перехватывает cookie в сети
+      why: "Это MITM-перехват. CSRF работает и по HTTPS: атакующему не нужно видеть трафик, браузер жертвы сам отправляет запрос."
+  answer: 0
+- id: csrf-get-mutation
+  skill: csrf-safe-methods
+  question: csrf
+  difficulty: 2
+  prompt: Route Handler удаляет пост залогиненного пользователя. Найдите строку, из-за которой его можно вызвать с чужого сайта.
+  explanation: "Изменение состояния через GET — классическая дыра. При `SameSite=Lax` cookie отправляется на top-level переходы с безопасными методами, поэтому ссылка или редирект с чужого сайта удалит пост. Правило: GET только читает, мутации — POST/DELETE с проверкой Origin или токеном."
+  type: find-bug
+  language: ts
+  code: |-
+    // app/api/posts/delete/route.ts
+    export async function GET(req: Request) {
+      const url = new URL(req.url);
+      const id = url.searchParams.get('id');
+      const user = await getSessionUser();
+      if (!user) {
+        return new Response(null, { status: 401 });
+      }
+      await db.post.delete({
+        where: { id, authorId: user.id },
+      });
+      return Response.redirect(new URL('/posts', url));
+    }
+  bugLines:
+    - 2
+  causes:
+    - "Мутация выполняется по GET: ссылка или редирект с чужого сайта отправит запрос вместе с cookie сессии"
+    - Сессию нужно проверять до разбора URL, иначе id утечёт неавторизованному пользователю
+    - Не выставлены CORS-заголовки, поэтому чужой сайт может прочитать ответ
+    - Response.redirect открывает уязвимость open redirect
+  answer: 0
+- id: csrf-fetch-site-middleware
+  skill: csrf-origin-check
+  question: csrf
+  difficulty: 2
+  prompt: "Допишите middleware: изменяющие запросы, пришедшие не с нашего origin, получают отказ."
+  explanation: "Безопасные методы пропускаем, остальные проверяем. `Sec-Fetch-Site` браузер ставит сам, и подделать его со страницы нельзя. Строже всего разрешать только `same-origin`: `same-site` пропустит соседние поддомены. 403 — «запрещено», а не «не залогинен». Если заголовка нет (старый браузер), стоит дополнительно проверить `Origin`."
+  type: fill-tokens
+  language: ts
+  code: |-
+    app.use(async (c, next) => {
+      const safe = ['GET', 'HEAD', 'OPTIONS'];
+      if (!safe.includes(c.req.___)) {
+        const site = c.req.header('sec-fetch-site');
+        if (site && site !== '___') {
+          return c.text('Forbidden', ___);
+        }
+      }
+      await next();
+    });
+  tokens:
+    - method
+    - same-origin
+    - "403"
+  decoys:
+    - cross-site
+    - "401"
+    - url
+    - none
+- id: csrf-legacy-forms-defense
+  skill: csrf-defense-choice
+  question: csrf
+  difficulty: 3
+  prompt: "Старое многостраничное приложение: сессия в cookie, HTML-формы. Корпоративный прокси клиента вырезает Origin и Referer, часть пользователей сидит на старых браузерах без SameSite. Чем закрыть CSRF?"
+  explanation: "Защита строится слоями, но каждый слой опирается на поддержку браузера или сети. Если заголовкам и SameSite доверять нельзя, остаётся CSRF-токен: секрет, привязанный к сессии, который чужая страница не может узнать. CORS и перенос токена в localStorage решают другие задачи."
+  type: choose-tool
+  options:
+    - label: Synchronizer CSRF-токен в скрытом поле формы, сверяемый с сессией
+      why: "Лучший вариант здесь. Токен не зависит от заголовков и поддержки SameSite: чужой сайт не знает его значения и не может подставить его в форму."
+    - label: Проверка Origin / Referer на сервере
+      why: "Хорошо работает в современных средах. Здесь прокси вырезает эти заголовки: строгая проверка отвергнет легитимных пользователей, а мягкая пропустит атаку."
+    - label: "Настроить CORS: разрешить только свой домен"
+      why: CORS ограничивает чтение ответа, а не отправку запроса. POST из формы на чужой странице выполнится всё равно.
+    - label: Перенести сессию в JWT в localStorage и слать его в Authorization
+      why: Такой вариант к CSRF не уязвим, но требует JS-клиента вместо обычных форм и открывает кражу токена через XSS. Это переписывание архитектуры, а не точечная защита.
+  answer: 0
+
+# focus-management: принято из черновика 2026-10-13
+- id: focus-management-spa-why
+  skill: spa-focus-management
+  question: focus-management
+  difficulty: 2
+  prompt: Почему в SPA фокусом приходится управлять вручную, а на классическом многостраничном сайте — нет?
+  explanation: При полной загрузке браузер сам сбрасывает фокус и скринридер читает новую страницу. В SPA этим занимается код. После перехода фокус ставят на заголовок с `tabIndex={-1}`. Модалка переносит фокус внутрь, удерживает его и при закрытии возвращает открывателю. Если сфокусированный элемент удаляют, фокус переводят на соседний.
+  type: quiz
+  options:
+    - label: "Документ не перезагружается: фокус остаётся на старом элементе или улетает в body, и переносить его должен код"
+      why: Верно. При полной загрузке браузер сбрасывает фокус в начало документа, и скринридер читает новую страницу. В SPA за это отвечает разработчик.
+    - label: Браузер сбрасывает фокус при каждом history.pushState, поэтому вручную нужно обрабатывать только модалки
+      why: pushState фокус не трогает. Поэтому после клиентского перехода фокус остаётся на нажатой ссылке, хотя страница уже другая.
+    - label: React перехватывает фокус при каждом ре-рендере, поэтому его нужно восстанавливать в эффектах
+      why: Элементы, которые React переиспользует при reconciliation, фокус сохраняют. Теряется он, только когда сфокусированный элемент удаляют или заменяют.
+    - label: "Проблема касается только мыши: клавиатура и скринридеры сами находят новый контент"
+      why: "Наоборот: страдают именно клавиатура и скринридер. Без переноса фокуса они не узнают о смене контента и остаются на старой позиции."
+  answer: 0
+- id: focus-management-heading-tabindex
+  skill: programmatic-focus-tabindex
+  question: focus-management
+  difficulty: 2
+  prompt: Компонент стоит вверху каждой страницы и монтируется заново при переходе. После навигации фокус должен перейти на заголовок, но он остаётся на ссылке. Найдите ошибку.
+  explanation: "`<h1>` не интерактивен, поэтому `focus()` на нём молча ничего не делает. С `tabIndex={-1}` элемент можно сфокусировать программно, и он не попадает в порядок Tab. `tabIndex={0}` добавил бы заголовок в Tab-цепочку, а положительные значения ломают естественный порядок обхода."
+  type: find-bug
+  language: tsx
+  code: |-
+    function PageTitle({ children }: Props) {
+      const ref = useRef<HTMLHeadingElement>(null);
+      useEffect(() => {
+        ref.current?.focus();
+      }, []);
+      return <h1 ref={ref}>{children}</h1>;
+    }
+  bugLines:
+    - 6
+  causes:
+    - "У h1 нет tabIndex={-1}: неинтерактивный элемент не фокусируется, и focus() молча ничего не делает"
+    - В useEffect ref ещё равен null — фокус нужно ставить в useLayoutEffect
+    - focus() можно вызывать только в обработчике пользовательского события, а не в эффекте
+    - "Пустой массив зависимостей: эффект должен срабатывать на каждом рендере"
+  answer: 0
+- id: focus-management-native-dialog
+  skill: native-dialog-modal
+  question: focus-management
+  difficulty: 2
+  prompt: Допишите модалку на нативном <dialog> так, чтобы браузер сам удерживал в ней фокус, закрывал её по Esc, делал фон недоступным и ставил фокус на безопасную кнопку.
+  explanation: "`showModal()` открывает модальный диалог. Браузер переносит в него фокус, удерживает его там, закрывает диалог по Esc, делает фон inert и при закрытии возвращает фокус открывателю. `show()` открывает немодальный диалог без этих гарантий. Атрибут `autoFocus` ставит начальный фокус на безопасное действие «Отмена»."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    useEffect(() => {
+      const dialog = ref.current!;
+      if (open && !dialog.open) dialog.___();
+      if (!open && dialog.open) dialog.___();
+    }, [open]);
+
+    return (
+      <dialog ref={ref} onClose={onClose}>
+        <h2>Удалить проект?</h2>
+        <button ___ onClick={onClose}>Отмена</button>
+      </dialog>
+    );
+  tokens:
+    - showModal
+    - close
+    - autoFocus
+  decoys:
+    - show
+    - hide
+    - tabIndex={1}
+- id: focus-management-save-announce
+  skill: aria-live-announcements
+  question: focus-management
+  difficulty: 2
+  prompt: После «Сохранить» форма остаётся на месте, а в углу появляется тост «Изменения сохранены». Скринридер должен озвучить сообщение, а пользователь — продолжить работу с формой. Что выбрать?
+  explanation: 'Переносить фокус стоит при смене контекста: модалка, новая страница. Сообщения о статусе объявляют через live-область, не трогая фокус. Для рядовых событий подходит `polite` (role="status"), для срочных ошибок — `assertive` (role="alert"). Контейнер должен быть в DOM до появления текста.'
+  type: choose-tool
+  options:
+    - label: Постоянный контейнер с role="status" (aria-live="polite"), куда вставляется текст
+      why: Скринридер озвучит текст, когда тот появится в уже существующей live-области, а фокус останется в форме. Контейнер должен быть в DOM заранее.
+    - label: Перенести фокус на тост через tabIndex={-1} и focus()
+      why: "Фокус уйдёт с формы, и пользователь потеряет своё место. Такой перенос уместен при смене контекста: открытии модалки или переходе на новую страницу."
+    - label: role="alert" на тосте
+      why: "Это assertive-область: она прерывает текущую речь скринридера. Подходит для срочных ошибок, а не для рядового сообщения об успехе."
+    - label: Атрибут inert на форме, пока виден тост
+      why: inert делает форму недоступной для фокуса и скринридера. Он нужен для фона под своим оверлеем или панелью, а не для уведомлений.
+  answer: 0
+
+# frontend-monitoring: принято из черновика 2026-10-13
+- id: frontend-monitoring-lab-vs-field
+  skill: frontend-rum-metrics
+  question: frontend-monitoring
+  difficulty: 2
+  prompt: Lighthouse в CI стабильно показывает LCP 1,5 с, а пользователи жалуются на медленную загрузку. Как понять, что происходит у них?
+  explanation: "Мониторинг отвечает на вопрос «как быстро у пользователей», а не «на ноутбуке разработчика». Lighthouse — лабораторные данные, RUM (`web-vitals`) — полевые. Смотрят перцентили: p75 — порог, по которому оценивает Google, а p95 показывает длинный хвост медленных устройств и сетей."
+  type: quiz
+  options:
+    - label: Собирать RUM через web-vitals (LCP, INP, CLS) и смотреть p75/p95 в разрезе маршрутов и типов устройств
+      why: Верно. Полевые метрики показывают реальные устройства, сети и взаимодействия, а перцентили не прячут медленный хвост.
+    - label: Собирать метрики пользователей и смотреть среднее LCP — оно отражает общую картину
+      why: "Среднее не показывает распределение: оно выглядит приемлемо, пока четверть пользователей ждёт в разы дольше. Нужны p75 и p95."
+    - label: Запускать Lighthouse чаще и на большем числе страниц, чтобы покрыть все сценарии
+      why: "Это всё ещё лабораторные данные: одна машина и эмулированная сеть. Реальные устройства и INP по живым взаимодействиям так не увидеть."
+    - label: "Опираться на алерты Sentry: если после релиза ошибок нет, с производительностью всё в порядке"
+      why: Ошибки и скорость — два разных вопроса мониторинга. Приложение может работать без единого исключения и при этом тормозить.
+  answer: 0
+- id: frontend-monitoring-root-error-hooks
+  skill: frontend-error-reporting
+  question: frontend-monitoring
+  difficulty: 2
+  prompt: Допишите код. Первый колбэк — для ошибок, которые не поймал ни один Error Boundary, второй — для пойманных Boundary. Последний обработчик ловит отклонённые промисы вне React.
+  explanation: "В React 19 `createRoot` принимает `onUncaughtError` и `onCaughtError`, так что в мониторинг попадают и ошибки, «спрятанные» за fallback-UI. Ошибки вне дерева React ловят глобально: у `unhandledrejection` причина лежит в `e.reason`."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const root = document.getElementById('root')!;
+    createRoot(root, {
+      ___: (error, info) =>
+        report(error, info.componentStack),
+      ___: (error, info) =>
+        report(error, info.componentStack, 'handled'),
+    }).render(<App />);
+
+    window.addEventListener('___', (e) =>
+      report(e.___),
+    );
+  tokens:
+    - onUncaughtError
+    - onCaughtError
+    - unhandledrejection
+    - reason
+  decoys:
+    - onRecoverableError
+    - onError
+    - error
+    - detail
+- id: frontend-monitoring-silent-boundary
+  skill: frontend-error-reporting
+  question: frontend-monitoring
+  difficulty: 1
+  prompt: Корневых колбэков onCaughtError нет. Виджет в проде иногда падает, пользователи видят Fallback, но команда об этом не знает. Где ошибка?
+  explanation: Error Boundary без отправки отчёта превращает падение в тихий fallback. `console.error` в браузере пользователя никто не прочитает. В `componentDidCatch` (или в `onCaughtError` на корне) ошибку отправляют в мониторинг вместе с `info.componentStack`, релизом и маршрутом.
+  type: find-bug
+  language: tsx
+  code: |-
+    class Boundary extends Component<Props, State> {
+      state: State = { failed: false };
+      static getDerivedStateFromError(): State {
+        return { failed: true };
+      }
+      componentDidCatch(error: Error) {
+        console.error(error);
+      }
+      render() {
+        if (this.state.failed) return <Fallback />;
+        return this.props.children;
+      }
+    }
+  bugLines:
+    - 7
+  causes:
+    - Ошибка пишется только в консоль браузера пользователя — в сервис мониторинга отчёт не уходит
+    - getDerivedStateFromError должен быть методом экземпляра, иначе Boundary не сработает
+    - Если есть getDerivedStateFromError, React не вызывает componentDidCatch
+    - Error Boundary должен показывать null, а не Fallback, иначе ошибка повторится
+  answer: 0
+- id: frontend-monitoring-sourcemaps-release
+  skill: frontend-sourcemaps-release
+  question: frontend-monitoring
+  difficulty: 2
+  prompt: Расставьте шаги CI/CD так, чтобы стектрейсы в Sentry были читаемыми, исходники не утекли публично, а регрессию релиза было видно сразу.
+  explanation: "Source maps нужны сервису мониторинга, а не пользователям: их генерируют без публичной ссылки, загружают с версией релиза и убирают из артефакта. SDK шлёт тот же release, поэтому стектрейсы разворачиваются, а алерты по новым ошибкам и росту частоты указывают на конкретный деплой."
+  type: order
+  kind: recipe
+  steps:
+    - Собрать бандл с hidden source maps (без ссылки sourceMappingURL в файлах)
+    - Загрузить .map в сервис мониторинга, привязав их к версии релиза
+    - Удалить .map из артефакта перед публикацией на CDN
+    - Задеплоить бандл, где SDK инициализирован с тем же release и environment
+    - Следить за алертами по новым ошибкам и росту частоты в этом релизе
+
+# security-advanced: принято из черновика 2026-10-13
+- id: security-advanced-trusted-types-policy
+  skill: trusted-types-react
+  question: security-advanced
+  difficulty: 3
+  prompt: "Допишите политику Trusted Types: HTML статьи из CMS должен проходить санитизацию и работать при CSP `require-trusted-types-for 'script'` в React 19.3."
+  explanation: Политика создаётся через `trustedTypes.createPolicy`, а её метод `createHTML` превращает очищенную строку в TrustedHTML. React 19.3 передаёт этот объект в innerHTML как есть. Если в CSP указан список `trusted-types`, имя политики (`sanitize`) должно в нём быть.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    import DOMPurify from 'dompurify';
+
+    const policy = trustedTypes.___('sanitize', {
+      ___: (input) => DOMPurify.___(input),
+    });
+
+    function Article({ html }: { html: string }) {
+      const safe = policy.createHTML(html);
+      return (
+        <div dangerouslySetInnerHTML={{ __html: safe }} />
+      );
+    }
+  tokens:
+    - createPolicy
+    - createHTML
+    - sanitize
+  decoys:
+    - createScript
+    - registerPolicy
+    - escape
+    - toString

@@ -449,3 +449,432 @@
     - label: Увеличить таймаут перед abort() до 30 секунд
       why: Таймаут лишь ограничивает, сколько ждать отложенные части. Бот всё равно получит HTML по частям с fallback-ами. Таймаут нужен как страховка, а не для SEO.
   answer: 0
+
+# app-router-conventions: принято из черновика 2026-10-13
+- id: app-router-layout-persistence
+  skill: app-router-layout-vs-template
+  question: app-router-conventions
+  difficulty: 2
+  prompt: В `app/dashboard/layout.tsx` есть сайдбар — клиентский компонент с `useState`. Пользователь раскрыл в нём секцию и через `<Link>` перешёл с `/dashboard` на `/dashboard/42`. Что произойдёт?
+  explanation: Layout — общая обёртка сегмента. При навигации между дочерними маршрутами он не перемонтируется, а меняется только `page`. Если обёртка должна создаваться заново при каждом переходе (сброс состояния, анимация входа, повтор эффектов), нужен `template.tsx`.
+  type: quiz
+  options:
+    - label: "Layout не перемонтируется: состояние сайдбара сохранится, заменится только содержимое page"
+      why: Верно. Layout сохраняется при навигации между дочерними страницами, React не размонтирует его поддерево.
+    - label: Layout перемонтируется при каждом переходе, и раскрытая секция свернётся
+      why: Так ведёт себя `template.tsx`. Layout для этого и нужен, чтобы не перемонтироваться.
+    - label: Состояние сохранится, только если обернуть сайдбар в `memo`
+      why: "`memo` пропускает лишние ререндеры, но на монтирование не влияет. Состояние сохраняется потому, что layout остаётся смонтированным."
+    - label: Страница перезагрузится целиком, потому что `[projectId]` — динамический сегмент
+      why: "`<Link>` выполняет клиентскую навигацию для любых сегментов, в том числе динамических. Полной перезагрузки нет."
+  answer: 0
+- id: app-router-async-params
+  skill: app-router-dynamic-params
+  question: app-router-conventions
+  difficulty: 2
+  prompt: Допишите страницу `app/dashboard/[projectId]/page.tsx` для Next.js 15+, чтобы для несуществующего проекта показывалась 404.
+  explanation: "С Next.js 15 `params` и `searchParams` — промисы, поэтому их тип `Promise<...>` и их нужно `await`. `notFound()` бросает специальную ошибку: дальше код не выполняется, и рендерится ближайший `not-found.tsx`. Данные запрашиваются прямо в Server Component, без useEffect."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    export default async function ProjectPage({
+      params,
+    }: {
+      params: ___<{ projectId: string }>;
+    }) {
+      const { projectId } = ___ params;
+      const project = await getProject(projectId);
+      if (!project) ___();
+      return <ProjectView project={project} />;
+    }
+  tokens:
+    - Promise
+    - await
+    - notFound
+  decoys:
+    - Readonly
+    - redirect
+    - use
+    - async
+- id: app-router-route-handler-export
+  skill: app-router-route-handlers
+  question: app-router-conventions
+  difficulty: 1
+  prompt: Файл `app/api/health/route.ts` перенесли из Pages Router. Запрос `GET /api/health` не находит обработчик. Где ошибка?
+  explanation: "В `route.ts` обработчики экспортируются именованными функциями по HTTP-методам: `export async function GET()`, `POST` и т.д. Default export, как в `pages/api`, здесь не работает. На неподдержанные методы Next сам ответит 405, ручная проверка `req.method` не нужна."
+  type: find-bug
+  language: ts
+  code: |-
+    // app/api/health/route.ts
+    export default async function handler(
+      req: Request,
+    ) {
+      if (req.method !== 'GET') {
+        return new Response(null, { status: 405 });
+      }
+      return Response.json({ ok: true });
+    }
+  bugLines:
+    - 2
+  causes:
+    - Route Handler должен экспортировать именованную функцию по методу (`GET`), а не default export, как в Pages Router
+    - "`Response.json` недоступен в Route Handlers, нужен `NextResponse.json`"
+    - Файл должен называться `page.ts`, иначе маршрут не создаётся
+    - Обработчик не может быть async, он должен синхронно вернуть Response
+  answer: 0
+- id: app-router-modal-with-url
+  skill: app-router-parallel-intercepting
+  question: app-router-conventions
+  difficulty: 3
+  prompt: "Лента фото: по клику фото открывается в модалке поверх ленты, а URL становится `/photo/42`. По этой ссылке или после обновления страницы должна открываться полноценная страница фото. Что выбрать?"
+  explanation: "Модалка с собственным URL строится так: параллельный слот `@modal` рендерит модалку рядом с лентой, а перехватывающий маршрут `(.)photo/[id]` подменяет переход при клиентской навигации. При прямом заходе перехвата нет, и срабатывает обычный `photo/[id]/page.tsx`."
+  type: choose-tool
+  options:
+    - label: Параллельный слот `@modal` + перехватывающий маршрут `(.)photo/[id]` и обычный `photo/[id]/page.tsx`
+      why: Лучший вариант. При клиентском переходе показывается модалка поверх ленты, при прямом заходе — полная страница. URL один и тот же, работает «назад».
+    - label: "`useState` в ленте и модалка-компонент"
+      why: Подходит для модалок без адреса (подтверждение, фильтры). Здесь не будет URL, ссылкой не поделиться, после обновления модалка пропадёт.
+    - label: Только отдельная страница `photo/[id]/page.tsx`
+      why: Подходит, если модалка не нужна. Переход уводит с ленты, и прокрутка и контекст ленты теряются.
+    - label: Query-параметр `?photo=42` и `useSearchParams`
+      why: Простой способ дать модалке URL, если отдельная страница не нужна. Адрес будет `/feed?photo=42`, и при прямом заходе откроется лента с модалкой, а не страница фото.
+  answer: 0
+
+# cache-components: принято из черновика 2026-10-13
+- id: cache-components-model-quiz
+  skill: cache-components-model
+  question: cache-components
+  difficulty: 2
+  prompt: "Какая формулировка точнее всего описывает модель Cache Components в Next.js (флаг `cacheComponents: true`)?"
+  explanation: "Cache Components переворачивают старую модель: по умолчанию всё динамично, кэшируется только помеченное `'use cache'`. Кэшируемое пререндерится в статическую оболочку, а динамика внутри `<Suspense>` стримится при запросе (PPR). Кэш виден в коде."
+  type: quiz
+  options:
+    - label: Всё динамично по умолчанию, кэшируется только помеченное 'use cache'; оно идёт в статическую оболочку, а динамика в Suspense стримится
+      why: "Верно. Явное кэширование плюс Partial Prerendering: одна страница сочетает пререндеренную оболочку и динамические части."
+    - label: Next.js автоматически кэширует все fetch, а директива 'use cache' нужна, чтобы точечно управлять или отключать этот кэш
+      why: "Это смесь со старой моделью App Router. В Cache Components неявного кэширования fetch нет: без 'use cache' данные запрашиваются при каждом запросе."
+    - label: "'use cache' сохраняет результат в браузере, как useMemo, чтобы не повторять запрос при клиентской навигации"
+      why: "Это серверный кэш: результат переиспользуется между запросами разных пользователей. Поэтому персональные данные туда класть нельзя."
+    - label: "'use cache' делает всю страницу статической, как ISR, а без него страница целиком рендерится при каждом запросе"
+      why: Граница проходит не по странице, а по компонентам и функциям. Статическая оболочка и динамические части в Suspense живут на одной странице.
+  answer: 0
+- id: cache-components-cookies-in-cache
+  skill: use-cache-dynamic-apis
+  question: cache-components
+  difficulty: 2
+  prompt: Функция должна кэшировать рекомендации на час. Найдите строку, из-за которой это не работает.
+  explanation: "Внутри области `'use cache'` нельзя вызывать `cookies()` и `headers()`: это данные конкретного запроса, а кэш общий, и Next.js выдаст ошибку. Прочитайте cookie снаружи (в компоненте внутри Suspense) и передайте `userId` аргументом: он станет частью ключа кэша."
+  type: find-bug
+  language: tsx
+  code: |-
+    import { cookies } from 'next/headers';
+    import { cacheLife } from 'next/cache';
+
+    async function getRecommendations() {
+      'use cache';
+      cacheLife('hours');
+      const store = await cookies();
+      const userId = store.get('uid')?.value;
+      return db.recs.findMany({ where: { userId } });
+    }
+  bugLines:
+    - 7
+  causes:
+    - "cookies() вызывается внутри 'use cache': данные запроса нельзя класть в общий кэш. userId нужно читать снаружи и передавать аргументом"
+    - cacheLife нужно вызвать до директивы 'use cache', иначе время жизни не применится
+    - Функция с 'use cache' должна быть синхронной, await внутри запрещён
+    - "Без cacheTag директива 'use cache' не работает: кэшу нужен хотя бы один тег"
+  answer: 0
+- id: cache-components-cache-and-update
+  skill: use-cache-api
+  question: cache-components
+  difficulty: 2
+  prompt: "Допишите код: товары кэшируются на часы с тегом категории, а после сохранения цены админ сразу видит новые данные."
+  explanation: Директива `'use cache'` стоит первой строкой функции. `cacheLife` задаёт время жизни, `cacheTag` вешает тег для инвалидации. В Server Function `updateTag` сбрасывает тег немедленно (read-your-writes). `revalidatePath` работает по маршрутам, а не по тегам.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    async function getProducts(category: string) {
+      '___';
+      ___('hours');
+      ___(`products:${category}`);
+      return db.products.find({ category });
+    }
+
+    async function savePrice(formData: FormData) {
+      'use server';
+      await db.products.update(formData);
+      ___('products:keyboards');
+    }
+  tokens:
+    - use cache
+    - cacheLife
+    - cacheTag
+    - updateTag
+  decoys:
+    - use server
+    - revalidatePath
+    - unstable_cache
+    - cacheKey
+- id: cache-components-invalidation-choice
+  skill: cache-invalidation-choice
+  question: cache-components
+  difficulty: 3
+  prompt: Каталог кэшируется через 'use cache' с тегом `products:${category}`. Админ меняет цену в форме (Server Action) и после сабмита должен сразу увидеть новую цену. Что вызвать?
+  explanation: "Правило: «изменил и сразу вижу» в Server Function — `updateTag`. Фоновые обновления, например вебхук из CMS, — `revalidateTag(tag, profile)` со stale-while-revalidate. Тег делайте узким: общий `products` после каждой правки сбросит весь каталог."
+  type: choose-tool
+  options:
+    - label: updateTag('products:keyboards') в Server Action
+      why: Инвалидирует тег немедленно, и следующий рендер читает свежие данные. Тег узкий, поэтому сбрасывается только одна категория.
+    - label: revalidateTag('products:keyboards', 'max')
+      why: "Это stale-while-revalidate: первый запрос может получить старую цену. Подходит для фоновых обновлений, например вебхука из CMS."
+    - label: cacheLife('seconds') вместо 'hours'
+      why: Короткий TTL нагружает базу и всё равно не гарантирует свежесть сразу после сабмита. Уместен для данных, где небольшое устаревание допустимо.
+    - label: Убрать 'use cache' с getProducts
+      why: Свежесть будет, но ценой похода в базу на каждый запрос, и каталог выпадет из статической оболочки. Оправдано для персональных или realtime-данных.
+  answer: 0
+
+# hydration-mismatch: принято из черновика 2026-10-13
+- id: hydration-mismatch-client-only-widget
+  skill: client-only-rendering-choice
+  question: hydration-mismatch
+  difficulty: 3
+  prompt: Next.js App Router. Нужна интерактивная карта на Leaflet, а библиотека обращается к window прямо при импорте модуля. SEO для карты не важно. Как её подключить?
+  explanation: "Если библиотека трогает window уже при импорте, условный рендер не поможет: модуль всё равно выполнится на сервере. Даже use(browser()) из React 19.3 — штатная замена useIsClient для клиентских частей UI — откладывает только рендер, но не import. Нужно, чтобы модуль вообще не загружался при SSR. Это делает dynamic с ssr: false в клиентском компоненте ('use client')."
+  type: choose-tool
+  options:
+    - label: "`dynamic(() => import('./Map'), { ssr: false })` в клиентском компоненте"
+      why: "Модуль карты не импортируется на сервере: сервер отдаёт loading-заглушку, карта грузится и рендерится только в браузере, расхождения нет."
+    - label: "`use(browser())` в компоненте карты внутри Suspense (React 19.3)"
+      why: Штатно отдаёт fallback на сервере вместо рендера, но статический import Leaflet всё равно выполнится при SSR и упадёт на window.
+    - label: Хук useIsClient (useSyncExternalStore) и рендер `<Map />` только после гидрации
+      why: Корректно для значений, доступных лишь в браузере. Но статический import Leaflet выполнится на сервере и упадёт на window.
+    - label: "`{typeof window !== 'undefined' && <Map />}` в разметке"
+      why: "Даёт mismatch: сервер рендерит пустоту, а клиент при гидрации рендерит карту. Проблему импорта на сервере это тоже не решает."
+    - label: "`suppressHydrationWarning` на контейнере карты"
+      why: Работает только для текста и атрибутов на один уровень. Подходит для таймстемпа, но не для целого виджета, который падает на сервере.
+  answer: 0
+
+# nextjs-proxy: принято из черновика 2026-10-13
+- id: nextjs-proxy-purpose-quiz
+  skill: nextjs-proxy-responsibility
+  question: nextjs-proxy
+  difficulty: 2
+  prompt: Что уместно делать в `proxy.ts` (бывший `middleware.ts`) в Next.js?
+  explanation: "Proxy выполняется до маршрутизации на каждый подходящий запрос и видит только сам запрос. Его задача — быстрые решения: redirect, rewrite, заголовки, cookies. Проверка в нём оптимистичная. Подпись сессии и права проверяют там, где читаются данные: в Server Components, Server Functions и Route Handlers."
+  type: quiz
+  options:
+    - label: "Быстро решать по самому запросу: редирект без cookie, язык, A/B-rewrite, заголовки. Права проверять там, где читаются данные"
+      why: "Верно. Proxy — сетевая граница перед приложением: дешёвые решения по запросу, а настоящая авторизация остаётся рядом с данными."
+    - label: "Всю авторизацию: если proxy закрыл путь /dashboard, страницы и Server Functions можно не защищать"
+      why: Server Function вызывается POST-запросом напрямую, минуя страницу и её путь. Защита только в proxy оставляет дыру.
+    - label: "Загружать пользователя из базы и передавать его страницам: proxy выполняется раньше всех и экономит запросы"
+      why: Запрос к базе в proxy выполняется на каждый запрос, включая статические страницы, и тормозит всё приложение.
+    - label: "Только переписывать URL: ставить cookies и заголовки или сразу вернуть ответ proxy не может"
+      why: Может. Proxy умеет redirect, rewrite, ставить заголовки и cookies, а также сразу вернуть свой Response.
+  answer: 0
+- id: nextjs-proxy-redirect-loop
+  skill: nextjs-proxy-redirects
+  question: nextjs-proxy
+  difficulty: 2
+  prompt: Пользователь без cookie сессии открывает /dashboard, и браузер показывает ошибку «слишком много перенаправлений». Где ошибка?
+  explanation: "Matcher пропускает в proxy и /login. Там cookie по-прежнему нет, поэтому снова срабатывает редирект на /login, и так по кругу. Правило: условие редиректа должно исключать саму целевую страницу. Либо проверяйте только защищённые пути (`startsWith('/dashboard')`), либо исключите /login в matcher."
+  type: find-bug
+  language: ts
+  code: |-
+    export function proxy(request: NextRequest) {
+      const session = request.cookies.get('session');
+      if (!session) {
+        const login = new URL('/login', request.url);
+        return NextResponse.redirect(login);
+      }
+      return NextResponse.next();
+    }
+
+    export const config = {
+      matcher: ['/((?!_next/static|_next/image).*)'],
+    };
+  bugLines:
+    - 3
+    - 11
+  causes:
+    - Запрос к /login тоже проходит через proxy и без cookie снова уходит на /login — бесконечный цикл редиректов
+    - В proxy нельзя читать cookies, доступны только заголовки запроса
+    - NextResponse.redirect принимает только строку, объект URL передавать нельзя
+    - matcher не поддерживает регулярные выражения, пути нужно перечислять явно
+  answer: 0
+- id: nextjs-proxy-subdomain-rewrite
+  skill: nextjs-proxy-rewrite
+  question: nextjs-proxy
+  difficulty: 2
+  prompt: "Допишите proxy для мультитенантности: acme.example.com/about должен отдавать страницу /acme/about, а URL в браузере не должен меняться."
+  explanation: "`rewrite` отдаёт содержимое другого пути и не меняет адрес, а `redirect` сменил бы URL в браузере. Поддомен берём из заголовка `host`. `nextUrl` — разобранный URL, и его клонируют, чтобы не мутировать исходный запрос. Через `config.matcher` из обработки исключают служебные пути."
+  type: fill-tokens
+  language: ts
+  code: |-
+    export function proxy(request: NextRequest) {
+      const host = request.headers.get('___') ?? '';
+      const tenant = host.split('.')[0];
+      const url = request.___.clone();
+      url.pathname = `/${tenant}${url.pathname}`;
+      return NextResponse.___(url);
+    }
+
+    export const ___ = {
+      matcher: ['/((?!_next|favicon.ico).*)'],
+    };
+  tokens:
+    - host
+    - nextUrl
+    - rewrite
+    - config
+  decoys:
+    - redirect
+    - url
+    - next
+    - matcher
+- id: nextjs-proxy-ownership-check
+  skill: nextjs-auth-placement
+  question: nextjs-proxy
+  difficulty: 2
+  prompt: Server Function `deleteProject(id)` должна удалять проект, только если текущий пользователь — его владелец. Где выполнить эту проверку?
+  explanation: "Правило: proxy и layout дают оптимистичный, удобный для UX барьер, но права проверяются там, где читаются или меняются данные. Server Function — публичная точка входа, её можно вызвать напрямую. Поэтому сессию и владение проверяют внутри неё, удобнее всего через общий слой доступа к данным (DAL)."
+  type: choose-tool
+  options:
+    - label: "Внутри Server Function: проверить сессию и владельца через слой доступа к данным"
+      why: "Лучший вариант: проверка стоит рядом с мутацией и срабатывает при любом способе вызова, в том числе при прямом POST в обход страницы."
+    - label: "В proxy: нет cookie на /projects — редирект на /login"
+      why: Полезно для UX, но proxy видит только наличие cookie и путь. Подпись сессии и владение проектом он не проверяет, а Server Function вызывается в обход пути.
+    - label: "В layout.tsx раздела /projects: проверить пользователя перед рендером"
+      why: Подходит, чтобы не показывать страницу чужим. Но Server Function выполняется независимо от проверки в layout, и она не стоит на пути мутации.
+    - label: "На клиенте: не показывать кнопку удаления, если пользователь не владелец"
+      why: "Улучшает интерфейс, но не защищает: запрос можно отправить вручную. Это дополнение к серверной проверке, а не её замена."
+  answer: 0
+
+# server-components: принято из черновика 2026-10-13
+- id: server-components-context-from-server
+  skill: rsc-context
+  question: server-components
+  difficulty: 2
+  prompt: Тема пользователя читается на сервере. Допишите код так, чтобы Server Component сам предоставлял контекст, без отдельной клиентской обёртки-Provider (React 19.3+).
+  explanation: "`createContext` недоступен в серверном окружении, поэтому контекст создают в `'use client'`-модуле. С React 19.3 его можно рендерить прямо в Server Component как `<ThemeContext value>`. Значение должно сериализоваться: здесь это строка. Читают контекст клиентские компоненты через `use` или `useContext`."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    // theme-context.ts
+    '___';
+    import * as React from 'react';
+    export const ThemeContext = React.___('light');
+    // app/layout.tsx — Server Component
+    import { ThemeContext } from './theme-context';
+    export default async function Layout({ children }: Props) {
+      const theme = await getUserTheme();
+      return (
+        <ThemeContext ___={theme}>
+          {children}
+        </ThemeContext>
+      );
+    }
+  tokens:
+    - use client
+    - createContext
+    - value
+  decoys:
+    - use server
+    - createServerContext
+    - useContext
+    - initialValue
+- id: server-components-context-nonserializable
+  skill: rsc-context
+  question: server-components
+  difficulty: 3
+  prompt: "`ThemeContext` создан в модуле с `'use client'`, проект на React 19.3. Найдите строку, из-за которой layout упадёт при рендере."
+  explanation: Контекст можно предоставлять прямо из Server Component, но его значение пересекает границу server/client и должно сериализоваться. Обычную функцию сериализовать нельзя. Передавайте данные (`theme`), а производные вычисляйте в клиентском хуке. Для мутаций подойдёт Server Function или клиентская обёртка со state.
+  type: find-bug
+  language: tsx
+  code: |-
+    // app/layout.tsx — Server Component
+    import { ThemeContext } from './theme-context';
+
+    export default async function Layout({ children }: Props) {
+      const theme = await getUserTheme();
+      return (
+        <ThemeContext
+          value={{ theme, isDark: () => theme === 'dark' }}
+        >
+          {children}
+        </ThemeContext>
+      );
+    }
+  bugLines:
+    - 8
+  causes:
+    - В value лежит обычная функция, а значение контекста из Server Component должно сериализоваться
+    - Контекст нельзя рендерить в Server Component, нужен отдельный клиентский Provider-компонент
+    - "Async-компонент не может рендерить контекст: сначала нужно дождаться данных в клиенте"
+    - Без `.Provider` значение не дойдёт до потребителей, нужно писать `<ThemeContext.Provider>`
+  answer: 0
+
+# server-runtimes: принято из черновика 2026-10-13
+- id: server-runtimes-edge-far-db
+  skill: edge-vs-db-latency
+  question: server-runtimes
+  difficulty: 3
+  prompt: SSR каталога перенесли с serverless во Франкфурте на edge-функции. Postgres остался во Франкфурте. Пользователи из Азии говорят, что страница стала грузиться медленнее. В чём главная причина?
+  explanation: "Edge выигрывает только на первом участке — до пользователя. Если рендер ходит в базу в одном регионе, каждый запрос пересекает континенты, а цепочка запросов умножает задержку. Правило: edge — для лёгких решений без базы, а SSR с данными размещают рядом с базой."
+  type: quiz
+  options:
+    - label: Каждый запрос к базе из точки рядом с пользователем идёт через полмира, а цепочка из нескольких запросов умножает эту задержку
+      why: Верно. Один round-trip Азия–Франкфурт стоит 150–250 мс. При 4 последовательных запросах это уже около секунды, а раньше было несколько мс внутри региона.
+    - label: У edge-функций долгий холодный старт, его и замечают пользователи
+      why: "Наоборот: edge стартует за единицы мс. Долгий холодный старт — проблема serverless-функций, а не edge."
+    - label: Edge-рантайм выполняет JavaScript заметно медленнее, чем Node
+      why: Изоляты V8 исполняют JS не медленнее Node. Урезан набор API, а не скорость. Сам рендер почти не изменился, выросла сетевая задержка.
+    - label: Edge-функции не умеют кешировать ответы, поэтому каждый рендер идёт с нуля
+      why: Кеширование на CDN и в edge есть. К тому же и без кэша рендер был бы быстрым, если бы данные лежали рядом.
+  answer: 0
+- id: server-runtimes-spiky-ssr
+  skill: runtime-choice
+  question: server-runtimes
+  difficulty: 2
+  prompt: SSR-страницы и API интернет-магазина, Postgres в одном регионе. Ночью трафика почти нет, в распродажи он вырастает в 50 раз. WebSocket и долгих задач нет. Где запускать?
+  explanation: "Неравномерная нагрузка, типичный SSR и API, база в одном регионе — это serverless в регионе базы. Пулер обязателен: каждый экземпляр функции открывает свои соединения. Edge оправдан без базы, долгоживущий сервер — для real-time и стабильной высокой нагрузки."
+  type: choose-tool
+  options:
+    - label: Serverless в регионе базы + пулер соединений (PgBouncer, Data API)
+      why: Автомасштабирование под пики, почти ноль затрат в простое, база рядом. Пулер не даст сотням экземпляров исчерпать лимит соединений Postgres.
+    - label: Serverless-функции с прямым подключением к Postgres
+      why: Подход тот же, но на распродаже тысячи экземпляров откроют свои соединения и упрутся в max_connections. Годится только при малом трафике.
+    - label: Edge-функции во всех точках CDN
+      why: Хороши для редиректов, A/B и проверки токена без базы. Здесь каждый рендер ходит в базу в одном регионе, и выигрыш от близости к пользователю теряется.
+    - label: Долгоживущий Node-кластер с автоскейлером
+      why: Подошёл бы при стабильной высокой нагрузке, WebSocket или фоновых задачах. Здесь придётся держать запас мощности под пики и обслуживать кластер самому.
+  answer: 0
+- id: server-runtimes-memory-rate-limit
+  skill: serverless-stateless
+  question: server-runtimes
+  difficulty: 2
+  prompt: Route handler развёрнут как serverless-функция. Лимит в 10 запросов с IP на нагрузке почти не срабатывает, а иногда внезапно обнуляется. Окно сброса опущено для краткости. Где ошибка?
+  explanation: Состояние в памяти модуля живёт только внутри одного экземпляра функции. Параллельные экземпляры считают каждый своё, а при холодном старте или масштабировании счётчик пропадает. Общее состояние между запросами (лимиты, сессии, кэш) выносят во внешнее хранилище, например Redis или Upstash.
+  type: find-bug
+  language: ts
+  code: |-
+    const hits = new Map<string, number>();
+
+    export async function POST(req: Request) {
+      const ip = req.headers.get('x-real-ip') ?? '';
+      const count = (hits.get(ip) ?? 0) + 1;
+      hits.set(ip, count);
+      if (count > 10) {
+        return new Response('Too many', { status: 429 });
+      }
+      return Response.json(await createOrder(req));
+    }
+  bugLines:
+    - 1
+  causes:
+    - "Счётчик хранится в памяти экземпляра: параллельные экземпляры не видят друг друга, а при новом старте он пропадает"
+    - В serverless-функции нельзя читать заголовки IP, поэтому ip всегда пустой
+    - Map нельзя объявлять на уровне модуля — функция упадёт при импорте
+    - hits.set нужно вызывать с await, иначе запись не успевает сохраниться
+  answer: 0

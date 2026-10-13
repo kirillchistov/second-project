@@ -23,6 +23,56 @@
     - Считать, что `ReactDOM.render` и `defaultProps` у функциональных компонентов в React 19 продолжают работать, а не удалены
     - Считать, что хук `use` подчиняется тем же правилам, что обычные хуки, и его нельзя вызывать в условиях
     - Утверждать, что значение, возвращаемое из ref-колбэка, игнорируется, как в React 18
+- question: view-transition
+  points:
+    - id: browser-api-wrapper
+      text: "`<ViewTransition>` оборачивает элементы и анимирует их появление, исчезновение и изменение через браузерный View Transition API"
+      weight: 3
+    - id: only-transition-updates
+      text: Анимация запускается только для обновлений-переходов (`startTransition`, раскрытие `<Suspense>`, `useDeferredValue`); обычный срочный `setState`, например ввод в поле, не анимируется
+      weight: 3
+    - id: four-animation-types
+      text: "Есть четыре типа анимации: `enter` (появился в дереве), `exit` (удалён), `update` (изменились стили или содержимое детей) и `share` (элемент с одинаковым `name` исчез в одном месте и появился в другом, например «карточка → детальная страница»)"
+      weight: 2
+    - id: css-class-props
+      text: По умолчанию это cross-fade; анимацию настраивают пропсами `enter`/`exit`/`update`/`share`, значение которых — имя CSS-класса для псевдоэлементов `::view-transition-old/new(.class)`
+      weight: 2
+    - id: add-transition-type
+      text: "`addTransitionType` внутри `startTransition` задаёт причину перехода, чтобы одно и то же изменение анимировалось по-разному (например, `next`/`previous`); тип доступен и в CSS через `:active-view-transition-type()`"
+      weight: 1
+    - id: callbacks-and-caveats
+      text: "Упоминает колбэки `onEnter`/`onExit`/`onUpdate`/`onShare` для анимаций через Web Animations API или подводные камни: работает пока только в DOM, а для `prefers-reduced-motion` анимации нужно отключать"
+      weight: 1
+  misconceptions:
+    - Любое обновление состояния внутри `<ViewTransition>`, включая обычный `setState` в обработчике, анимируется автоматически
+    - "`<ViewTransition>` сам рассчитывает анимации на JS (через `requestAnimationFrame`), не используя браузерный View Transition API"
+    - Shared element переход (`share`) срабатывает без совпадающего `name` у двух `<ViewTransition>`
+    - "`<ViewTransition>` уже полноценно работает в React Native и других рендерерах так же, как в DOM"
+- question: fragment-refs
+  points:
+    - id: fragment-instance
+      text: "`<Fragment>` принимает `ref` и отдаёт не DOM-узел, а объект `FragmentInstance`, который работает со всеми DOM-детьми фрагмента как с группой."
+      weight: 3
+    - id: replaces-wrapper-div
+      text: Fragment ref заменяет лишний обёрточный `<div>`, который ломал раскладку (flex, grid, строки таблицы, пункты `<li>`) и семантику разметки.
+      weight: 3
+    - id: events-and-observers
+      text: Через `FragmentInstance` можно навесить обработчики (`addEventListener`/`removeEventListener`/`dispatchEvent`) и подключить `IntersectionObserver` или `ResizeObserver` ко всем детям через `observeUsing`/`unobserveUsing`.
+      weight: 2
+    - id: first-level-vs-focus
+      text: Методы событий, наблюдателей и измерений действуют на детей первого уровня, а `focus()`/`focusLast()` ищут первый или последний фокусируемый элемент в глубину.
+      weight: 2
+    - id: use-cases
+      text: Полезно, когда у компонента нет одного корневого DOM-элемента или когда дети — чужие компоненты, которые не принимают `ref`.
+      weight: 2
+    - id: dom-only-effects
+      text: "Это DOM-возможность: на сервере и в React Native методов нет, поэтому их вызывают в эффектах и снимают в cleanup (например, `unobserveUsing`)."
+      weight: 1
+  misconceptions:
+    - Fragment ref указывает на первый DOM-элемент или массив DOM-узлов фрагмента — на самом деле это отдельный объект `FragmentInstance`.
+    - "`addEventListener` на фрагменте напрямую навешивает обработчик на все вложенные элементы любой глубины — он работает с детьми первого уровня."
+    - Fragment с `ref` создаёт в DOM реальный узел-обёртку.
+    - Методы `FragmentInstance` можно безопасно вызывать во время рендера или на сервере.
 - question: use-transition
   points:
     - id: non-urgent-interruptible

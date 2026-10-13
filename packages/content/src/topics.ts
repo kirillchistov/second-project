@@ -31,6 +31,7 @@ export const TOPICS: Topic[] = [
   { id: 'architecture', title: 'Архитектура', description: 'Паттерны, структура, дизайн-системы' },
   { id: 'quality', title: 'Доступность и безопасность', description: 'a11y, XSS, CSP, обработка ошибок' },
   { id: 'ecosystem', title: 'Экосистема', description: 'Vite, роутинг, фреймворки, стили' },
+  { id: 'fullstack', title: 'Fullstack', description: 'HTTP, API, аутентификация, Node.js, базы и очереди' },
 ];
 
 export const topicById = Object.fromEntries(TOPICS.map((t) => [t.id, t])) as Record<TopicId, Topic>;

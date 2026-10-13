@@ -1043,3 +1043,101 @@
     - label: Хранить цену в useRef и вызывать forceUpdate через useReducer на событие
       why: Чтение мутабельного ref в рендере даёт тот же tearing, и SSR не поддерживается. Это хак времён до появления официального API.
   answer: 0
+
+# normalized-state: принято из черновика 2026-10-13
+- id: normalized-state-why
+  skill: state-normalization
+  question: normalized-state
+  difficulty: 2
+  prompt: "Зачем в клиентском сторе хранить сущности нормализованно: словарь по id, связи через id?"
+  explanation: "Нормализация — хранение как в БД: каждая сущность один раз, связи через id. Она даёт консистентность (одно место правды), дешёвые иммутабельные обновления и O(1) доступ. Нужна, когда одни сущности видны в разных местах и меняются на клиенте. Серверный кэш TanStack Query обычно не нормализуют, а инвалидируют."
+  type: quiz
+  options:
+    - label: "Сущность хранится один раз: обновил её по id — и изменение видно везде, обновление дешёвое, поиск по id O(1)"
+      why: Верно. Без вложенных копий нет рассинхрона, а иммутабельно заменить одну запись в словаре проще, чем искать её по всему дереву.
+    - label: Нормализованный стор сам по себе уменьшает число рендеров компонентов
+      why: Нет. Селекторы, собирающие «пост с автором», без мемоизации, наоборот, дают лишние рендеры. Цель нормализации — консистентность данных.
+    - label: Без нормализации Redux не сможет отследить иммутабельные изменения
+      why: Redux сравнивает ссылки при любой форме данных. Вложенное дерево тоже можно обновлять иммутабельно — просто это дороже и легко забыть копию.
+    - label: Это стандартная практика, поэтому так стоит хранить и серверный кэш TanStack Query
+      why: В TanStack Query кэш по ключам обычно инвалидируют или правят через setQueryData. Нормализованный кэш есть в Apollo/urql, но он добавляет сложности.
+  answer: 0
+- id: normalized-state-unmemoized-selector
+  skill: memoized-selectors
+  question: normalized-state
+  difficulty: 2
+  prompt: PostCard перерисовывается при любом dispatch в сторе, даже не связанном с постами. Где причина?
+  explanation: "useSelector сравнивает результат по ссылке (===). Спред создаёт новый объект на каждом вызове, поэтому любой dispatch даёт «изменение» и рендер. Решение — createSelector из Reselect/RTK: он вернёт прежний объект, пока post и author не изменились."
+  type: find-bug
+  language: tsx
+  code: |-
+    const selectPostWithAuthor = (
+      state: RootState,
+      id: string,
+    ) => {
+      const post = state.posts.entities[id];
+      const author = state.users.entities[post.authorId];
+      return { ...post, author };
+    };
+    function PostCard({ id }: { id: string }) {
+      const post = useSelector((s: RootState) =>
+        selectPostWithAuthor(s, id),
+      );
+      return <h3>{post.title} — {post.author.name}</h3>;
+    }
+  bugLines:
+    - 7
+  causes:
+    - Селектор каждый раз возвращает новый объект, а useSelector сравнивает по ссылке — рендер на каждый dispatch
+    - Стрелочная функция в useSelector пересоздаётся на каждом рендере, из-за этого подписка обновляется
+    - Доступ к entities[id] по ключу без проверки заставляет Redux пересчитывать весь срез
+    - Нормализованный стор нельзя читать из двух срезов в одном селекторе
+  answer: 0
+- id: normalized-state-entity-adapter
+  skill: rtk-entity-adapter
+  question: normalized-state
+  difficulty: 2
+  prompt: Допишите слайс так, чтобы событие сокета «пост изменён» с payload { id, changes } обновляло одну запись.
+  explanation: createEntityAdapter даёт нормализованную форму { ids, entities } через getInitialState и готовые CRUD-редьюсеры. updateOne принимает { id, changes } и мержит поля в одну запись. setOne заменил бы сущность целиком.
+  type: fill-tokens
+  language: ts
+  code: |-
+    const postsAdapter = ___<Post>();
+    const postsSlice = createSlice({
+      name: 'posts',
+      initialState: postsAdapter.___(),
+      reducers: {
+        postsReceived: postsAdapter.setAll,
+        postChanged: postsAdapter.___,
+      },
+    });
+    const { postChanged } = postsSlice.actions;
+    socket.on('post:changed', ({ id, changes }) =>
+      dispatch(postChanged({ id, changes })),
+    );
+  tokens:
+    - createEntityAdapter
+    - getInitialState
+    - updateOne
+  decoys:
+    - createSelector
+    - initialState
+    - setOne
+    - upsertMany
+- id: normalized-state-query-rename-user
+  skill: server-state-normalization-choice
+  question: normalized-state
+  difficulty: 2
+  prompt: REST API, данные в TanStack Query. После мутации «переименовать пользователя» имя должно обновиться в списке пользователей, карточке профиля и ленте комментариев. Что выбрать?
+  explanation: "Серверное состояние в TanStack Query обычно не нормализуют: после мутации инвалидируют затронутые ключи, а для мгновенного отклика точечно правят кэш через setQueryData. Нормализованный стор оправдан, когда клиент — источник истины: редакторы, офлайн, real-time."
+  type: choose-tool
+  options:
+    - label: invalidateQueries по затронутым ключам в onSuccess (+ setQueryData для мгновенного отклика)
+      why: "Лучше всего: сервер остаётся источником истины, кэши перезапросятся сами, а точечный setQueryData уберёт задержку там, где она заметна."
+    - label: Скопировать ответы запросов в Redux-слайс с createEntityAdapter
+      why: Два источника правды для серверных данных и ручная синхронизация. Оправдано, только если клиент сам владеет графом данных — редактор или офлайн.
+    - label: Перейти на Apollo ради нормализованного кэша
+      why: Нормализованный кэш Apollo/urql хорош для GraphQL-API, но требует смены стека и платы сложностью. Для REST и одной мутации это избыточно.
+    - label: Хранить пользователей в Context и синхронизировать его из useEffect после мутации
+      why: Context не кеширует и не перезапрашивает, а эффект-синхронизация легко рассинхронизируется и перерисует всех потребителей.
+  answer: 0

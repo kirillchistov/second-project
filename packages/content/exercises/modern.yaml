@@ -815,3 +815,248 @@
     - label: Только React.memo для Results
       why: memo помогает, если пропсы не меняются. Здесь query меняется на каждый символ, и тяжёлый рендер остаётся синхронным.
   answer: 0
+
+# fragment-refs: принято из черновика 2026-10-13
+- id: fragment-refs-main-idea
+  skill: fragment-refs-concept
+  question: fragment-refs
+  difficulty: 2
+  prompt: Что получает `ref`, переданный в `<Fragment ref={ref}>`, и зачем это нужно?
+  explanation: "Fragment не создаёт DOM-узел, поэтому ref получает не элемент, а `FragmentInstance`, групповой интерфейс над DOM-детьми фрагмента. Через него вешают события, подключают наблюдатели, управляют фокусом и измеряют. Правило: если обёрточный div нужен только ради ref, а ломает раскладку или семантику, берите Fragment ref."
+  type: quiz
+  options:
+    - label: "Объект FragmentInstance: события, фокус, observers и измерения для всех DOM-детей фрагмента без лишнего узла"
+      why: Верно. Это группа DOM-детей с DOM-подобным API, поэтому обёртка ради ref больше не нужна.
+    - label: Первый DOM-элемент среди детей фрагмента, как будто ref передали ему напрямую
+      why: "Неверно. Ref указывает не на один элемент: методы вроде observeUsing и addEventListener применяются ко всем детям первого уровня."
+    - label: "Скрытый DOM-узел, который React вставляет на место фрагмента, аналог div с display: contents"
+      why: Неверно. Fragment по-прежнему не создаёт DOM-узлов, именно поэтому он не ломает flex, grid и таблицы.
+    - label: Массив DOM-узлов детей, по которому нужно пройтись вручную
+      why: Неверно. Это объект с методами, а не массив. Перебирать детей и вешать на каждого обработчик вручную не нужно.
+  answer: 0
+- id: fragment-refs-resize-observer
+  skill: fragment-refs-observers
+  question: fragment-refs
+  difficulty: 2
+  prompt: "Допишите компонент: он сообщает об изменении размера любого из детей, не добавляя обёртку в DOM."
+  explanation: "Ref типизируется как `FragmentInstance` и вешается прямо на `<Fragment>`. `observeUsing` подключает observer ко всем DOM-детям первого уровня, а в cleanup нужен парный `unobserveUsing`. Методы вызываются в эффекте: на сервере DOM нет."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function OnResize({ onResize, children }: Props) {
+      const ref = useRef<___>(null);
+      useLayoutEffect(() => {
+        const observer = new ResizeObserver(
+          () => onResize(),
+        );
+        const fragment = ref.current!;
+        fragment.___(observer);
+        return () => fragment.___(observer);
+      }, [onResize]);
+      return <___ ref={ref}>{children}</Fragment>;
+    }
+  tokens:
+    - FragmentInstance
+    - observeUsing
+    - unobserveUsing
+    - Fragment
+  decoys:
+    - HTMLDivElement
+    - observe
+    - disconnect
+    - unobserve
+- id: fragment-refs-listener-cleanup
+  skill: fragment-refs-events
+  question: fragment-refs
+  difficulty: 2
+  prompt: Компонент сообщает о наведении на группу детей. Со временем onHover начинает вызываться много раз за одно наведение. Где ошибка?
+  explanation: "`removeEventListener` снимает обработчик только по той же ссылке на функцию. Здесь в cleanup передаётся новая стрелка, поэтому старый слушатель остаётся. При каждой смене onHover на детях копится ещё один. Вынесите обработчик в переменную и передайте её в оба вызова."
+  type: find-bug
+  language: tsx
+  code: |-
+    function HoverGroup({ children, onHover }: Props) {
+      const ref = useRef<FragmentInstance>(null);
+      useEffect(() => {
+        const fragment = ref.current!;
+        fragment.addEventListener('mouseenter', () => onHover());
+        return () => {
+          fragment.removeEventListener(
+            'mouseenter', () => onHover());
+        };
+      }, [onHover]);
+      return <Fragment ref={ref}>{children}</Fragment>;
+    }
+  bugLines:
+    - 7
+    - 8
+  causes:
+    - В removeEventListener передана новая функция, а не та же ссылка, поэтому обработчик не снимается и копится
+    - У FragmentInstance нет addEventListener, обработчики можно вешать только на DOM-элементы
+    - Методы фрагмента можно вызывать только в useLayoutEffect, в useEffect ref ещё не заполнен
+    - ref.current внутри эффекта всегда null, потому что Fragment не создаёт DOM-узел
+  answer: 0
+- id: fragment-refs-grid-visibility
+  skill: fragment-refs-vs-wrapper
+  question: fragment-refs
+  difficulty: 2
+  prompt: "CSS grid каталога: карточки рендерит сторонний `<VendorCard>`, который не принимает ref. Для аналитики нужно знать, когда группа карточек одной акции попала во viewport. Раскладку grid менять нельзя. Что выбрать?"
+  explanation: Когда нужен ref на группу, а обёртка ломает раскладку (grid, flex, таблицы, li) или дети не принимают ref, подходит Fragment ref. Он не добавляет DOM-узел и даёт observeUsing, события, фокус и измерения сразу для всех детей.
+  type: choose-tool
+  options:
+    - label: <Fragment ref> + observeUsing(IntersectionObserver)
+      why: "Лучший вариант: в DOM не появляется лишний узел, карточки остаются grid-элементами, а observer подключается ко всем детям, даже если они не принимают ref."
+    - label: Обернуть группу в <div ref> и наблюдать его
+      why: Подходит, если обёртка не мешает вёрстке. Здесь div станет одним grid-элементом, и карточки внутри него выпадут из сетки.
+    - label: "Обёртка <div style={{ display: 'contents' }}>"
+      why: "Сетку не ломает, но у такого div нет своего бокса: IntersectionObserver и измерения по нему бесполезны. Годится только как чисто логическая группировка."
+    - label: Передать ref в каждый VendorCard и наблюдать их
+      why: Хорошо, когда компонент принимает ref (в React 19 это обычный проп). Здесь сторонний компонент его не пробрасывает.
+  answer: 0
+
+# react-compiler: принято из черновика 2026-10-13
+- id: react-compiler-verify-optimized-choice
+  skill: react-compiler-verification
+  question: react-compiler
+  difficulty: 3
+  prompt: Компилятор включён (`babel-plugin-react-compiler` 1.0), `eslint-plugin-react-hooks` 7.1 ошибок не показывает. Нужно убедиться, что ключевой компонент `ProductGrid` действительно оптимизирован при сборке. Что сделать?
+  explanation: "Линтер 7.1.x собран с более новой версией компилятора, чем babel-плагин 1.0. Код, который линтер считает нормальным, сборка может молча пропустить. Факт компиляции проверяют в React DevTools по бейджу Memo ✨. Правило: версии плагина и линтера обновляют вместе, а результат сверяют в DevTools."
+  type: choose-tool
+  options:
+    - label: Открыть React DevTools и проверить бейдж Memo ✨ у ProductGrid
+      why: Бейдж показывает, что компонент реально скомпилирован в текущей сборке. Это прямая проверка, а не косвенный признак.
+    - label: Считать зелёный линтер достаточной гарантией
+      why: Линтер собран с более новым компилятором, чем babel-плагин 1.0. Он может пропустить код, который при сборке молча не оптимизируется.
+    - label: Для надёжности обернуть компонент в memo и расставить useCallback
+      why: Так вы вернётесь к ручной мемоизации и не узнаете, работает ли компилятор. Ручные хуки уместны точечно, например для зависимостей эффектов.
+    - label: Записать сессию в Profiler и посмотреть число ререндеров
+      why: "Profiler нужен, чтобы измерить эффект оптимизации. Скомпилирован ли компонент, он прямо не показывает: ререндеры бывают и по другим причинам."
+  answer: 0
+
+# use-hook: принято из черновика 2026-10-13
+- id: use-hook-try-catch-fallback
+  skill: use-hook-error-handling
+  question: use-hook
+  difficulty: 2
+  prompt: Автор хотел показать пустой список, если загрузка комментариев упала. Найдите ошибку.
+  explanation: "`use` нельзя вызывать внутри try/catch: приостановка и отклонение промиса должны дойти до Suspense и Error Boundary. Запасное значение задают там, где создаётся промис, например `getComments(id).catch(() => [])` в Server Component. Другой вариант — обернуть компонент в Error Boundary."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Comments({ commentsPromise }: Props) {
+      let comments: Comment[];
+      try {
+        comments = use(commentsPromise);
+      } catch {
+        comments = [];
+      }
+      return comments.map((c) => (
+        <p key={c.id}>{c.text}</p>
+      ));
+    }
+  bugLines:
+    - 3
+    - 4
+  causes:
+    - "`use` вызван внутри try/catch: приостановка и ошибка промиса должны уйти к Suspense и Error Boundary, React такое запрещает"
+    - Перед `use` не хватает `await`, поэтому в comments попадает сам промис
+    - Промис нужно читать в useEffect и складывать в state, а не в рендере
+    - Компонент не может возвращать массив элементов без обёртки-фрагмента
+  answer: 0
+
+# use-transition: принято из черновика 2026-10-13
+- id: use-transition-view-transition-recipe
+  skill: view-transition-animations
+  question: use-transition
+  difficulty: 3
+  prompt: Нужно анимировать переключение вкладок через <ViewTransition>, причём «вперёд» и «назад» — по-разному. Расставьте шаги по порядку.
+  explanation: "<ViewTransition> анимирует только обновления внутри startTransition: обычный setTab переключит вкладку без анимации. addTransitionType вызывают внутри того же startTransition, что и обновление, — так React знает тип конкретного перехода и выбирает соответствующую анимацию."
+  type: order
+  kind: recipe
+  steps:
+    - Обернуть меняющийся контент вкладки в <ViewTransition>
+    - В обработчике клика вызвать startTransition
+    - "Внутри колбэка вызвать addTransitionType с типом по направлению: 'nav-forward' или 'nav-back'"
+    - Там же вызвать setTab(next) — именно это обновление запустит анимацию
+    - Описать в CSS анимацию для каждого типа перехода
+
+# view-transition: принято из черновика 2026-10-13
+- id: view-transition-urgent-update-quiz
+  skill: view-transition-triggers
+  question: view-transition
+  difficulty: 2
+  prompt: Список обернули в `<ViewTransition>`, фильтр меняется обычным `setFilter` в `onChange`. Список обновляется, но анимации нет. Почему?
+  explanation: "`<ViewTransition>` анимирует только обновления-переходы: `startTransition`, раскрытие `<Suspense>` и `useDeferredValue`. Срочные обновления, например ввод или обычный setState в обработчике, применяются сразу и без анимации. Если «ничего не анимируется», первым делом проверьте, что обновление идёт через transition."
+  type: quiz
+  options:
+    - label: Анимация запускается только для обновлений-переходов, а обычный setState в обработчике — срочное обновление
+      why: Верно. Нужно обернуть setFilter в startTransition, использовать useDeferredValue или раскрытие Suspense.
+    - label: "Без CSS-класса в пропсе update анимации нет: по умолчанию стоит none"
+      why: Неверно. По умолчанию React делает cross-fade, а классы только меняют вид анимации. Значение none нужно задать явно.
+    - label: ViewTransition анимирует только появление и исчезновение, а изменение содержимого — нет
+      why: Неверно. Для изменения содержимого и стилей детей есть тип update.
+    - label: ViewTransition работает только при навигации роутера, а не при локальном состоянии
+      why: Неверно. Подойдёт любой startTransition, роутер здесь не нужен. Роутеры просто сами оборачивают навигацию в transition.
+  answer: 0
+- id: view-transition-missing-start-transition
+  skill: view-transition-triggers
+  question: view-transition
+  difficulty: 2
+  prompt: Фото по кнопке меняются, но анимация slide-in не проигрывается. Найдите строку с ошибкой.
+  explanation: "Смена key пересоздаёт `<ViewTransition>`: старый экземпляр получает exit, новый — enter. Но анимация запускается только внутри transition. Обычный setState — срочное обновление, поэтому DOM меняется мгновенно. Исправление: `startTransition(() => setIndex((i) => i + 1))`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Gallery({ photos }: Props) {
+      const [index, setIndex] = useState(0);
+      const next = () => setIndex((i) => i + 1);
+
+      return (
+        <>
+          <ViewTransition key={index} enter="slide-in">
+            <Photo src={photos[index]} />
+          </ViewTransition>
+          <button onClick={next}>Next</button>
+        </>
+      );
+    }
+  bugLines:
+    - 3
+  causes:
+    - "setIndex вызывается вне startTransition: срочное обновление не анимируется"
+    - В enter нужно передавать объект по типам перехода, а не строку-класс
+    - "key на ViewTransition ломает анимацию: компонент пересоздаётся без перехода"
+    - ViewTransition должен оборачивать Suspense, иначе анимации не будет
+  answer: 0
+- id: view-transition-direction-types
+  skill: view-transition-types
+  question: view-transition
+  difficulty: 2
+  prompt: "Допишите слайдер: при «вперёд» новый слайд въезжает справа, при «назад» — слева."
+  explanation: "`addTransitionType` помечает причину перехода. Объект в `enter` и `exit` выбирает класс по этому типу. Смена `key` пересоздаёт ViewTransition: старый слайд получает exit, новый — enter. Всё это работает только внутри `startTransition`."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const go = (dir: 'next' | 'previous') =>
+      ___(() => {
+        ___(dir);
+        setIndex((i) => i + (dir === 'next' ? 1 : -1));
+      });
+    return (
+      <ViewTransition
+        ___={index}
+        enter={{ next: 'from-right', previous: 'from-left' }}
+        ___={{ next: 'to-left', previous: 'to-right' }}
+      >
+        <Slide index={index} />
+      </ViewTransition>
+    );
+  tokens:
+    - startTransition
+    - addTransitionType
+    - key
+    - exit
+  decoys:
+    - useTransition
+    - setTransitionType
+    - name
+    - leave

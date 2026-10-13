@@ -248,7 +248,8 @@ async function runBatch(list: Question[]): Promise<string[]> {
     console.log(`✓ ${slug}: ${finalize(questionBySlug.get(slug)!, wires, reviews, droppedBySlug.get(slug)!)}`);
   }
 
-  rmSync(BATCH_STATE);
+  // force: параллельный запуск с другим набором вопросов мог уже убрать файл
+  rmSync(BATCH_STATE, { force: true });
   return failed;
 }
 

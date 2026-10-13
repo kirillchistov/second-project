@@ -54,6 +54,8 @@ type RouteName = keyof typeof routes;   // 'home' | 'product'
 
 # Какие угрозы безопасности актуальны для современного React-приложения?
 @slug security-advanced
+@verified react@19.3
+@updated 2026-10
 @topic quality
 
 > Помимо XSS: утечки секретов в клиентский бандл (переменные окружения с префиксом `VITE_` / `NEXT_PUBLIC_` видны всем), незащищённые Server Functions и API-роуты, CSRF при cookie-аутентификации, атаки на цепочку поставок (вредоносные npm-пакеты), небезопасные сторонние скрипты, open redirect, кликджекинг. Защита — многоуровневая: CSP с nonce, заголовки безопасности, валидация на сервере, аудит и фиксация зависимостей, принцип минимальных привилегий.
@@ -64,6 +66,7 @@ type RouteName = keyof typeof routes;   // 'home' | 'product'
 - **Server Functions / API** — аутентификация, авторизация и валидация в каждой функции; rate limiting.
 - **CSRF** — `SameSite=Lax/Strict` cookies, проверка `Origin`, CSRF-токены для небезопасных методов.
 - **CSP** — `script-src 'nonce-…' 'strict-dynamic'`, запрет `unsafe-inline` и `unsafe-eval`; отчёты `report-to`.
+- **Trusted Types** — `require-trusted-types-for 'script'` в CSP. С React 19.3 поддерживаются: React больше не приводит `TrustedHTML` к строке, поэтому `dangerouslySetInnerHTML` принимает значение из политики санитизации.
 - **Заголовки** — `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `frame-ancestors` (против кликджекинга), HSTS.
 - **Зависимости** — lockfile, `npm audit` / Dependabot / Renovate, проверка новых пакетов, `ignore-scripts` где возможно, Subresource Integrity для скриптов с CDN.
 - **Редиректы** — разрешать только относительные пути или белый список (`?next=//evil.com`).

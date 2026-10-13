@@ -271,3 +271,367 @@
     - "Изучить trace воспроизведённого падения: шаги, сеть, DOM в момент ошибки"
     - "Устранить причину: заменить паузы на автоожидающие проверки, изолировать тестовые данные"
     - Снова прогнать тест многократно и вернуть его в обязательный набор
+
+# e2e-playwright: принято из черновика 2026-10-13
+- id: e2e-playwright-stability-quiz
+  skill: e2e-test-stability
+  question: e2e-playwright
+  difficulty: 2
+  prompt: Что в первую очередь делает e2e-тесты на Playwright устойчивыми к флаки-падениям и рефакторингу вёрстки?
+  explanation: "Устойчивость дают три вещи: локаторы по роли и тексту (как видит пользователь), web-first проверки `await expect(locator)...` с автоожиданием и изоляция данных. Таймауты, ретраи и CSS-селекторы лишь маскируют проблему."
+  type: quiz
+  options:
+    - label: Локаторы по роли и тексту, web-first проверки с автоожиданием и собственные данные у каждого теста
+      why: Верно. Такие локаторы переживают рефакторинг DOM, expect повторяет проверку до таймаута, а изоляция убирает зависимость от порядка тестов.
+    - label: Паузы `waitForTimeout` после каждого действия и увеличенный глобальный таймаут
+      why: "Фиксированная пауза то слишком короткая в медленном CI, то зря тормозит сьют. Ждать нужно состояния: текста, URL или ответа сети."
+    - label: Точные CSS-селекторы по классам и вложенности, чтобы не промахнуться мимо элемента
+      why: "Точность здесь мнимая: такие селекторы ломаются при любой правке вёрстки. Роль и доступное имя стабильнее и заодно проверяют доступность."
+    - label: "Последовательный запуск: тесты переиспользуют данные, созданные предыдущими"
+      why: "Это связывает тесты: одно падение тянет за собой остальные, параллелить и запускать тест по отдельности нельзя."
+  answer: 0
+- id: e2e-playwright-isvisible-no-wait
+  skill: playwright-web-first-assertions
+  question: e2e-playwright
+  difficulty: 2
+  prompt: Тест локально проходит, а в CI периодически падает. Найдите причину.
+  explanation: "`isVisible()` проверяет состояние один раз, в момент вызова, и `expect(ok).toBe(true)` уже ничего не ждёт. Если статус появится через 300 мс после ответа сервера, тест упадёт. Строки 6–8 заменяются одной web-first проверкой `await expect(page.getByRole('status')).toBeVisible()`, которая повторяется до выполнения условия или до таймаута."
+  type: find-bug
+  language: ts
+  code: |-
+    test('заказ оплачен', async ({ page }) => {
+      await page.goto('/checkout');
+      await page
+        .getByRole('button', { name: 'Оплатить' })
+        .click();
+      const ok = await page
+        .getByRole('status').isVisible();
+      expect(ok).toBe(true);
+    });
+  bugLines:
+    - 6
+    - 7
+    - 8
+  causes:
+    - "`isVisible()` проверяет видимость один раз без ожидания, поэтому статус, появившийся чуть позже, не будет найден"
+    - После `click()` нужно добавить `waitForTimeout(1000)`, иначе Playwright не успевает нажать кнопку
+    - "`getByRole('status')` не находит элементы с `role=\"status\"`, нужен селектор по CSS-классу"
+    - "`page.goto` нужно вызывать без `await`, иначе тест ждёт полной загрузки и падает по таймауту"
+  answer: 0
+- id: e2e-playwright-login-flow
+  skill: playwright-web-first-assertions
+  question: e2e-playwright
+  difficulty: 1
+  prompt: "Допишите тест входа: локатор по роли и проверки, которые сами дожидаются нужного состояния."
+  explanation: "Кнопку ищем по роли и доступному имени. `expect(page).toHaveURL` ждёт редиректа, `toBeVisible` ждёт появления заголовка. Обе проверки повторяются до таймаута, поэтому ручные паузы не нужны. Правило: ждём состояние, а не время."
+  type: fill-tokens
+  language: ts
+  code: |-
+    test('вход', async ({ page }) => {
+      await page.goto('/login');
+      await page.getByLabel('Email').fill('a@b.co');
+      await page.getByLabel('Пароль').fill('pw');
+      await page
+        .___('button', { name: 'Войти' })
+        .click();
+      await ___(page).___(/\/dashboard/);
+      await expect(
+        page.getByRole('heading', { name: 'Дашборд' })
+      ).___();
+    });
+  tokens:
+    - getByRole
+    - expect
+    - toHaveURL
+    - toBeVisible
+  decoys:
+    - getByTestId
+    - isVisible
+    - waitForTimeout
+    - toBe
+- id: e2e-playwright-auth-once
+  skill: playwright-auth-setup
+  question: e2e-playwright
+  difficulty: 2
+  prompt: В сьюте 40 тестов, и каждый начинает с логина через форму. Прогон медленный и иногда падает прямо на логине. Всем тестам нужен один и тот же пользователь. Что сделать?
+  explanation: "Повторяющееся состояние (сессию) готовят один раз: setup-проект логинится и сохраняет `storageState`, а остальные проекты подключают его через `dependencies` и `use.storageState`. Сам логин достаточно проверить одним отдельным тестом."
+  type: choose-tool
+  options:
+    - label: Setup-проект логинится один раз и сохраняет `storageState`, остальные тесты стартуют с ним
+      why: "Лучший вариант: логин выполняется один раз за прогон, а не 40 раз. Тесты сразу открывают нужную страницу, и шанс поймать флаки на входе резко падает."
+    - label: Оставить логин через UI в `beforeEach`, но поднять таймауты и включить `retries`
+      why: Ретраи и таймауты маскируют флаки, а сьют станет ещё медленнее. UI-логин нужен только в отдельном тесте самой формы входа.
+    - label: "`test.describe.serial` с общей страницей: залогиниться в первом тесте"
+      why: "Тесты станут зависимыми: упал первый — пропущены остальные. Параллельный запуск и отладка отдельного теста тоже теряются."
+    - label: Логиниться API-запросом `request.post` в начале каждого теста
+      why: Быстрее UI и уместно, когда тестам нужны разные пользователи или роли. Для одного общего пользователя проще один раз сохранить storageState.
+  answer: 0
+
+# flaky-tests: принято из черновика 2026-10-13
+- id: flaky-tests-strategy-quiz
+  skill: flaky-tests-strategy
+  question: flaky-tests
+  difficulty: 2
+  prompt: E2E-тест падает в CI примерно раз в 20 прогонов, код при этом не менялся. Какой подход правильный?
+  explanation: "Флаки-тест приучает команду перезапускать CI и пропускать настоящие падения. Ретраи и большие таймауты прячут причину. Удаление теста лишает покрытия. Правильный путь: воспроизвести, найти класс причины и устранить её. Если быстро не получается — карантин с владельцем и сроком."
+  type: quiz
+  options:
+    - label: Воспроизвести в цикле без ретраев, найти класс причины и устранить; если быстро нельзя — карантин с владельцем и сроком
+      why: Верно. Лечится причина, а не симптом. Карантин честно выключает шум, но не даёт тесту исчезнуть навсегда.
+    - label: "Включить retries: 3 в CI: если тест проходит с повтора, значит, функциональность работает"
+      why: "Ретраи «зеленят» сборку и прячут гонку, которая может быть и в продукте. Их стоит использовать только как сигнал: такой тест помечается нестабильным."
+    - label: Поднять таймаут ожидания до 10 секунд, чтобы медленному CI точно хватило времени
+      why: Гонка остаётся, только реже проявляется, а весь набор тестов замедляется. Ждать нужно состояния, а не времени.
+    - label: "Удалить тест: нестабильный тест хуже, чем его отсутствие"
+      why: Он хуже, пока остаётся нестабильным. Если его удалить, сценарий потеряет покрытие. Тест нужно починить, а на время исправления — поместить в карантин.
+  answer: 0
+- id: flaky-tests-shared-query-client
+  skill: flaky-tests-shared-state
+  question: flaky-tests
+  difficulty: 2
+  prompt: Отдельно тест проходит. В общем прогоне он иногда падает — когда перед ним выполнился тест со списком заказов. Где причина?
+  explanation: "Один QueryClient на модуль хранит кэш между тестами. `<Orders />` сразу показывает заказы из прошлого теста. Пустое состояние появится только после фонового перезапроса, а при ненулевом staleTime — вообще не появится. Результат зависит от порядка и таймингов. Создавайте новый QueryClient в каждом render (с retry: false) или чистите кэш в afterEach."
+  type: find-bug
+  language: tsx
+  code: |-
+    const queryClient = new QueryClient();
+    function renderWithClient(ui: ReactElement) {
+      return render(
+        <QueryClientProvider client={queryClient}>
+          {ui}
+        </QueryClientProvider>
+      );
+    }
+    test('shows empty state', async () => {
+      server.use(emptyOrdersHandler);
+      renderWithClient(<Orders />);
+      const empty = await screen.findByText('Нет заказов');
+      expect(empty).toBeVisible();
+    });
+  bugLines:
+    - 1
+  causes:
+    - "QueryClient общий для всех тестов: в нём остаётся кэш заказов из предыдущего теста"
+    - findByText нужно заменить на getByText, иначе тест ждёт лишнее время
+    - server.use должен вызываться после render, иначе обработчик не применится
+    - render нужно обернуть в act, иначе запросы не успевают выполниться
+  answer: 0
+- id: flaky-tests-time-dependent-unit
+  skill: flaky-tests-time-control
+  question: flaky-tests
+  difficulty: 2
+  prompt: Unit-тест проверяет бейдж «Акция закончится через 2 дня», который считается от Date.now(). Локально тест зелёный, а в CI падает ночью и на раннерах в другой таймзоне. Что сделать?
+  explanation: "Реальное время — частая причина нестабильных тестов. Время в тесте задают явно: vi.useFakeTimers() и vi.setSystemTime() фиксируют «сейчас», а TZ и локаль в CI фиксируют форматирование. Повторы и таймауты не устраняют недетерминизм, а только прячут его."
+  type: choose-tool
+  options:
+    - label: vi.useFakeTimers() + vi.setSystemTime(...) и фиксированные TZ и локаль в CI
+      why: "Лучший вариант: «сейчас» и таймзона одинаковы при каждом запуске, и результат становится детерминированным."
+    - label: Считать ожидаемый текст в самом тесте от new Date()
+      why: "Тест дублирует логику компонента и всё равно зависит от реального времени: на границе суток значения расходятся."
+    - label: "retry: 3 в конфиге Vitest"
+      why: Повторы уместны только как сигнал нестабильности. Здесь тест падает в определённые часы, и повторы просто «позеленят» реальную проблему.
+    - label: Увеличить testTimeout
+      why: Таймаут помогает с медленным кодом, а здесь проблема не в скорости, а в зависимости от текущих даты и таймзоны.
+  answer: 0
+- id: flaky-tests-triage-recipe
+  skill: flaky-tests-triage-process
+  question: flaky-tests
+  difficulty: 3
+  prompt: Расставьте шаги работы с нестабильным тестом по порядку.
+  explanation: "Сначала сигнал: отчёт CI о тестах, прошедших только с повтора. Затем — надёжное воспроизведение, иначе не понять, помог ли фикс. Класс причины подсказывает лекарство. Финальная проверка — тот же прогон в цикле, а не один зелёный запуск. Если быстро починить нельзя, тест уходит в карантин с владельцем и сроком."
+  type: order
+  kind: recipe
+  steps:
+    - Найти тест в отчёте CI о тестах, прошедших только после повтора
+    - "Воспроизвести: прогнать в цикле без ретраев (--repeat-each=50 --retries=0), с фиксированным seed и CPU throttling"
+    - "Определить класс причины: время, общее состояние, данные, асинхронность или окружение"
+    - "Устранить причину: фейковые таймеры, сброс состояния, уникальные данные, web-first ожидания"
+    - Подтвердить фикс тем же прогоном в цикле, а не одним зелёным запуском
+
+# mocking-boundaries: принято из черновика 2026-10-13
+- id: mocking-boundaries-what-to-mock
+  skill: mocking-boundaries
+  question: mocking-boundaries
+  difficulty: 2
+  prompt: Что правильно мокать в тестах фронтенда, чтобы тест ловил реальные поломки, а не проверял сам себя?
+  explanation: "Мокаем то, что недетерминировано или недоступно в тесте: сеть, время, случайность и API, которых нет в jsdom. Собственный код оставляем настоящим. Порядок предпочтений: ничего не мокать → внедрить зависимость → перехватить на границе (MSW, фейковые таймеры, stubGlobal) → vi.mock модуля как крайняя мера."
+  type: quiz
+  options:
+    - label: "Границы системы: сеть, время, случайность, отсутствующие в jsdom браузерные API. Свой код оставить настоящим"
+      why: Верно. Тогда в тесте работают настоящие компоненты, хуки, fetch и обработка ошибок, а заменено только то, что недетерминировано или недоступно.
+    - label: Все модули, кроме тестируемого компонента, — так тест полностью изолирован и быстрый
+      why: "Такой тест привязан к структуре импортов: он ломается при рефакторинге и остаётся зелёным, когда сломана интеграция модулей."
+    - label: Хук данных (например, useTodos) через vi.mock — тогда сеть вообще не понадобится
+      why: Вместе с сетью выпадают кэш, состояния загрузки и обработка ошибок. Лучше перехватить HTTP через MSW, а хук оставить настоящим.
+    - label: "Ничего: любой мок делает тест ненадёжным, поэтому нужно ходить в реальный бэкенд"
+      why: Реальный бэкенд делает тесты медленными и нестабильными, а ошибки 500 и пустые ответы почти не воспроизвести. Границы мокать нужно.
+  answer: 0
+- id: mocking-boundaries-countdown-time
+  skill: mocking-time
+  question: mocking-boundaries
+  difficulty: 2
+  prompt: Компонент Countdown раз в секунду через setInterval показывает, сколько осталось до дедлайна из пропа. Текущее время он берёт из Date.now(). Нужно проверить текст через 5 минут. Что выбрать?
+  explanation: Время — граница системы. Фейковые таймеры подменяют сразу и часы, и планировщик, поэтому тест детерминирован и выполняется мгновенно. Сдвиг таймеров, который вызывает обновление state, оборачивают в act. Если бы now можно было передать пропом, внедрение зависимости было бы ещё проще.
+  type: choose-tool
+  options:
+    - label: vi.useFakeTimers + vi.setSystemTime + vi.advanceTimersByTime
+      why: "Лучший вариант: фейковые таймеры управляют и Date.now, и setInterval. Пять минут проматываются мгновенно и всегда одинаково."
+    - label: vi.spyOn(Date, 'now') с фиксированным значением
+      why: "Подходит, если код только читает время. Здесь setInterval останется настоящим: тикать он будет реально, а now застынет на одном значении."
+    - label: Реальное ожидание через waitFor с большим timeout
+      why: "Ждать 5 минут по-настоящему нельзя: тест медленный и нестабильный. waitFor годится для асинхронных ответов, а не для промотки времени."
+    - label: vi.mock('./formatTimeLeft') с готовой строкой
+      why: Так проверяется мок, а не компонент. Тикающий интервал и расчёт оставшегося времени остаются без проверки.
+  answer: 0
+- id: mocking-boundaries-msw-handler-leak
+  skill: mock-isolation
+  question: mocking-boundaries
+  difficulty: 2
+  prompt: Тест на ошибку проходит. Следующий за ним тест «shows todos» падает, хотя сам по себе он зелёный. Providers на каждый рендер создаёт новый QueryClient. Где ошибка?
+  explanation: "server.use добавляет обработчик поверх общих, и он живёт, пока его не сбросят. resetHandlers в afterAll срабатывает только после всех тестов, поэтому ответ 500 достаётся соседям. Правило: моки сбрасываются в afterEach (resetHandlers, restoreMocks), иначе результат зависит от порядка запуска."
+  type: find-bug
+  language: tsx
+  code: |-
+    const server = setupServer(
+      http.get('/api/todos', () =>
+        HttpResponse.json([{ id: '1', title: 'Milk' }])),
+    );
+    beforeAll(() => server.listen());
+    afterAll(() => server.resetHandlers());
+    afterAll(() => server.close());
+
+    test('shows error', async () => {
+      server.use(http.get('/api/todos', () =>
+        new HttpResponse(null, { status: 500 })));
+      render(<TodoList />, { wrapper: Providers });
+      expect(await screen.findByRole('alert')).toBeVisible();
+    });
+  bugLines:
+    - 6
+  causes:
+    - "resetHandlers вызывается в afterAll, а не в afterEach: обработчик с ответом 500 из server.use остаётся и в следующих тестах"
+    - server.use нужно вызывать до server.listen(), иначе переопределение не применится
+    - new HttpResponse(null, ...) — некорректный ответ, ошибку нужно возвращать через HttpResponse.json
+    - findByRole не ждёт появления элемента, его нужно обернуть в waitFor
+  answer: 0
+- id: mocking-boundaries-msw-error-test
+  skill: msw-network-mocking
+  question: mocking-boundaries
+  difficulty: 2
+  prompt: Допишите тест. Незамоканный запрос должен ронять тест, переопределения не должны протекать в соседние тесты, а проверить нужно появление ошибки загрузки.
+  explanation: "onUnhandledRequest: 'error' сразу показывает, что запрос не покрыт обработчиком. resetHandlers в afterEach убирает переопределения. server.use задаёт ответ для одного теста. findByRole асинхронно ждёт, пока настоящий fetch и TanStack Query отработают ошибку и покажут alert."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    beforeAll(() =>
+      server.listen({ onUnhandledRequest: '___' }));
+    afterEach(() => server.___());
+    afterAll(() => server.close());
+
+    test('shows load error', async () => {
+      server.___(
+        http.get('/api/todos', () =>
+          new HttpResponse(null, { status: 500 })),
+      );
+      render(<TodoList />, { wrapper: Providers });
+      expect(await screen.___('alert')).toBeVisible();
+    });
+  tokens:
+    - error
+    - resetHandlers
+    - use
+    - findByRole
+  decoys:
+    - warn
+    - getByRole
+    - listen
+    - reset
+
+# testing-hooks: принято из черновика 2026-10-13
+- id: testing-hooks-strategy-quiz
+  skill: testing-hooks-strategy
+  question: testing-hooks
+  difficulty: 2
+  prompt: Когда собственный хук стоит тестировать отдельно через `renderHook`, а когда — через компонент, который его использует?
+  explanation: Тест должен проверять публичный контракт. У хука одного компонента контракт — поведение этого компонента, а сам хук — деталь реализации. У переиспользуемого хука его аргументы и возвращаемое значение и есть API, поэтому его тестируют отдельно через `renderHook`.
+  type: quiz
+  options:
+    - label: Хук одного компонента — через этот компонент, переиспользуемый — отдельно через renderHook
+      why: "Верно. Контракт переиспользуемого хука — его API, а хук одного компонента — деталь реализации: тест через UI переживёт рефакторинг."
+    - label: "Всегда через renderHook: тест изолированнее и быстрее, а компонентные тесты дублируют проверки"
+      why: "Изоляция ради изоляции привязывает тест к реализации: вынесли логику обратно в компонент — тест сломался, хотя поведение то же."
+    - label: "Всегда через компонент: renderHook устарел и удалён в современных версиях Testing Library"
+      why: "renderHook не удалён: он переехал из @testing-library/react-hooks в @testing-library/react и поддерживается."
+    - label: "Через renderHook только хуки без состояния: useState и useEffect вне настоящего компонента не работают"
+      why: renderHook как раз рендерит хук внутри тестового компонента, поэтому состояние, эффекты и контексты работают.
+  answer: 0
+- id: testing-hooks-stale-result-current
+  skill: testing-hooks-result-current
+  question: testing-hooks
+  difficulty: 2
+  prompt: "Хук useCounter работает правильно, но тест падает: ожидалось 1, получено 0. Найдите строку с ошибкой."
+  explanation: "`result.current` — ссылка, которую renderHook обновляет после каждого рендера. Деструктуризация копирует значения первого рендера, и `count` навсегда остаётся 0. Правило: после каждого `act` читайте `result.current.count` заново."
+  type: find-bug
+  language: tsx
+  code: |-
+    test('increment увеличивает count', () => {
+      const { result } = renderHook(() => useCounter(0));
+      const { count, increment } = result.current;
+      act(() => increment());
+      expect(count).toBe(1);
+    });
+  bugLines:
+    - 3
+  causes:
+    - Деструктуризация зафиксировала count первого рендера — после act нужно читать result.current.count
+    - Синхронный act не применяет обновление — нужен await act(async () => increment())
+    - Сам вызов renderHook нужно обернуть в act, иначе хук не отрендерится
+    - При деструктуризации increment теряет this и не меняет состояние
+  answer: 0
+- id: testing-hooks-debounce-fake-timers
+  skill: testing-hooks-timers
+  question: testing-hooks
+  difficulty: 2
+  prompt: "Допишите тест debounce-хука: сменить аргумент и промотать время фейковыми таймерами."
+  explanation: "Аргументы хука передают через `initialProps`, а новые значения — через `rerender`. Время двигают `vi.advanceTimersByTime`, обёрнутым в `act`: срабатывает setState, и React должен применить обновление. Не забудьте вернуть `vi.useRealTimers()` в afterEach."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    test('debounce ждёт 300 мс', () => {
+      vi.useFakeTimers();
+      const { result, rerender } = renderHook(
+        ({ v }) => useDebouncedValue(v, 300),
+        { ___: { v: 'a' } },
+      );
+      ___({ v: 'ab' });
+      expect(result.current).toBe('a');
+      ___(() => vi.___(300));
+      expect(result.current).toBe('ab');
+    });
+  tokens:
+    - initialProps
+    - rerender
+    - act
+    - advanceTimersByTime
+  decoys:
+    - props
+    - setProps
+    - waitFor
+    - useRealTimers
+- id: testing-hooks-query-error-timeout
+  skill: testing-hooks-query-client
+  question: testing-hooks
+  difficulty: 2
+  prompt: Тест проверяет, что useUser на TanStack Query отдаёт isError при ответе 500 от MSW. Тест висит и падает по таймауту. Как исправить?
+  explanation: "TanStack Query по умолчанию повторяет упавшие запросы с задержкой, и waitFor не дожидается ошибки. Правило: в тестах — свежий QueryClient на каждый тест с `retry: false`, переданный через `wrapper`. Так нет повторов и общего кэша между тестами."
+  type: choose-tool
+  options:
+    - label: "Создавать в каждом тесте new QueryClient с retry: false и передавать его через wrapper"
+      why: "Лучший вариант: ошибка приходит сразу, а свежий клиент не делит кэш с другими тестами."
+    - label: Увеличить timeout у waitFor и у теста до 10 секунд
+      why: "Тест станет медленным и хрупким: он зависит от числа повторов и их задержек. Годится только как временная заплатка."
+    - label: Включить vi.useFakeTimers() и промотать задержки между повторами
+      why: Уместно, когда тестируют саму логику повторов. Для проверки состояния ошибки это лишняя сложность и риск зависнуть на промисах.
+    - label: "Замокать useQuery через vi.mock и вернуть { isError: true }"
+      why: "Тогда тест проверяет мок, а не хук: ключ запроса, queryFn и обработка ответа не участвуют. Подходит, только если тестируется компонент поверх хука."
+  answer: 0

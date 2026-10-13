@@ -248,3 +248,28 @@
     - "`key` можно указать у короткого синтаксиса `<>`"
     - Фрагменту можно передать `className`, `style` или обработчики событий, например `onClick`, — на деле `Fragment` принимает только `key` и `children`
     - Фрагмент мемоизирует детей или заметно ускоряет перерендер, как `memo`
+- question: promises-async-await
+  points:
+    - id: promise-states-async-returns
+      text: Промис находится в состоянии `pending`, затем переходит в `fulfilled` или `rejected`; `async`-функция всегда возвращает промис, а `await` приостанавливает только эту функцию до завершения промиса, не блокируя поток
+      weight: 3
+    - id: event-loop-order
+      text: "Порядок выполнения: сначала весь синхронный код, затем все микрозадачи (`.then`, продолжение после `await`, `queueMicrotask`), и только потом одна макрозадача (`setTimeout`, события), поэтому `setTimeout(fn, 0)` срабатывает позже `Promise.then`"
+      weight: 3
+    - id: async-body-sync-until-await
+      text: Тело `async`-функции до первого `await` выполняется синхронно, а код после `await` продолжается как микрозадача
+      weight: 2
+    - id: parallel-promise-all
+      text: Независимые `await` подряд выполняются последовательно (водопад); чтобы запустить запросы параллельно, используют `await Promise.all([a(), b()])`
+      weight: 2
+    - id: combinators-difference
+      text: "`Promise.all` отклоняется на первой ошибке, `Promise.allSettled` ждёт все результаты, `Promise.race` берёт первый завершившийся, `Promise.any` — первый успешный"
+      weight: 1
+    - id: errors-and-cancel
+      text: Ошибки ловят через `try/catch` вокруг `await` или `.catch()` на цепочке; сам промис отменить нельзя — отменяют операцию через `AbortController` и `signal`
+      weight: 1
+  misconceptions:
+    - "`await` блокирует основной поток/весь JavaScript до завершения промиса"
+    - "`setTimeout(fn, 0)` выполняется сразу или раньше колбэков `Promise.then`, потому что задержка нулевая"
+    - Тело `async`-функции целиком выполняется асинхронно, включая код до первого `await`
+    - "`array.forEach(async ...)` дожидается завершения всех асинхронных колбэков"

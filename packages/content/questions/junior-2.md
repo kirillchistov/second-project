@@ -81,10 +81,12 @@ const [email, setEmail] = useState('');
 
 # Что такое фрагменты и зачем они нужны?
 @slug fragments
+@verified react@19.3
+@updated 2026-10
 @topic basics
 @legacy 17
 
-> Фрагмент позволяет вернуть несколько элементов без лишней обёртки в DOM. Короткий синтаксис — `<>...</>`; если нужен `key` (например, в списке), используется полная форма `<Fragment key={...}>`.
+> Фрагмент позволяет вернуть несколько элементов без лишней обёртки в DOM. Короткий синтаксис — `<>...</>`; если нужен `key` (например, в списке) или, с React 19.3, `ref`, используется полная форма `<Fragment>`. Ref на фрагменте даёт `FragmentInstance` (обработчики событий, `focus`, `observeUsing`, `getClientRects`, `scrollIntoView`) и заменяет лишний обёрточный `<div>`.
 
 ```tsx
 import { Fragment } from 'react';

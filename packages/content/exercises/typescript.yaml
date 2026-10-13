@@ -394,3 +394,356 @@
     - label: Ручные проверки `typeof` прямо в компоненте
       why: Сработает для одного-двух полей, но логика размазывается по UI, тип приходится сужать вручную, а проверки быстро расходятся с интерфейсом.
   answer: 0
+
+# runtime-validation-zod: принято из черновика 2026-10-13
+- id: runtime-validation-why-not-types
+  skill: type-assertion-vs-validation
+  question: runtime-validation-zod
+  difficulty: 2
+  prompt: В проекте строгий TypeScript, и ответ API приводится через `as User`. Зачем тогда ещё и схема Zod на этом ответе?
+  explanation: Типы — это обещание компилятору, а не проверка данных. На границе (API, localStorage, URL, env, формы) данные по сути `unknown`. Схема проверяет их в рантайме, а `z.infer` выводит из неё тип, поэтому проверка и тип не расходятся.
+  type: quiz
+  options:
+    - label: Типы стираются при компиляции, и `as` ничего не проверяет. Схема реально проверяет данные в рантайме и даёт тип через z.infer
+      why: Верно. `as User` просто верит данным на слово. Поломка контракта всплывёт глубоко в UI, а схема упадёт у границы с путём к полю.
+    - label: "`as User` проверяет форму объекта в рантайме, а Zod нужен только для красивых сообщений об ошибках"
+      why: Неверно. Утверждение типа исчезает после компиляции, в JS-коде от него ничего не остаётся.
+    - label: strict-режим TypeScript валидирует результат res.json(), Zod нужен только без strict
+      why: Неверно. strict влияет только на проверки при компиляции. Что пришло по сети, он не знает и знать не может.
+    - label: Схема нужна, только если бэкенд написан не на TypeScript; при общих типах в монорепо проверка не нужна
+      why: "Общие типы не гарантируют, что развёрнутая версия API им соответствует: старый деплой, прокси или баг сервера. Проверка на границе всё равно полезна."
+  answer: 0
+- id: runtime-validation-as-cast-date
+  skill: type-assertion-vs-validation
+  question: runtime-validation-zod
+  difficulty: 2
+  prompt: TypeScript не показывает ошибок, но в рантайме падает `getFullYear is not a function`. Какая строка виновата?
+  explanation: "JSON не умеет передавать Date: createdAt приходит строкой. `as User` заставляет TypeScript поверить, что там Date. Решение — схема с `z.coerce.date()` и `UserSchema.parse(await res.json())`, а тип — через `z.infer`."
+  type: find-bug
+  language: ts
+  code: |-
+    type User = { id: string; createdAt: Date };
+
+    async function getUser(id: string): Promise<User> {
+      const res = await fetch(`/api/users/${id}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (await res.json()) as User;
+    }
+
+    const user = await getUser('42');
+    console.log(user.createdAt.getFullYear());
+  bugLines:
+    - 6
+  causes:
+    - "`as User` ничего не проверяет: createdAt из JSON — строка, а тип утверждает, что это Date"
+    - Нужно сначала await res.text(), а потом JSON.parse — res.json() теряет типы
+    - "Проверка res.ok стоит не там: ошибочный ответ доходит до return"
+    - Тип User должен быть interface, иначе Date не сохранится
+  answer: 0
+- id: runtime-validation-safeparse-form
+  skill: zod-safe-parse-infer
+  question: runtime-validation-zod
+  difficulty: 2
+  prompt: "Допишите: тип выводится из схемы, а ошибки формы возвращаются без исключений."
+  explanation: "`z.infer` даёт тип из схемы, поэтому источник истины один. `safeParse` не бросает исключение, а возвращает `{ success, data | error }`: это удобно для форм, где нужны fieldErrors. `parse` бросил бы ZodError и лучше подходит там, где ошибка — исключительная ситуация."
+  type: fill-tokens
+  language: ts
+  code: |-
+    const SignupSchema = z.object({
+      email: z.email(),
+      age: z.coerce.number().int().min(18),
+    });
+    type Signup = z.___<typeof SignupSchema>;
+
+    function validate(input: unknown) {
+      const result = SignupSchema.___(input);
+      if (!result.___) {
+        return z.flattenError(result.error).fieldErrors;
+      }
+      return result.data;
+    }
+  tokens:
+    - infer
+    - safeParse
+    - success
+  decoys:
+    - parse
+    - ok
+    - valid
+    - check
+- id: runtime-validation-server-action
+  skill: server-side-validation
+  question: runtime-validation-zod
+  difficulty: 2
+  prompt: Server Function `updateProfile(formData)` в Next.js. На клиенте форма уже проверяется через zodResolver в React Hook Form. Как защитить сервер?
+  explanation: "Клиентская валидация — это удобство, а серверная — защита: Server Function можно вызвать напрямую с любыми данными. Одна схема на клиенте и на сервере даёт одинаковые правила и один тип без дублирования."
+  type: choose-tool
+  options:
+    - label: Прогнать ту же схему через safeParse на сервере и вернуть fieldErrors
+      why: "Лучший вариант: данные проверяются там, где их нельзя подделать, а правила совпадают с клиентскими."
+    - label: Положиться на zodResolver на клиенте
+      why: "Хватило бы для чистого UX, но запрос можно отправить в обход формы: через curl, DevTools или старую версию клиента."
+    - label: Типизировать аргумент как Profile вместо FormData
+      why: "Типы стираются при компиляции: сервер получит то, что прислали, а аннотация лишь скроет отсутствие проверки."
+    - label: Проверить поля вручную через if на сервере
+      why: Работает для одного-двух полей, но правила дублируются и со временем расходятся со схемой клиента и с типом.
+  answer: 0
+
+# satisfies-and-const: принято из черновика 2026-10-13
+- id: satisfies-vs-annotation-quiz
+  skill: ts-satisfies-vs-annotation
+  question: satisfies-and-const
+  difficulty: 2
+  prompt: "Чем `const ROUTES = {...} satisfies Record<string, Route>` отличается от `const ROUTES: Record<string, Route> = {...}`?"
+  explanation: "Аннотация `: T` проверяет значение и заменяет его тип на `T`, поэтому детали теряются. `satisfies T` проверяет так же строго, но оставляет точный выведенный тип. Правило: если тип нужен для проверки, а работать дальше надо с конкретными ключами, используйте `satisfies`."
+  type: quiz
+  options:
+    - label: "satisfies проверяет форму, но оставляет выведенный тип: ключи home и profile известны, и ROUTES.profle будет ошибкой"
+      why: "Верно. Аннотация расширила бы тип до Record<string, Route>: любой строковый ключ стал бы допустим, и опечатку TypeScript бы не заметил."
+    - label: "На уровне типов разницы нет: satisfies — просто более короткая запись аннотации"
+      why: Разница есть. С аннотацией тип переменной равен T, а с satisfies переменная сохраняет свой точный тип, и от этого зависят автодополнение и поиск опечаток.
+    - label: satisfies, как и `as`, отключает проверку, поэтому лишние или неверные поля в значении пропустит
+      why: "Наоборот: `as` — утверждение, и оно ослабляет проверку. satisfies проверяет совместимость, так что `{} satisfies User` не скомпилируется."
+    - label: satisfies делает объект readonly и сужает строки до литералов, как as const
+      why: "Этим занимается as const. satisfies ничего не делает readonly, он только проверяет тип. Если нужны оба эффекта, их комбинируют: `as const satisfies T`."
+  answer: 0
+- id: satisfies-hook-tuple-as-const
+  skill: ts-as-const-tuples
+  question: satisfies-and-const
+  difficulty: 2
+  prompt: TypeScript подчёркивает `onClick={toggle}`. В какой строке настоящая причина ошибки?
+  explanation: Литерал массива `[on, toggle]` выводится как `(boolean | (() => void))[]`. После деструктуризации у toggle тип объединения, и в onClick его передать нельзя. `return [on, toggle] as const` даёт readonly-кортеж `[boolean, () => void]`, как у useState.
+  type: find-bug
+  language: tsx
+  code: |-
+    function useToggle(initial = false) {
+      const [on, setOn] = useState(initial);
+      const toggle = () => setOn((v) => !v);
+      return [on, toggle];
+    }
+
+    function Panel() {
+      const [open, toggle] = useToggle();
+      return (
+        <button onClick={toggle}>{open ? '-' : '+'}</button>
+      );
+    }
+  bugLines:
+    - 4
+  causes:
+    - Без as const хук возвращает массив `(boolean | (() => void))[]`, и у toggle тип объединения, который не подходит для onClick
+    - Параметр по умолчанию в хуке ломает вывод типа useState, поэтому on и toggle получают тип any
+    - Кастомный хук обязан возвращать объект, а не массив, иначе деструктуризация не типизируется
+    - toggle не обёрнут в useCallback, и TypeScript не может вывести стабильный тип функции
+  answer: 0
+- id: satisfies-variant-component-map
+  skill: ts-union-from-const-array
+  question: satisfies-and-const
+  difficulty: 2
+  prompt: "Допишите код: тип Variant должен выводиться из массива, а карта иконок — давать ошибку, если какой-то вариант забыт, и при этом сохранять свой точный тип."
+  explanation: "`as const` превращает массив в readonly-кортеж литералов, а `[number]` достаёт объединение `'info' | 'warning' | 'error'`. В итоге массив — единственный источник и для рендера, и для типов. `satisfies Record<Variant, …>` требует все ключи. `as` пропустил бы неполный объект без ошибки."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const VARIANTS = ['info', 'warning', 'error'] ___;
+    type Variant = (typeof VARIANTS)[___];
+
+    const ICONS = {
+      info: InfoIcon,
+      warning: WarnIcon,
+      error: ErrorIcon,
+    } ___ Record<Variant, ComponentType>;
+  tokens:
+    - as const
+    - number
+    - satisfies
+  decoys:
+    - as
+    - string
+    - keyof
+    - Readonly
+- id: satisfies-theme-tokens-choice
+  skill: ts-as-const-satisfies
+  question: satisfies-and-const
+  difficulty: 3
+  prompt: "Объект токенов темы `{ primary: '#0a7', radius: 8 }`. Нужно, чтобы `theme.primary` имел тип `'#0a7'`, поля были readonly, `theme.primry` давал ошибку, а значение не того типа (например, null) ловилось сразу. Как объявить?"
+  explanation: "`as const` отвечает за точность: литералы и readonly. `satisfies` проверяет форму и не расширяет тип. Порядок фиксирован: `as const` ставится к самому литералу, а `satisfies T` — после него. Запись `satisfies T as const` не скомпилируется, потому что const-утверждение применимо только к литералам. Аннотацию берите, когда ключи динамические и точный тип не нужен."
+  type: choose-tool
+  options:
+    - label: as const satisfies Record<string, string | number>
+      why: Даёт литералы и readonly, сохраняет известные ключи и проверяет, что каждое значение — string или number. Выполнены все четыре требования.
+    - label: "Аннотация `: Record<string, string | number>`"
+      why: "Форму проверит, но тип станет просто Record: primary — string | number, любой ключ допустим, опечатка не ловится. Подходит для словарей с динамическими ключами."
+    - label: Только satisfies Record<string, string | number>
+      why: Ключи сохранятся, и форма будет проверена, но поля не станут readonly, а литералы расширятся до string. Достаточно, когда точные значения не нужны.
+    - label: Только as const
+      why: "Даёт литералы и readonly, но не проверяет форму: null или объект в значении пройдут молча. Хватает для списков вариантов, где проверять нечего."
+  answer: 0
+
+# typescript-at-scale: принято из черновика 2026-10-13
+- id: typescript-at-scale-strict-rollout
+  skill: ts-strictness-migration
+  question: typescript-at-scale
+  difficulty: 3
+  prompt: В большом проекте на слабых настройках TypeScript решили включить `strict`. Как это сделать правильно?
+  explanation: "Строгость вводят постепенно: по папкам или пакетам, с метрикой долга в CI. Метрика — счётчик `any` и `@ts-expect-error`, который не должен расти. Массовая «починка» через `as any` или `@ts-ignore` прячет ошибки и делает типы ложными. Смысл в том, чтобы каждый включённый флаг реально защищал код, а не только давал зелёный CI."
+  type: quiz
+  options:
+    - label: Включать strict-флаги по папкам или пакетам, а счётчик any и @ts-expect-error в CI не должен расти
+      why: Верно. Ошибки чинят порциями, новый код сразу пишут строго, а метрика не даёт долгу расти незаметно.
+    - label: Включить strict одним коммитом и быстро закрыть ошибки через as any
+      why: Тысячи `as any` отключают проверку там, где она нужнее всего. Типы начинают врать, и это хуже исходного состояния.
+    - label: Включить strict и поставить @ts-ignore над каждой ошибкой, потом разобрать
+      why: "`@ts-ignore` молчит и после исправления ошибки, поэтому «потом» не наступит. Если подавлять, то через `@ts-expect-error` и со счётчиком."
+    - label: "Не включать strict: в большом проекте выгода не окупает затрат"
+      why: Без strict nullable-ошибки и неявные any доходят до продакшена. Постепенное включение делает затраты управляемыми.
+  answer: 0
+- id: typescript-at-scale-js-migration-recipe
+  skill: ts-strictness-migration
+  question: typescript-at-scale
+  difficulty: 2
+  prompt: Расставьте шаги постепенной миграции большого JS-проекта на TypeScript.
+  explanation: "Сначала JS и TS должны уживаться вместе (`allowJs`), а счётчик долга фиксируют с первого дня. Файлы переводят снизу вверх по графу зависимостей: тогда у верхних модулей уже есть типизированные импорты. Строгие флаги по ходу включают в папках, уже переведённых на TS. `allowJs` убирают, когда .js не осталось, и только потом включают strict в корне."
+  type: order
+  kind: recipe
+  steps:
+    - Включить allowJs и завести в CI счётчик any и @ts-expect-error, который не должен расти
+    - "Переименовать в .ts листья графа зависимостей: утилиты и общие типы"
+    - "Подниматься по графу выше: сервисы, хуки, компоненты"
+    - Удалить allowJs, когда .js-файлов не осталось
+    - Включить strict в корневом tsconfig для всего проекта
+- id: typescript-at-scale-unsafe-as-boundary
+  skill: ts-typed-boundaries
+  question: typescript-at-scale
+  difficulty: 2
+  prompt: "API иногда возвращает `name: null`, и в проде падает «Cannot read properties of null». TypeScript ошибок не показывал. Найдите строку, где типы разошлись с реальностью."
+  explanation: "`res.json()` возвращает `Promise<any>`, а `as User` — лишь утверждение без проверки в рантайме. Внешние данные проверяют на границе схемой, например `UserSchema.parse(await res.json())` в zod или valibot. Тогда тип выводится из схемы, а ошибка ловится сразу при получении данных."
+  type: find-bug
+  language: ts
+  code: |-
+    type User = { id: string; name: string };
+
+    async function getUserName(id: string) {
+      const res = await fetch(`/api/users/${id}`);
+      const user = (await res.json()) as User;
+      return user.name.toUpperCase();
+    }
+  bugLines:
+    - 5
+  causes:
+    - as User только утверждает тип и не проверяет данные в рантайме — внешний ответ нужно валидировать схемой
+    - Без as User код не скомпилируется, поэтому проблема в типе User
+    - fetch нужно вызывать с дженериком fetch<User>, тогда ответ проверится
+    - toUpperCase нельзя вызывать без optional chaining в strict-режиме
+  answer: 0
+- id: typescript-at-scale-find-slow-type
+  skill: ts-performance-diagnostics
+  question: typescript-at-scale
+  difficulty: 3
+  prompt: IDE заметно тормозит на одном пакете. `tsc --extendedDiagnostics` показал большой Check time и миллионы instantiations. Как найти конкретный тип-виновник?
+  explanation: "`--extendedDiagnostics` отвечает, что проверка медленная, а `--generateTrace` показывает, где именно. Трейс открывают в Perfetto или разбирают `@typescript/analyze-trace` и находят файлы и типы с самым долгим временем проверки. Обычно виноваты глубокие условные и рекурсивные типы или огромные объединения."
+  type: choose-tool
+  options:
+    - label: tsc --generateTrace и анализ трейса
+      why: Трейс показывает время проверки по файлам и типам. Так находят конкретный рекурсивный тип или огромное объединение.
+    - label: Включить skipLibCheck
+      why: Ускоряет, только если тяжёлые сами .d.ts библиотек. Ваш тип в исходниках не найдёт, а instantiations останутся.
+    - label: Разбить проект на project references
+      why: Ускоряет повторные проверки через tsc -b. Медленный тип останется медленным и продолжит тормозить IDE.
+    - label: Перейти на сборку через esbuild
+      why: esbuild только транслирует и вообще не проверяет типы. IDE и tsc --noEmit будут тормозить так же.
+  answer: 0
+
+# typescript-utility-types: принято из черновика 2026-10-13
+- id: typescript-utility-types-main-idea
+  skill: utility-types-derive
+  question: typescript-utility-types
+  difficulty: 2
+  prompt: В чём главная польза утилитарных типов (`Partial`, `Pick`, `ComponentProps`, `ReturnType`…) в React-коде?
+  explanation: "Утилитарные типы строят новый тип из существующего: модели, функции, компонента или HTML-элемента. Источник истины один, поэтому при его изменении производные типы обновятся сами. Все типы стираются при компиляции, поэтому данные из внешних источников нужно проверять в рантайме отдельно, например через zod."
+  type: quiz
+  options:
+    - label: Тип выводится из одного источника истины, поэтому изменения модели или компонента сами доходят до производных типов
+      why: Верно. Ручные копии полей расходятся с оригиналом, а `Omit<User, 'id'>` или `ComponentProps<typeof Select>` всегда соответствуют исходному типу.
+    - label: Они добавляют рантайм-проверки props, поэтому можно отказаться от валидации
+      why: Типы стираются при компиляции, и в рантайме от них ничего не остаётся. Проверять данные приходится отдельно.
+    - label: Они гарантируют, что ответ сервера соответствует типу, например `Awaited<ReturnType<typeof fetchUser>>`
+      why: "Этот тип лишь повторяет то, что объявила функция. Если сервер вернул другое, TypeScript об этом не узнает: нужна схема вроде zod."
+    - label: Они нужны в основном авторам библиотек, а в приложении понятнее писать интерфейсы вручную
+      why: Ручные интерфейсы дублируют поля и устаревают. Формы, DTO и обёртки над компонентами есть в любом приложении.
+  answer: 0
+- id: typescript-utility-types-compose
+  skill: utility-types-compose
+  question: typescript-utility-types
+  difficulty: 2
+  prompt: Заполните пропуски так, чтобы каждый тип соответствовал комментарию над ним.
+  explanation: "`Omit` убирает `id`, а `Partial` делает остальные поля необязательными: так выглядит тело PATCH. `Pick<User, 'id'>` оставил бы только `id`. `Awaited` разворачивает `Promise<User>` в `User`. `Record` с ключом-объединением требует все варианты: забытая роль даст ошибку компиляции."
+  type: fill-tokens
+  language: ts
+  code: |-
+    type Role = 'admin' | 'user';
+    type User = { id: string; name: string; role: Role };
+    declare function fetchUser(id: string): Promise<User>;
+
+    // PATCH: всё необязательно, id менять нельзя
+    type UserPatch = Partial<___<User, 'id'>>;
+    // User, а не Promise<User>
+    type Fetched = ___<ReturnType<typeof fetchUser>>;
+    // забыть роль — ошибка компиляции
+    const labels: ___<Role, string> = {
+      admin: 'Администратор',
+      user: 'Пользователь',
+    };
+  tokens:
+    - Omit
+    - Awaited
+    - Record
+  decoys:
+    - Pick
+    - Required
+    - Promise
+    - Map
+- id: typescript-utility-types-omit-union
+  skill: omit-union-distributive
+  question: typescript-utility-types
+  difficulty: 3
+  prompt: TypeScript ругается на `d.text` в строке 8, хотя `d.type` проверен. Где ошибка?
+  explanation: "`Omit<A | B, K>` не распределяется по вариантам объединения. Он берёт только общие ключи (`type`, `id`), и вариант `add` теряет поле `text`. Решение — распределяющий Omit: `type DOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never`."
+  type: find-bug
+  language: ts
+  code: |-
+    type Action =
+      | { type: 'add'; id: string; text: string }
+      | { type: 'remove'; id: string };
+
+    type Draft = Omit<Action, 'id'>;
+
+    function describe(d: Draft) {
+      if (d.type === 'add') return d.text;
+      return 'remove';
+    }
+  bugLines:
+    - 5
+  causes:
+    - "`Omit` на объединении схлопывает его до общих ключей, поэтому поле `text` и различие вариантов теряются"
+    - Сужение по `d.type === 'add'` не работает без `as const` у литералов
+    - "`Omit` удаляет и `type`, ведь он есть в обоих вариантах"
+    - В объединении нельзя повторять одно и то же поле `id` в разных вариантах
+  answer: 0
+- id: typescript-utility-types-status-config
+  skill: record-exhaustive-keys
+  question: typescript-utility-types
+  difficulty: 2
+  prompt: Есть `type Status = 'draft' | 'paid' | 'shipped'`. Нужен объект с цветом и подписью бейджа для каждого статуса. Когда добавят новый статус, компилятор должен сам указать, где не хватает конфигурации. Как типизировать?
+  explanation: "Правило: словарь с ключом-объединением типизируют через `Record<Union, V>`. Он требует все ключи и не пускает лишние. `Partial<Record>` и индексная сигнатура этой проверки лишены, а `Map` проверяет ключи только при вызове `set`."
+  type: choose-tool
+  options:
+    - label: Record<Status, BadgeConfig>
+      why: "Лучший вариант: TypeScript потребует ключ для каждого статуса, а новый статус сразу даст ошибку в конфиге."
+    - label: Partial<Record<Status, BadgeConfig>>
+      why: Подходит, когда конфиг задаётся не для всех ключей и есть значение по умолчанию. Забытый статус компилятор пропустит.
+    - label: "{ [key: string]: BadgeConfig }"
+      why: Нужен для словаря с заранее неизвестными ключами, например по id. Опечатки и пропущенные статусы не ловит.
+    - label: new Map<Status, BadgeConfig>()
+      why: Уместен при динамическом наполнении и частых добавлениях и удалениях. Полноту ключей компилятор не проверит, а `get` вернёт `undefined`.
+  answer: 0

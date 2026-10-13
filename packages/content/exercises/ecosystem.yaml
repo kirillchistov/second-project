@@ -575,3 +575,274 @@
     - Нельзя одновременно передавать className и style — style отключает классы
     - Свойство background в inline-стилях не работает, нужен backgroundColor
   answer: 0
+
+# bundling-tree-shaking: принято из черновика 2026-10-13
+- id: bundling-cjs-no-tree-shaking
+  skill: tree-shaking-conditions
+  question: bundling-tree-shaking
+  difficulty: 2
+  prompt: Команда заменила `import _ from 'lodash'` на `import { debounce } from 'lodash'`, но размер бандла не изменился. Почему?
+  explanation: "Tree-shaking опирается на статическую структуру ES-модулей: `import`/`export` известны до выполнения кода. В CommonJS экспорты — это обычный объект, который собирается в рантайме. Нужна ESM-сборка (`lodash-es`, `es-toolkit`), именованный импорт и отсутствие побочных эффектов при импорте."
+  type: quiz
+  options:
+    - label: "lodash — CommonJS: `module.exports` собирается в рантайме, и бандлер не может статически доказать, что остальное не нужно"
+      why: Верно. Анализ возможен только для статических `import`/`export`. Для CJS бандлер оставляет модуль целиком.
+    - label: "Синтаксис импорта ничего не решает: именованный импорт сработал бы, только если бы ещё и импорт по умолчанию удалили из проекта"
+      why: Дело не в синтаксисе. Для CJS именованный импорт — лишь interop поверх того же объекта `module.exports`, а он всё равно попадает в бандл целиком.
+    - label: "Нужно добавить `sideEffects: false` в package.json приложения, тогда lodash вырежется"
+      why: "`sideEffects` позволяет выбрасывать неиспользуемые ESM-модули целиком, но не делает CommonJS статически анализируемым."
+    - label: Tree-shaking работает только для кода проекта, а node_modules бандлер не трогает
+      why: "Неверно: ESM-зависимости (es-toolkit, lodash-es) отлично шейкаются. Главное — формат модулей, а не их расположение."
+  answer: 0
+- id: bundling-lazy-inside-component
+  skill: code-splitting-lazy
+  question: bundling-tree-shaking
+  difficulty: 2
+  prompt: При каждом нажатии клавиши редактор на мгновение показывает спиннер, теряет курсор и историю undo. Найдите ошибку.
+  explanation: "`lazy` возвращает новый тип компонента. Если вызвать его внутри рендера, на каждом рендере появляется новый тип: React размонтирует старый Editor, монтирует новый и снова уходит в Suspense. Правило: `lazy` вызывают только на верхнем уровне модуля."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Post({ editing }: { editing: boolean }) {
+      const [draft, setDraft] = useState('');
+      const Editor = lazy(() => import('./Editor'));
+
+      if (!editing) return <PostView />;
+      return (
+        <Suspense fallback={<Spinner />}>
+          <Editor value={draft} onChange={setDraft} />
+        </Suspense>
+      );
+    }
+  bugLines:
+    - 3
+  causes:
+    - "`lazy` вызывается внутри компонента: на каждом рендере создаётся новый тип Editor, и React перемонтирует его со сбросом состояния"
+    - Suspense нужно ставить снаружи Post, а не внутри него
+    - В `import()` нужно явно добавить `.then((m) => m.default)`, иначе lazy не найдёт компонент
+    - Состояние draft должно жить внутри Editor, иначе lazy-компонент нельзя контролировать снаружи
+  answer: 0
+- id: bundling-heavy-rare-feature
+  skill: code-splitting-choice
+  question: bundling-tree-shaking
+  difficulty: 2
+  prompt: Модалку экспорта в PDF (библиотека весит ~400 КБ) открывают около 5% пользователей по кнопке. Сейчас она в основном бандле и замедляет старт. Что сделать?
+  explanation: "Правило: код, который нужен не всем и не сразу, выносят в отдельный чанк через динамический `import()`. Вендорные чанки помогают кэшированию, `sideEffects` — вырезанию неиспользуемого, а preload ускоряет загрузку того, что точно понадобится."
+  type: choose-tool
+  options:
+    - label: Загружать модалку через `lazy(() => import('./ExportPdf'))` с Suspense
+      why: "Лучший вариант: 400 КБ уходят в отдельный чанк и грузятся только по клику. Остальные 95% пользователей их не скачивают и не парсят."
+    - label: Вынести библиотеку в отдельный вендорный чанк
+      why: Улучшит кэширование между деплоями, но чанк по-прежнему грузится на старте. Подходит для React и других стабильных зависимостей.
+    - label: "Указать `sideEffects: false` в package.json"
+      why: Помогает выбросить неиспользуемые модули. Здесь код используется, поэтому tree-shaking его не удалит.
+    - label: Добавить `modulepreload` для библиотеки
+      why: Preload заставит скачать её раньше, а не позже. Уместен для чанка следующего вероятного маршрута, а не для редкой функции.
+  answer: 0
+- id: bundling-reduce-initial-js
+  skill: bundle-size-optimization
+  question: bundling-tree-shaking
+  difficulty: 2
+  prompt: Главная страница долго становится интерактивной из-за объёма JS. Расставьте шаги оптимизации по порядку.
+  explanation: Сначала измеряем, иначе можно оптимизировать не то. Затем делим код по маршрутам — это самый выгодный сплит. Prefetch имеет смысл, только когда отдельные чанки маршрутов уже есть. После изменений пересобираем и сравниваем отчёт с исходным. Достигнутый размер записываем как бюджет, чтобы CI не дал ему снова вырасти.
+  type: order
+  kind: recipe
+  steps:
+    - Собрать прод-бандл и открыть анализатор (vite-bundle-analyzer), найти, что занимает место
+    - Разделить код по маршрутам на отдельные чанки
+    - Настроить prefetch чанка вероятного следующего маршрута
+    - Пересобрать проект и сравнить отчёт анализатора с исходным
+    - Записать достигнутый размер как бюджет и проверять его в CI
+
+# i18n: принято из черновика 2026-10-13
+- id: i18n-core-approach
+  skill: i18n-architecture
+  question: i18n
+  difficulty: 2
+  prompt: Какой подход к интернационализации React-приложения считается правильным?
+  explanation: "Базовый рецепт: тексты лежат в словарях по ключам и подключаются библиотекой (react-i18next, FormatJS, Lingui). Плюралы и порядок слов задаются ICU-сообщениями, числа, даты и валюты форматируются через Intl. Язык берут из URL или настроек пользователя, а словари грузят лениво — по языку и по namespaces."
+  type: quiz
+  options:
+    - label: Тексты в словарях по ключам через библиотеку, плюралы — ICU-сообщения, числа и даты — Intl, словари грузятся лениво по языку
+      why: Верно. Так переводчик управляет формами и порядком слов, форматы учитывают локаль, а бандл не тащит все языки сразу.
+    - label: Держать все языки в одном объекте в бандле и собирать фразы конкатенацией t('hello') + ' ' + name
+      why: Склейка ломает языки с другим порядком слов, а все словари в бандле раздувают его. Нужна интерполяция внутри одного сообщения и ленивая загрузка.
+    - label: Переводить только строки, а числа и даты форматировать через toFixed и шаблоны — форматы везде одинаковые
+      why: "Форматы различаются: разделители, положение валюты, порядок дня и месяца. Для этого есть Intl.NumberFormat и Intl.DateTimeFormat."
+    - label: Определять язык через navigator.language прямо в рендере, без хранения в URL или профиле
+      why: На сервере navigator нет, поэтому при SSR языки разойдутся и будет ошибка гидрации. К тому же пользователь не сможет выбрать язык сам.
+  answer: 0
+- id: i18n-binary-plural-bug
+  skill: i18n-pluralization
+  question: i18n
+  difficulty: 2
+  prompt: Русские пользователи видят «5 товара» и «21 товара». Найдите ошибку.
+  explanation: "В русском у плюрализации несколько форм: one (1, 21 товар), few (2–4 товара), many (5, 11 товаров). Условие «1 или не 1» их не различает. Передайте count в одно сообщение — t('cart.items', { count }), — а формы опишите в словаре через ICU plural или суффиксы _one/_few/_many. Число при этом остаётся внутри сообщения, и порядок слов задаёт переводчик."
+  type: find-bug
+  language: tsx
+  code: |-
+    function CartBadge({ count }: { count: number }) {
+      const { t } = useTranslation();
+      const word =
+        count === 1 ? t('cart.item') : t('cart.items');
+      return <span>{count} {word}</span>;
+    }
+  bugLines:
+    - 3
+    - 4
+  causes:
+    - Плюрал выбирается бинарным условием, а в русском формы one/few/many — нужно одно сообщение с count и формами в словаре
+    - t нельзя вызывать вне JSX — перевод не обновится при смене языка
+    - Ключи с точкой воспринимаются как вложенный namespace, поэтому перевод не находится
+    - count нужно привести к строке, иначе библиотека выберет форму other
+  answer: 0
+- id: i18n-intl-formatters
+  skill: i18n-intl-formatting
+  question: i18n
+  difficulty: 2
+  prompt: Допишите форматирование цены и даты по локали так, чтобы дата при SSR совпала на сервере и клиенте.
+  explanation: "Валюту и числа форматирует Intl.NumberFormat, даты — Intl.DateTimeFormat. Без явного timeZone сервер (часто в UTC) и браузер пользователя могут получить разную дату, и тогда случится ошибка гидрации. Опция пишется в camelCase: timeZone."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const price = new Intl.___(locale, {
+      style: 'currency',
+      currency: 'RUB',
+    }).format(total);
+
+    const date = new Intl.___(locale, {
+      dateStyle: 'medium',
+      ___: 'Europe/Moscow',
+    }).format(createdAt);
+  tokens:
+    - NumberFormat
+    - DateTimeFormat
+    - timeZone
+  decoys:
+    - PluralRules
+    - DateFormat
+    - timezone
+    - locale
+- id: i18n-locale-storage-choice
+  skill: i18n-locale-source
+  question: i18n
+  difficulty: 2
+  prompt: Публичный каталог магазина на Next.js на ru и en. Обе версии должны индексироваться, а ссылка должна открываться на том же языке у получателя. Где хранить текущий язык?
+  explanation: "Правило: публичный контент, SEO и шаринг — язык в URL. Приложение за логином — cookie или профиль. Accept-Language подходит только как подсказка для первого редиректа. Источник языка должен быть доступен серверу, иначе SSR и клиент разойдутся."
+  type: choose-tool
+  options:
+    - label: "Сегмент URL: /ru/catalog, /en/catalog"
+      why: "У каждой версии свой адрес: поисковик индексирует обе, ссылка несёт язык, а сервер знает его уже при SSR."
+    - label: Cookie с выбранным языком
+      why: "Хорошо для приложений за логином. Но URL для всех языков один: поисковик увидит одну версию, а ссылка откроется на языке получателя."
+    - label: localStorage
+      why: "На сервере он недоступен: SSR отрисует язык по умолчанию, клиент — другой, и будет мигание или ошибка гидрации. Годится разве что для чисто клиентского SPA."
+    - label: Accept-Language / navigator.language
+      why: "Удобен как подсказка для первого редиректа на /en. Как единственный источник не подходит: язык нельзя выбрать вручную, а ссылки не воспроизводимы."
+  answer: 0
+
+# package-management: принято из черновика 2026-10-13
+- id: package-management-lock-vs-range
+  skill: lockfile-reproducible-installs
+  question: package-management
+  difficulty: 1
+  prompt: 'В `package.json` указано `"react": "^19.2.0"`, в закоммиченном lock-файле — 19.2.0. Вышла 19.3.0. Какую версию поставит `npm ci` в CI?'
+  explanation: "`package.json` задаёт допустимый диапазон, а lock-файл фиксирует точную версию всего дерева. `npm ci` ставит строго по lock-файлу и падает, только если он не согласован с `package.json`. Переход на новую версию делают явно, например через `npm update` или `npm install pkg@x`, и коммитят обновлённый lock-файл."
+  type: quiz
+  options:
+    - label: 19.2.0 — `npm ci` ставит ровно то, что записано в lock-файле
+      why: Верно. Lock-файл — точный снимок дерева. Диапазон из package.json при этом лишь проверяется на совместимость.
+    - label: 19.3.0 — `^` означает «последняя 19.x», а lock-файл лишь подсказка
+      why: "`^` описывает допустимые версии, но не требует брать самую свежую. При наличии lock-файла выбор уже сделан."
+    - label: "Установка упадёт: lock-файл отстаёт от последней версии в диапазоне"
+      why: "`npm ci` падает при расхождении lock-файла с package.json. Версия 19.2.0 входит в `^19.2.0`, так что расхождения нет."
+    - label: Зависит от того, что лежит в node_modules на CI-агенте
+      why: "`npm ci` перед установкой удаляет node_modules и ставит всё с нуля по lock-файлу. Поэтому результат воспроизводим."
+  answer: 0
+- id: package-management-react-in-library-deps
+  skill: peer-dependencies
+  question: package-management
+  difficulty: 2
+  prompt: Приложение на React 19 подключило этот UI-кит, и компоненты кита падают с «Invalid hook call». Какая строка `package.json` библиотеки виновата?
+  explanation: Пакет из `dependencies` библиотеки ставится как её собственная копия. Получаются два React в бандле, а хуки работают только с одним экземпляром. React в библиотеке указывают в `peerDependencies` (например, `^18.3.0 || ^19.0.0`), а для разработки дублируют в `devDependencies`. Проверить дубли можно командой `npm ls react`.
+  type: find-bug
+  language: js
+  code: |-
+    {
+      "name": "@acme/ui-kit",
+      "version": "2.3.0",
+      "main": "dist/index.js",
+      "dependencies": {
+        "clsx": "^2.1.0",
+        "react": "^18.3.0"
+      },
+      "devDependencies": {
+        "typescript": "^5.9.0"
+      }
+    }
+  bugLines:
+    - 7
+  causes:
+    - "React указан в dependencies: у библиотеки ставится своя копия React 18, и в бандле оказываются две копии React"
+    - Нужен `~18.3.0` вместо `^18.3.0`, иначе приедет несовместимый минор
+    - "`main` должен указывать на исходники, а не на dist"
+    - clsx тоже должен быть в peerDependencies, иначе хуки не найдут контекст
+  answer: 0
+- id: package-management-patch-transitive-vuln
+  skill: transitive-dependency-override
+  question: package-management
+  difficulty: 2
+  prompt: "`npm audit` нашёл уязвимость в `tiny-parser@1.2.3`. Его тянет ваша зависимость `legacy-lib` с диапазоном `^1.2.0`. Исправление вышло только в `tiny-parser@2.0.1`, и по changelog используемое API не менялось. Мейнтейнер `legacy-lib` не отвечает. Как закрыть уязвимость?"
+  explanation: Транзитивную версию, которую нельзя получить через диапазоны, принудительно меняют через `overrides` (в npm) или `resolutions` (в Yarn). После этого нужно прогнать тесты и закоммитить package.json вместе с lock-файлом. Удаление lock-файла и `--force` дают неконтролируемые изменения дерева.
+  type: choose-tool
+  options:
+    - label: '`overrides`: `{ "legacy-lib": { "tiny-parser": "2.0.1" } }` и прогон тестов'
+      why: Точечно меняет версию транзитивной зависимости, даже вне диапазона родителя. Остальное дерево не трогает.
+    - label: Удалить lock-файл и выполнить `npm install`
+      why: "Обновит десятки пакетов разом и всё равно не выйдет за `^1.2.0`: 2.0.1 не поставится. Уместно разве что при полном пересоздании проекта."
+    - label: Добавить `tiny-parser@2.0.1` в свои dependencies
+      why: Ставит отдельную копию для вашего кода. `legacy-lib` останется на своей вложенной 1.2.3. Так стоит делать, только если пакет нужен вам напрямую.
+    - label: "`npm audit fix --force`"
+      why: Может поставить мажор `legacy-lib` или откатить пакеты, ломая API. Подойдёт для быстрой оценки в отдельной ветке, но не как осознанный фикс.
+  answer: 0
+- id: package-management-major-upgrade-recipe
+  skill: safe-major-upgrade
+  question: package-management
+  difficulty: 2
+  prompt: Расставьте шаги безопасного обновления мажорной версии библиотеки в приложении.
+  explanation: Мажор по semver может ломать API. Поэтому сначала изучают breaking changes и совместимость `peerDependencies`. Затем в отдельной ветке явно обновляют пакет и сразу проверяют, что не появилась вторая копия. Дальше чинят код, пока не пройдут `tsc` и тесты. В конце package.json и lock-файл коммитят вместе, а CI проверяет их через `npm ci`.
+  type: order
+  kind: recipe
+  steps:
+    - Прочитать changelog и migration guide, сверить peerDependencies
+    - В отдельной ветке обновить пакет явно (`npm install lib@^5`) и проверить `npm ls lib` на дубли
+    - Исправить breaking changes (при наличии — через codemod), пока не пройдут tsc и тесты
+    - Закоммитить package.json и lock-файл вместе и прогнать CI с `npm ci`
+
+# react-router: принято из черновика 2026-10-13
+- id: react-router-v8-entry-imports
+  skill: react-router-v8-imports
+  question: react-router
+  difficulty: 2
+  prompt: Проект обновили до React Router v8, и сборка падает на точке входа. Найдите строку с ошибкой.
+  explanation: В v7 пакет react-router-dom оставили только для совместимости, а в v8 его удалили. RouterProvider теперь импортируют из `react-router/dom`, всё остальное — из `react-router`. Ещё v8 требует React 19.2+ и поставляется только как ESM.
+  type: find-bug
+  language: tsx
+  code: |-
+    import { createBrowserRouter } from 'react-router';
+    import { RouterProvider } from 'react-router-dom';
+    import { createRoot } from 'react-dom/client';
+    import { routes } from './routes';
+
+    const router = createBrowserRouter(routes);
+
+    createRoot(document.getElementById('root')!)
+      .render(<RouterProvider router={router} />);
+  bugLines:
+    - 2
+  causes:
+    - "В v8 пакета react-router-dom больше нет: RouterProvider нужно импортировать из react-router/dom"
+    - createBrowserRouter нельзя вызывать на уровне модуля, только внутри компонента
+    - RouterProvider нужно дополнительно обернуть в <BrowserRouter>
+    - В data mode маршруты задаются только через JSX <Routes>, а не массивом объектов
+  answer: 0

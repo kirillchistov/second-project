@@ -23,5 +23,6 @@ export const UNITS: UnitDef[] = [
   { id: 'testing', title: 'Тестирование', goal: 'Testing Library, MSW, стратегия тестов', topics: ['testing'] },
   { id: 'quality', title: 'Доступность и безопасность', goal: 'a11y, XSS, CSP, обработка ошибок', topics: ['quality'] },
   { id: 'ecosystem', title: 'Экосистема', goal: 'Роутинг, сборка, фреймворки, стили', topics: ['ecosystem'] },
+  { id: 'fullstack', title: 'Fullstack', goal: 'HTTP и кэширование, дизайн API, аутентификация, Node.js, базы и очереди', topics: ['fullstack'] },
   { id: 'architecture', title: 'Архитектура', goal: 'Структура проекта, паттерны, дизайн-системы, микрофронтенды', topics: ['architecture'] },
 ];

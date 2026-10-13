@@ -950,3 +950,148 @@
     - Найти минимальное полное состояние, остальное вычислять из него
     - Определить, какой компонент владеет каждым кусочком состояния
     - "Добавить обратный поток данных: колбэки из дочерних обновляют состояние владельца"
+
+# fragments: принято из черновика 2026-10-13
+- id: fragments-ref-focusin-fill
+  skill: fragment-ref-api
+  question: fragments
+  difficulty: 2
+  prompt: "Допишите компонент (React 19.3): нужно узнавать, когда фокус попал в любое поле группы, без обёрточного div."
+  explanation: "Ref передаётся только полной форме `<Fragment>`. FragmentInstance повторяет API EventTarget: `addEventListener` вешает слушатель на каждый дочерний элемент, а `removeEventListener` в cleanup снимает его. focusin всплывает, поэтому сработает и для вложенных input."
+  type: fill-tokens
+  language: jsx
+  code: |-
+    function FieldGroup({ children, onFocusIn }) {
+      const ref = useRef(null);
+      useEffect(() => {
+        const group = ref.current;
+        group.___('focusin', onFocusIn);
+        return () =>
+          group.___('focusin', onFocusIn);
+      }, [onFocusIn]);
+      return (
+        <Fragment ___={ref}>{children}</Fragment>
+      );
+    }
+  tokens:
+    - addEventListener
+    - removeEventListener
+    - ref
+  decoys:
+    - on
+    - off
+    - key
+    - onFocus
+- id: fragments-ref-observe-bug
+  skill: fragment-ref-api
+  question: fragments
+  difficulty: 3
+  prompt: React 19.3. Компонент должен вызвать onSeen, когда содержимое станет видимым, но в эффекте падает TypeError. Найдите строку с ошибкой.
+  explanation: "`IntersectionObserver.observe` ожидает DOM Element, а `ref.current` у фрагмента — это FragmentInstance, а не узел. Правильно наоборот: `ref.current.observeUsing(io)`. Тогда наблюдатель подключится к каждому дочернему элементу. В cleanup можно вызвать `unobserveUsing(io)` или `disconnect()`."
+  type: find-bug
+  language: jsx
+  code: |-
+    function TrackedSection({ children, onSeen }) {
+      const ref = useRef(null);
+      useEffect(() => {
+        const io = new IntersectionObserver((es) => {
+          if (es.some((e) => e.isIntersecting)) onSeen();
+        });
+        io.observe(ref.current);
+        return () => io.disconnect();
+      }, [onSeen]);
+      return <Fragment ref={ref}>{children}</Fragment>;
+    }
+  bugLines:
+    - 7
+  causes:
+    - "observe() ждёт DOM-элемент, а FragmentInstance им не является: нужно ref.current.observeUsing(io)"
+    - Fragment не принимает ref — нужно вернуть обёрточный div
+    - В эффекте ref.current всегда null, потому что фрагмент не создаёт DOM-узел
+    - disconnect() в cleanup не останавливает наблюдение, нужен unobserve(ref.current)
+  answer: 0
+
+# promises-async-await: принято из черновика 2026-10-13
+- id: promises-microtask-vs-timeout
+  skill: event-loop-order
+  question: promises-async-await
+  difficulty: 1
+  prompt: Почему колбэк `setTimeout(fn, 0)` выполняется позже `Promise.resolve().then(fn)`, даже если setTimeout вызван раньше?
+  explanation: Event loop берёт одну макрозадачу (скрипт, таймер, событие), затем полностью опустошает очередь микрозадач и только потом переходит к следующей макрозадаче. Колбэки промисов, продолжения после await и queueMicrotask — микрозадачи. Поэтому они всегда опережают таймеры, даже с задержкой 0.
+  type: quiz
+  options:
+    - label: После синхронного кода event loop выполняет все микрозадачи (then, await), и только потом берёт одну макрозадачу (таймер)
+      why: Верно. Очередь микрозадач опустошается целиком после каждой макрозадачи, а колбэк таймера — следующая макрозадача.
+    - label: У setTimeout минимальная задержка около 4 мс, а промис резолвится мгновенно
+      why: "Ограничение в 4 мс действует для вложенных таймеров. Даже без него таймер отстал бы: дело в типе очереди, а не во времени."
+    - label: Промисы выполняются в отдельном потоке и поэтому успевают раньше
+      why: "JavaScript здесь однопоточный: then выполняется в том же потоке. Промис не создаёт поток, он лишь планирует микрозадачу."
+    - label: "Порядок не гарантирован: какой колбэк выполнится первым, зависит от нагрузки браузера"
+      why: "Порядок детерминирован спецификацией: микрозадачи текущей итерации всегда выполняются раньше следующей макрозадачи."
+  answer: 0
+- id: promises-async-run-order
+  skill: event-loop-order
+  question: promises-async-await
+  difficulty: 3
+  prompt: Код выполняется как модуль в браузере. Что будет в консоли?
+  explanation: "Синхронно: A, D (тело async до await), H. Затем микрозадачи в порядке постановки: C, продолжение после await → E. Промис run() резолвится только сейчас, поэтому F встаёт в очередь после уже ожидающего G. Последним идёт таймер B."
+  type: predict-output
+  language: ts
+  code: |-
+    console.log('A');
+    setTimeout(() => console.log('B'), 0);
+    queueMicrotask(() => console.log('C'));
+    async function run() {
+      console.log('D');
+      await Promise.resolve();
+      console.log('E');
+    }
+    run().then(() => console.log('F'));
+    Promise.resolve().then(() => console.log('G'));
+    console.log('H');
+  options:
+    - A D H C E G F B
+    - A D H C E F G B
+    - A H D C E G F B
+    - A D H B C E G F
+  answer: 0
+- id: promises-foreach-async
+  skill: async-iteration
+  question: promises-async-await
+  difficulty: 2
+  prompt: Тост «Всё сохранено» показывается до того, как запросы завершились, а ошибки save не ловятся. Найдите строку с ошибкой.
+  explanation: "forEach игнорирует промисы, которые возвращает колбэк: saveAll не ждёт сохранений, а их ошибки становятся unhandledrejection. Последовательно — `for (const item of items) await save(item)`, параллельно — `await Promise.all(items.map(save))`."
+  type: find-bug
+  language: ts
+  code: |-
+    async function saveAll(items: Item[]) {
+      items.forEach(async (item) => {
+        await save(item);
+      });
+      toast('Всё сохранено');
+    }
+  bugLines:
+    - 2
+  causes:
+    - forEach не ждёт промисы из async-колбэка — функция идёт дальше сразу
+    - await внутри стрелочной функции запрещён, нужен обычный function
+    - toast нужно вызвать через queueMicrotask, чтобы он выполнился позже
+    - async-функция без return не возвращает промис
+  answer: 0
+- id: promises-dashboard-combinator
+  skill: promise-combinators
+  question: promises-async-await
+  difficulty: 2
+  prompt: Дашборд грузит три независимых виджета из трёх API. Если один API упал, остальные виджеты всё равно нужно показать, а для упавшего — заглушку с ошибкой. Что использовать?
+  explanation: "Выбор комбинатора: нужны все результаты, и сбой одного не должен ронять остальные — allSettled; все или ничего — all; первый успешный — any; первый завершившийся (например, таймаут) — race. Независимые запросы запускайте параллельно, а не цепочкой await."
+  type: choose-tool
+  options:
+    - label: await Promise.allSettled([...])
+      why: Ждёт все запросы и для каждого отдаёт status fulfilled или rejected с value или reason — удобно рендерить данные или заглушку.
+    - label: await Promise.all([...])
+      why: Отклоняется на первой же ошибке, и успешные результаты теряются. Подходит, когда без любого из ответов экран не имеет смысла.
+    - label: await Promise.any([...])
+      why: Вернёт только первый успешный ответ. Подходит для запроса к нескольким зеркалам, когда достаточно любого одного.
+    - label: Три await подряд, каждый в своём try/catch
+      why: "Работает, но это водопад: запросы идут по очереди, и время складывается. Оправдано, только если запросы зависят друг от друга."
+  answer: 0

@@ -48,11 +48,13 @@ test('показывает ошибку, если сервер упал', async 
 - [MSW — Getting Started](https://mswjs.io/docs/getting-started)
 - [Testing Library — Async Methods](https://testing-library.com/docs/dom-testing-library/api-async)
 
-# Как устроен роутинг в React Router v7?
+# Как устроен роутинг в React Router v7 и v8?
 @slug react-router
+@verified react-router@8.4
+@updated 2026-10
 @topic ecosystem
 
-> React Router v7 объединился с Remix и работает в трёх режимах: declarative (`<BrowserRouter>` и `<Routes>`, как раньше), data (`createBrowserRouter` с `loader` и `action` у маршрутов) и framework (файловые роуты, SSR, типизация, сборка через Vite-плагин). Ключевые идеи: вложенные маршруты с `<Outlet>`, загрузка данных до рендера маршрута, формы и мутации через actions.
+> React Router v7 объединился с Remix, v8 (июнь 2026) сохранил ту же модель. Он работает в трёх режимах: declarative (`<BrowserRouter>` и `<Routes>`, как раньше), data (`createBrowserRouter` с `loader` и `action` у маршрутов) и framework (файловые роуты, SSR, типизация, сборка через Vite-плагин). Ключевые идеи: вложенные маршруты с `<Outlet>`, загрузка данных до рендера маршрута, формы и мутации через actions.
 
 ```tsx
 const router = createBrowserRouter([
@@ -87,7 +89,7 @@ createRoot(root).render(<RouterProvider router={router} />);
 Альтернатива — TanStack Router с полностью типизированными путями и search params.
 
 ### Подводные камни
-- В v7 пакет — `react-router`; `react-router-dom` остался только для совместимости.
+- В v7 пакет — `react-router`; `react-router-dom` остался только для совместимости, а в v8 удалён: `RouterProvider` импортируют из `react-router/dom`, остальное — из `react-router`. v8 требует React 19.2+ и поставляется только как ESM, middleware включён всегда.
 - Для статического хостинга (GitHub Pages, S3) нужен fallback на `index.html`, иначе прямые ссылки дают 404.
 
 ### Что спросят дальше

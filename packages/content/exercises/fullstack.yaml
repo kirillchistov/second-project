@@ -1,0 +1,1013 @@
+# api-styles: принято из черновика 2026-10-13
+- id: api-styles-main-criterion
+  skill: api-style-choice
+  question: api-styles
+  difficulty: 2
+  prompt: Что в первую очередь должно определять выбор между REST, GraphQL и tRPC?
+  explanation: Стиль API выбирают по клиентам и контракту, а не по моде. Публичный контракт и HTTP-кэш — REST с OpenAPI. Много разнородных клиентов с разными потребностями в данных — GraphQL. Один TS-фронтенд и бэкенд в монорепо — tRPC. Типы есть везде, различается способ их получить.
+  type: quiz
+  options:
+    - label: "Кто клиенты и какой контракт им нужен: публичный и кэшируемый, гибкий для многих клиентов или внутренний TS"
+      why: Верно. От клиентов зависят кэширование, типизация, стабильность контракта и стоимость поддержки.
+    - label: "Производительность: GraphQL всегда быстрее, потому что всё приходит одним запросом"
+      why: "Один запрос не гарантирует скорости: резолверы легко порождают N+1, а POST-запросы не попадают в HTTP-кэш и CDN."
+    - label: "Типобезопасность: только tRPC даёт клиенту типы, поэтому для TS-проекта он всегда лучше"
+      why: У REST типы дают OpenAPI и генерация клиента, у GraphQL — схема и codegen. tRPC удобен, но это внутренний API, а не публичный контракт.
+    - label: "Актуальность: REST устарел, новые проекты стоит сразу делать на GraphQL"
+      why: REST не устарел. Он проще, понятен любым клиентам и бесплатно кэшируется. GraphQL требует отдельной экспертизы и защиты от тяжёлых запросов.
+  answer: 0
+- id: api-styles-many-clients
+  skill: api-style-choice
+  question: api-styles
+  difficulty: 2
+  prompt: Данные заказов нужны вебу, нативным iOS и Android и встраиваемому виджету. Каждому экрану нужен свой набор полей заказа, позиций и клиента. Мобильные клиенты жалуются на десятки запросов и лишние данные. Что выбрать?
+  explanation: "Разнородные клиенты с разными потребностями в данных — классический случай GraphQL. Схема даёт контракт и codegen для любого языка, клиент выбирает поля. Цена этого: DataLoader против N+1, лимиты глубины и сложности запросов, клиентский кэш или persisted queries."
+  type: choose-tool
+  options:
+    - label: GraphQL со схемой и codegen для каждого клиента
+      why: Каждый экран одним запросом получает ровно нужные поля. Over- и under-fetching уходят, схема типизирует и Swift, и Kotlin, и TS.
+    - label: REST + OpenAPI
+      why: Лучший выбор для публичного API партнёров и HTTP-кэша. Здесь пришлось бы плодить эндпоинты под экраны или мириться с лишними данными.
+    - label: tRPC
+      why: Подходит, когда TS-фронтенд и бэкенд живут в одном монорепо. Нативные iOS и Android не получат выведенных типов, а контракт останется внутренним.
+    - label: Отдельный BFF под каждый клиент
+      why: Хорош, когда клиентов мало и под каждый есть команда. При четырёх клиентах придётся дублировать агрегацию и поддерживать четыре сервиса.
+  answer: 0
+- id: api-styles-trpc-public-mutation
+  skill: trpc-endpoint-security
+  question: api-styles
+  difficulty: 2
+  prompt: «Эту процедуру вызывает только наш фронтенд после логина», — говорит автор. Найдите строку с уязвимостью.
+  explanation: "Процедура tRPC — обычный HTTP-эндпоинт: её можно вызвать curl-ом в обход UI. Нужна процедура с middleware, которое проверяет ctx.session (обычно её называют protectedProcedure), и проверка, что заказ принадлежит пользователю. Валидация через zod тоже обязательна — здесь она уже есть."
+  type: find-bug
+  language: ts
+  code: |-
+    export const appRouter = router({
+      deleteOrder: publicProcedure
+        .input(z.object({ id: z.string() }))
+        .mutation(({ input }) =>
+          db.order.delete(input.id)),
+    });
+  bugLines:
+    - 2
+  causes:
+    - "publicProcedure не проверяет сессию: любой может вызвать HTTP-эндпоинт и удалить чужой заказ"
+    - z.string() не валидирует id — нужна ручная проверка типа
+    - Удаление нужно оформить как query, а не mutation
+    - tRPC требует описать схему и запустить кодогенерацию, иначе вход не проверяется
+  answer: 0
+- id: api-styles-trpc-type-inference
+  skill: trpc-type-inference
+  question: api-styles
+  difficulty: 2
+  prompt: Допишите tRPC-роутер так, чтобы клиент мог вызвать процедуру через useQuery и получить типы без кодогенерации.
+  explanation: "`.input()` задаёт zod-схему: она и валидирует вход на рантайме, и типизирует input. `.query()` нужен для чтения — useQuery работает только с query-процедурами. Клиент импортирует лишь тип `typeof appRouter`: серверный код в бандл не попадает, а типы выводятся напрямую из кода."
+  type: fill-tokens
+  language: ts
+  code: |-
+    export const appRouter = router({
+      orderById: publicProcedure
+        .___(z.object({ id: z.string() }))
+        .___(({ input }) =>
+          db.order.find(input.id)),
+    });
+    export type AppRouter = ___ appRouter;
+
+    // client
+    const order = trpc.orderById.useQuery({
+      id: '42',
+    });
+  tokens:
+    - input
+    - query
+    - typeof
+  decoys:
+    - mutation
+    - keyof
+    - schema
+
+# bff-pattern: принято из черновика 2026-10-13
+- id: bff-pattern-quiz
+  skill: bff-responsibility
+  question: bff-pattern
+  difficulty: 2
+  prompt: Что точнее всего описывает Backend for Frontend (BFF)?
+  explanation: "BFF — серверный слой одного фронтенда. Он собирает данные из сервисов в форму под экран, держит токены вне браузера и даёт клиенту простой API. Граница: в BFF только композиция и адаптация, без бизнес-правил. Сквозные задачи для всех клиентов (маршрутизация, rate limiting) решает API Gateway."
+  type: quiz
+  options:
+    - label: "Серверный слой конкретного фронтенда, которым владеет его команда: агрегирует и адаптирует данные под экраны, хранит токены"
+      why: Верно. BFF меняется вместе с UI, сокращает число запросов с клиента и не выпускает секреты в браузер.
+    - label: "Единый шлюз для всех клиентов: маршрутизация, rate limiting и проверка аутентификации на входе в систему"
+      why: "Это API Gateway: он общий и сквозной, а не заточен под экраны конкретного клиента. BFF может стоять за гейтвеем."
+    - label: Слой, куда переносят расчёт цен и проверку прав, чтобы фронтенд не зависел от правил сервисов
+      why: Это главный подводный камень. Бизнес-правила в BFF начинают расходиться с сервисами, и BFF превращается во «второй бэкенд».
+    - label: Кэширующий прокси перед сервисами, который ускоряет ответы, не меняя их формы
+      why: Кэш может быть частью BFF, но суть паттерна в композиции и адаптации данных под экран. Прозрачный прокси форму ответа не меняет.
+  answer: 0
+- id: bff-pattern-sequential-calls
+  skill: bff-parallel-aggregation
+  question: bff-pattern
+  difficulty: 2
+  prompt: После перехода на BFF экран товара грузится дольше, чем раньше, когда браузер ходил в сервисы напрямую. Найдите причину.
+  explanation: product, reviews и stock зависят только от id, но не друг от друга. Последовательные await складывают задержки всех трёх вызовов, а браузер раньше делал те же запросы параллельно. Независимые вызовы объединяйте через Promise.all. Последовательно вызывайте только зависимые, например когда нужен id из первого ответа.
+  type: find-bug
+  language: ts
+  code: |-
+    app.get('/bff/product/:id', async (c) => {
+      const token = await getServiceToken(c);
+      const id = c.req.param('id');
+      const product = await catalogApi.get(id, token);
+      const reviews = await reviewsApi.list(id, token);
+      const stock = await stockApi.get(id, token);
+      return c.json({
+        title: product.title,
+        price: product.price,
+        rating: reviews.average,
+        stock: stock.count,
+      });
+    });
+  bugLines:
+    - 4
+    - 5
+    - 6
+  causes:
+    - "Независимые вызовы сервисов идут последовательно: задержки складываются, хотя их можно запустить параллельно через Promise.all"
+    - await внутри обработчика блокирует event loop, и BFF не обслуживает другие запросы, пока ждёт сервисы
+    - "BFF должен отдавать ответы сервисов целиком: обрезка полей в c.json замедляет сериализацию"
+    - Токен надо получать в браузере и передавать в заголовке, иначе BFF тратит время на сессию при каждом запросе
+  answer: 0
+- id: bff-pattern-next-server-components
+  skill: bff-vs-server-components
+  question: bff-pattern
+  difficulty: 3
+  prompt: Веб-приложение на Next.js App Router, других клиентов нет. Экрану заказа нужны данные из трёх внутренних сервисов, токены сервисов не должны попасть в браузер. Как это организовать?
+  explanation: В фреймворках с серверным рендерингом роль BFF часто берут на себя Server Components и Server Functions. Они выполняются на сервере, видят секреты, собирают данные и отдают клиенту готовый результат. Отдельный BFF-сервис оправдан, когда клиентов несколько или слой нужно масштабировать отдельно.
+  type: choose-tool
+  options:
+    - label: Server Components и Server Functions в Next.js
+      why: Лучший вариант здесь. Агрегация и токены остаются на сервере, нет лишнего сервиса для деплоя, а код меняется вместе с UI.
+    - label: Отдельный BFF-сервис на Hono или Express
+      why: Подходит, если есть мобильные клиенты, фронтенд не на Next.js или слою нужно своё масштабирование. Здесь это лишний сервис без выгоды.
+    - label: API Gateway перед сервисами
+      why: Решает маршрутизацию, rate limiting и аутентификацию для всех клиентов, но не собирает данные в форму конкретного экрана.
+    - label: TanStack Query из браузера напрямую в сервисы
+      why: Хорош для кэша на клиенте, но токены окажутся в браузере, а экран будет делать несколько запросов. Уместен поверх BFF, а не вместо него.
+  answer: 0
+- id: bff-pattern-token-handler-flow
+  skill: bff-token-handler
+  question: bff-pattern
+  difficulty: 3
+  prompt: "Расставьте по порядку шаги паттерна token handler: вход пользователя и запрос данных через BFF."
+  explanation: OAuth-токены получает и хранит BFF, браузер видит только HttpOnly cookie сессии. XSS не может украсть access-токен, а client secret никогда не уходит на клиент. На каждый запрос BFF сам подставляет токен из сессии при вызове сервисов.
+  type: order
+  kind: timeline
+  steps:
+    - Браузер открывает /bff/login, BFF перенаправляет на OAuth-провайдера
+    - После входа провайдер возвращает authorization code на callback BFF
+    - BFF обменивает code на access- и refresh-токены, используя client secret
+    - BFF сохраняет токены в серверной сессии и ставит HttpOnly cookie
+    - Браузер делает запрос к BFF, отправляя только cookie сессии
+    - BFF берёт access-токен из сессии и вызывает сервисы
+
+# cors: принято из черновика 2026-10-13
+- id: cors-browser-not-server
+  skill: cors-same-origin-policy
+  question: cors
+  difficulty: 1
+  prompt: Фронтенд на `app.example.com` делает fetch на `api.example.com` и получает в консоли ошибку CORS. Тот же URL через curl отвечает нормально. Почему?
+  explanation: "CORS — правило браузера, защищающее пользователя: скрипт с чужого origin не прочитает ответ без разрешения сервера. Сам запрос при этом может уйти и выполниться. curl и бэкенд CORS не проверяют, поэтому CORS не защищает API и не заменяет авторизацию."
+  type: quiz
+  options:
+    - label: "Браузер применяет same-origin policy: ответ не отдаётся скрипту без `Access-Control-Allow-Origin`, а curl эту политику не применяет"
+      why: Верно. Блокирует браузер, а не сервер. Origin — схема, домен и порт, поэтому поддомен api уже считается другим origin.
+    - label: Сервер видит по User-Agent, что запрос из браузера, и отклоняет кросс-доменные обращения
+      why: "Сервер ничего не блокирует: он отвечает как обычно, просто без нужного заголовка. Решение о блокировке принимает браузер."
+    - label: Браузер вообще не отправляет запрос на другой origin, пока сервер не разрешит
+      why: Простые запросы (GET, form-POST) уходят сразу и выполняются на сервере. Браузер не отдаёт скрипту только ответ. Preflight нужен лишь для «сложных» запросов.
+    - label: CORS защищает API от чужих клиентов, а curl обходит защиту, подделывая заголовок Origin
+      why: "CORS не защищает сервер: любой небраузерный клиент шлёт что угодно. Для защиты API нужны авторизация и CSRF-токены, а не CORS."
+  answer: 0
+- id: cors-credentials-wildcard
+  skill: cors-credentials
+  question: cors
+  difficulty: 2
+  prompt: Клиент шлёт запрос с cookies, сервер выставляет оба CORS-заголовка, но браузер всё равно блокирует ответ. Найдите ошибку.
+  explanation: "С `credentials: 'include'` браузер требует, чтобы `Access-Control-Allow-Origin` содержал конкретный origin, а не `*`. Правильно сверить `req.headers.origin` со списком разрешённых, вернуть его и добавить `Vary: Origin`. Отражать любой Origin без проверки опасно."
+  type: find-bug
+  language: ts
+  code: |-
+    app.use((req, res, next) => {
+      res.setHeader(
+        'Access-Control-Allow-Origin', '*'
+      );
+      res.setHeader(
+        'Access-Control-Allow-Credentials', 'true'
+      );
+      next();
+    });
+
+    // client: https://app.example.com
+    fetch('https://api.example.com/me', {
+      credentials: 'include',
+    });
+  bugLines:
+    - 3
+  causes:
+    - С credentials нельзя отвечать `*` в Allow-Origin — нужен конкретный разрешённый origin
+    - "На клиенте не хватает `mode: 'no-cors'`, без него cookies не уходят на другой домен"
+    - Allow-Credentials должен быть булевым true, а строка 'true' браузером игнорируется
+    - Cookies не отправляются с GET-запросом через origin — нужен POST
+  answer: 0
+- id: cors-local-dev-proxy
+  skill: cors-fix-strategy
+  question: cors
+  difficulty: 2
+  prompt: Локально фронтенд на Vite (`localhost:5173`), API другой команды на `localhost:8080`, и их CORS-конфиг быстро не поменять. В продакшене оба будут за одним доменом через `/api`. Как разрабатывать без ошибок CORS?
+  explanation: "Самый надёжный способ избавиться от CORS — сделать origin одинаковым: в dev это прокси dev-сервера, в проде reverse proxy или BFF. Настраивать CORS на сервере нужно, только когда кросс-доменные запросы действительно нужны, и то со списком origin."
+  type: choose-tool
+  options:
+    - label: "`server.proxy` в Vite: `/api` → `localhost:8080`"
+      why: Браузер видит один origin, и CORS не нужен. Схема совпадает с продовой, где `/api` тоже на том же домене.
+    - label: "Добавить в fetch `mode: 'no-cors'`"
+      why: "Ответ станет непрозрачным (opaque): скрипт не прочитает ни тело, ни статус. «Отключить» CORS с клиента нельзя."
+    - label: Расширение браузера, отключающее CORS
+      why: Работает только у вас и скрывает реальные проблемы. Годится для разовой отладки, но не как способ разработки для команды.
+    - label: Попросить бэкенд отражать любой Origin с Allow-Credentials
+      why: "Это дыра в безопасности: любой сайт сможет читать ответы с cookies пользователя. Разрешённые origin задают списком."
+  answer: 0
+- id: cors-preflight-timeline
+  skill: cors-preflight
+  question: cors
+  difficulty: 2
+  prompt: Скрипт с `app.example.com` делает PUT на `api.example.com` с JSON-телом и заголовком Authorization. Расставьте события по порядку.
+  explanation: Из-за PUT, JSON и своего заголовка запрос «сложный», поэтому браузер сначала спрашивает разрешение через OPTIONS. Если preflight не прошёл, PUT вообще не отправится. `Access-Control-Max-Age` кэширует разрешение. Allow-Origin проверяется и в ответе на сам запрос.
+  type: order
+  kind: timeline
+  steps:
+    - Скрипт вызывает fetch с методом PUT и заголовком Authorization
+    - Браузер отправляет OPTIONS с Origin, Access-Control-Request-Method и -Headers
+    - Сервер отвечает 204 с Allow-Origin, Allow-Methods, Allow-Headers и Max-Age
+    - Браузер сверяет разрешения и кэширует их на Access-Control-Max-Age
+    - Браузер отправляет сам PUT-запрос с телом
+    - Браузер проверяет Allow-Origin в ответе и отдаёт его скрипту
+
+# database-for-frontend: принято из черновика 2026-10-13
+- id: database-for-frontend-atomic-stock
+  skill: db-transactions-atomicity
+  question: database-for-frontend
+  difficulty: 3
+  prompt: "Внутри `db.$transaction` сначала вызывается `product.update` с `where: { id, stock: { gte: qty } }` и `decrement: qty`, затем `order.create`. Что именно гарантирует этот код?"
+  explanation: "Транзакция даёт атомарность: изменения применяются все или ни одного. От гонки защищает условие в самом UPDATE: база проверяет остаток и списывает его одной операцией над заблокированной строкой. Правило: не делайте «прочитать → проверить в коде → записать». Перенесите проверку в WHERE или берите блокировку (`SELECT … FOR UPDATE`)."
+  type: quiz
+  options:
+    - label: Списание и заказ применятся вместе или не применятся вовсе, а остаток проверяется базой атомарно, поэтому последний товар не продадут дважды
+      why: Верно. Если строка не подошла под условие, update бросит ошибку, транзакция откатится и заказ не создастся. Второй параллельный UPDATE дождётся блокировки строки и уже не пройдёт по условию.
+    - label: Транзакция блокирует всю таблицу products, поэтому параллельные заказы просто выполняются по очереди
+      why: Неверно. Postgres блокирует изменяемые строки, а не таблицу. Уровень изоляции по умолчанию (Read Committed) не сериализует транзакции целиком.
+    - label: Защиту даёт сама транзакция, условие `stock gte qty` можно убрать и проверять остаток в коде после чтения
+      why: Неверно. При Read Committed две транзакции одновременно прочитают stock = 1, обе пройдут проверку в коде и обе спишут товар. Это классическая гонка read-check-write.
+    - label: Если остатка не хватит, update вернёт null, и заказ создастся без списания — нужен ручной откат
+      why: Неверно. Если запись не найдена, Prisma `update` бросает ошибку, а не возвращает null. Исключение внутри `$transaction` само откатывает все изменения.
+  answer: 0
+- id: database-for-frontend-n-plus-one
+  skill: orm-n-plus-one
+  question: database-for-frontend
+  difficulty: 2
+  prompt: Эндпоинт ленты возвращает правильные данные, но медленно отвечает под нагрузкой. Найдите строку-причину.
+  explanation: "Это N+1: один запрос за постами и ещё 20 за авторами, причём по очереди, то есть 21 обращение к базе подряд. Решение — `include: { author: true }` (JOIN) или один `findMany({ where: { id: { in: ids } } })` со склейкой в коде. `Promise.all` лишь распараллелил бы запросы, но не уменьшил бы их число. Включайте лог SQL, чтобы замечать такое."
+  type: find-bug
+  language: ts
+  code: |-
+    async function listPosts() {
+      const posts = await db.post.findMany({
+        take: 20,
+        orderBy: { createdAt: 'desc' },
+      });
+      const result = [];
+      for (const p of posts) {
+        const author = await db.user.findUnique({
+          where: { id: p.authorId },
+        });
+        result.push({ ...p, author });
+      }
+      return result;
+    }
+  bugLines:
+    - 8
+  causes:
+    - "Для каждого поста отдельный запрос за автором (N+1): 21 последовательный запрос вместо одного-двух"
+    - "`await` внутри `for…of` не дожидается промиса, и `author` окажется незавершённым промисом"
+    - "`orderBy` указан после `take`, поэтому база берёт 20 случайных строк и только потом их сортирует"
+    - Спред `...p` глубоко копирует каждый пост, и основное время уходит на копирование объектов
+  answer: 0
+- id: database-for-frontend-deep-pagination
+  skill: db-pagination-cursor
+  question: database-for-frontend
+  difficulty: 2
+  prompt: "Бесконечная лента заказов: 2 млн строк, сортировка по `created_at DESC`. Первые страницы открываются мгновенно, но чем глубже прокрутка, тем медленнее ответ. Индекс по `created_at` уже есть. Что сделать?"
+  explanation: "`OFFSET N` заставляет базу пройти и выбросить N строк даже при наличии индекса, поэтому время растёт с глубиной. Курсор (keyset) начинает чтение индекса сразу с нужного места, и время не зависит от номера страницы. `OFFSET` оставьте для небольших таблиц и интерфейсов с «перейти на страницу 7»."
+  type: choose-tool
+  options:
+    - label: "Курсорная пагинация: `WHERE (created_at, id) < ($1, $2) ORDER BY created_at DESC, id DESC LIMIT 20` + индекс под это"
+      why: "Лучший вариант: база спускается по индексу сразу к курсору. Скорость одинакова на любой глубине, а `id` в ключе разрешает совпадения `created_at`."
+    - label: Оставить `OFFSET`, но добавить ещё один индекс по `(created_at, id)`
+      why: Индекс ускорит сортировку, но `OFFSET` всё равно прочитает и выбросит все пропущенные строки. Подходит, если глубина пагинации невелика.
+    - label: Кэшировать страницы в Redis по ключу `offset`
+      why: Первое обращение к странице останется медленным, новые заказы сдвигают страницы и ломают кэш. Кэш уместен для горячих неизменных выборок, а не для лечения плохого запроса.
+    - label: Увеличить `LIMIT` до 500, чтобы реже ходить за новыми страницами
+      why: Растут payload и память клиента, а глубокие страницы всё так же медленные. Крупный `LIMIT` уместен для экспорта или батч-обработки, а не для ленты.
+  answer: 0
+- id: database-for-frontend-slow-query-recipe
+  skill: db-slow-query-diagnosis
+  question: database-for-frontend
+  difficulty: 2
+  prompt: Эндпоинт «последние заказы пользователя» стал отвечать секунды. Расставьте шаги диагностики и исправления по порядку.
+  explanation: "Сначала измеряйте, потом чините: лог SQL показывает реальные запросы, которые генерирует ORM, а `EXPLAIN ANALYZE` показывает план. Индекс строят под WHERE + ORDER BY, равенство ставят слева. В проде индекс создают через миграцию с `CONCURRENTLY`, чтобы не блокировать запись. В конце план проверяют ещё раз."
+  type: order
+  kind: recipe
+  steps:
+    - Включить лог SQL и найти медленный запрос, который генерирует ORM
+    - Запустить для него `EXPLAIN ANALYZE` на реалистичных данных
+    - Увидеть в плане `Seq Scan` по orders вместо `Index Scan`
+    - "Спроектировать составной индекс под WHERE и ORDER BY: `(user_id, created_at DESC)`"
+    - Добавить индекс миграцией (в проде — `CREATE INDEX CONCURRENTLY`)
+    - Повторить `EXPLAIN ANALYZE` и убедиться, что используется `Index Scan`
+
+# fetch-http: принято из черновика 2026-10-13
+- id: fetch-http-error-status
+  skill: fetch-error-handling
+  question: fetch-http
+  difficulty: 1
+  prompt: Сервер ответил на `fetch('/api/todos')` статусом 500 с JSON-телом ошибки. Что произойдёт с промисом fetch?
+  explanation: "fetch отклоняет промис только при сетевой ошибке: нет соединения, CORS, abort. Любой HTTP-ответ, даже 404 или 500, — это успешный Response. Правило: после await fetch всегда проверяйте `res.ok` (статус 200–299) и бросайте ошибку сами."
+  type: quiz
+  options:
+    - label: Промис выполнится с Response, у которого ok === false и status === 500
+      why: Верно. Для fetch это успешно полученный ответ. Отличить ошибку можно только по res.ok или res.status.
+    - label: Промис отклонится с TypeError, потому что статус 5xx
+      why: TypeError бывает при сетевой ошибке или блокировке CORS. Статус ответа на сам промис не влияет.
+    - label: Промис отклонится только при 5xx, а при 4xx выполнится
+      why: "Частое заблуждение. fetch не различает 4xx и 5xx: в обоих случаях промис выполняется."
+    - label: fetch сам повторит запрос несколько раз и после этого отклонит промис
+      why: У fetch нет встроенных повторов. Ретраи делают вручную или через библиотеку, например TanStack Query.
+  answer: 0
+- id: fetch-http-json-on-204
+  skill: fetch-response-parsing
+  question: fetch-http
+  difficulty: 2
+  prompt: При успешном удалении сервер отвечает `204 No Content`. Задача удаляется, но вызывающий код всё равно попадает в catch. Найдите ошибку.
+  explanation: "У ответа 204 нет тела, поэтому `res.json()` бросает SyntaxError, хотя запрос прошёл успешно. Тело разбирают только там, где оно есть: проверяйте `res.status === 204` или заголовок Content-Type. Для DELETE часто достаточно ничего не возвращать."
+  type: find-bug
+  language: ts
+  code: |-
+    async function deleteTodo(id: string) {
+      const res = await fetch(`/api/todos/${id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+  bugLines:
+    - 6
+  causes:
+    - res.json() на пустом теле ответа 204 бросает SyntaxError
+    - Для 204 res.ok равен false, и срабатывает throw
+    - Запросу DELETE обязательно нужно тело и заголовок Content-Type
+    - Метод DELETE нельзя вызывать через fetch, нужен POST с полем _method
+  answer: 0
+- id: fetch-http-patch-request
+  skill: fetch-request-building
+  question: fetch-http
+  difficulty: 1
+  prompt: Допишите функцию, которая **частично** обновляет задачу и превращает HTTP-ошибки в исключения.
+  explanation: "Для частичного изменения ресурса подходит PATCH. PUT заменяет ресурс целиком, и поля, которых нет в теле, могут потеряться. Тело перед отправкой сериализуют через JSON.stringify. Ошибку проверяют по res.ok: status — это число, и `!res.status` для 404 или 500 всегда даёт false."
+  type: fill-tokens
+  language: ts
+  code: |-
+    async function updateTodo(
+      id: string,
+      patch: Partial<Todo>,
+    ): Promise<Todo> {
+      const res = await fetch(`/api/todos/${id}`, {
+        method: '___',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.___(patch),
+      });
+      if (!res.___) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+  tokens:
+    - PATCH
+    - stringify
+    - ok
+  decoys:
+    - PUT
+    - parse
+    - status
+    - POST
+- id: fetch-http-safe-retry-post
+  skill: http-idempotency-retry
+  question: fetch-http
+  difficulty: 3
+  prompt: Создание заказа (`POST /api/orders`) иногда завершается ответом 504, хотя на сервере заказ уже создан. Запрос нужно автоматически повторять и при этом не плодить дубли. Что выбрать?
+  explanation: "POST не идемпотентен: если повторить его вслепую после таймаута, заказ может создаться дважды. Ключ идемпотентности, один на одну попытку оформления, позволяет серверу распознать повтор и вернуть уже созданный заказ. GET, PUT и DELETE идемпотентны по семантике, поэтому их повторять безопаснее."
+  type: choose-tool
+  options:
+    - label: Заголовок Idempotency-Key с одним ключом на все повторы и дедупликация на сервере
+      why: Лучший вариант. Сервер видит знакомый ключ и возвращает уже созданный заказ вместо нового. Так делают платёжные API.
+    - label: Просто повторять POST до 3 раз при ответах 5xx
+      why: Подходит для идемпотентных запросов вроде GET. Для POST при 504 заказ мог уже создаться, и повтор даст дубликат.
+    - label: Блокировать кнопку «Оформить», пока запрос в полёте
+      why: "Полезно против двойного клика, но с повтором после таймаута не помогает: дубль появится при ретрае."
+    - label: Заменить POST на GET с параметрами заказа в query
+      why: GET должен только читать. Его могут кэшировать и повторять прокси, и тогда побочный эффект станет непредсказуемым.
+  answer: 0
+
+# http-caching: принято из черновика 2026-10-13
+- id: http-caching-no-cache-vs-no-store
+  skill: http-cache-control-directives
+  question: http-caching
+  difficulty: 2
+  prompt: "Чем `Cache-Control: no-cache` отличается от `no-store`?"
+  explanation: "`no-cache` означает «храни, но перед использованием сверься с сервером». Обычно это условный запрос с ETag, и ответ `304` приходит без тела. `no-store` полностью запрещает сохранять ответ. Для HTML SPA подходит `no-cache`. `no-store` нужен только для действительно чувствительных данных."
+  type: quiz
+  options:
+    - label: "`no-cache` разрешает хранить ответ, но требует сверки с сервером перед использованием; `no-store` запрещает сохранять его вовсе"
+      why: Верно. При `no-cache` кэш шлёт условный запрос и при `304` берёт тело у себя. При `no-store` ответа в кэше просто нет.
+    - label: "`no-cache` запрещает сохранять ответ где-либо, а `no-store` запрещает хранить его только на CDN и прокси"
+      why: "Это типичная путаница: «не кэшировать» — это `no-store`. Запрет хранения в общих кэшах задаёт `private`."
+    - label: "`no-cache` заставляет браузер каждый раз скачивать ответ целиком, а `no-store` позволяет взять его из кэша"
+      why: С валидатором (ETag или Last-Modified) сервер ответит коротким `304`, и тело заново не передаётся. А `no-store` как раз ничего не хранит.
+    - label: "Это синонимы: `no-store` оставлен для старых браузеров, современные понимают оба одинаково"
+      why: "Синонимами они не являются. Директивы дают разное поведение: одна требует ревалидации, другая запрещает хранение."
+  answer: 0
+- id: http-caching-spa-index-html
+  skill: http-cache-spa-strategy
+  question: http-caching
+  difficulty: 2
+  prompt: "После деплоя SPA у части пользователей белый экран: старый `index.html` ссылается на удалённые чанки `app.3f9a1c.js`. Ассеты уже с хэшем и `immutable`. Какой `Cache-Control` поставить для `index.html`?"
+  explanation: "Стратегия для SPA: ассеты с хэшем в имени кэшируются «навсегда» (`immutable`), а HTML всегда ревалидируется (`no-cache` + ETag). Новый деплой меняет HTML, HTML ссылается на новые имена файлов, и старые ассеты не мешают."
+  type: choose-tool
+  options:
+    - label: "`no-cache` + `ETag`"
+      why: Браузер хранит HTML, но каждый раз сверяется с сервером. Пока ничего не менялось, приходит быстрый `304`, а после деплоя сразу новая версия.
+    - label: "`public, max-age=31536000, immutable`"
+      why: Подходит для файлов с хэшем в имени. У `index.html` имя не меняется, поэтому пользователь застрянет на старой версии на год.
+    - label: "`no-store`"
+      why: Проблему тоже решит, но HTML будет скачиваться целиком при каждом заходе. Подходит для чувствительных данных, а не для публичного HTML.
+    - label: "`public, s-maxage=3600`"
+      why: CDN целый час будет отдавать старый HTML после деплоя. Годится для API каталога, где допустима устаревшая на минуты выдача.
+  answer: 0
+- id: http-caching-private-orders-on-cdn
+  skill: http-cache-private-data
+  question: http-caching
+  difficulty: 2
+  prompt: Route handler в Next.js отдаёт заказы текущего пользователя. Найдите строку, из-за которой пользователи могут увидеть чужие заказы.
+  explanation: "`public` и `s-maxage` разрешают CDN закэшировать ответ по URL. URL `/api/orders` у всех один, поэтому первый ответ уйдёт всем. Для персональных данных нужен `private` (например, `private, max-age=0, must-revalidate`) или `no-store`. Правило: если ответ зависит от сессии, общим кэшам его не отдают."
+  type: find-bug
+  language: ts
+  code: |-
+    export async function GET(req: Request) {
+      const session = await getSession(req);
+      const orders = await db.order.findMany({
+        where: { userId: session.userId },
+      });
+      return Response.json(orders, {
+        headers: {
+          'Cache-Control':
+            'public, s-maxage=60, stale-while-revalidate=300',
+        },
+      });
+    }
+  bugLines:
+    - 8
+    - 9
+  causes:
+    - Ответ с персональными данными помечен `public` + `s-maxage`, и CDN отдаёт закэшированные заказы одного пользователя всем остальным
+    - "`stale-while-revalidate` без `max-age` не работает, поэтому браузер отдаёт устаревшие данные"
+    - "`Response.json` нельзя вызывать с объектом headers, заголовок `Cache-Control` будет проигнорирован"
+    - Не хватает заголовка `ETag`, без него CDN не может отличить ответы разных пользователей
+  answer: 0
+- id: http-caching-etag-revalidation-flow
+  skill: http-conditional-requests
+  question: http-caching
+  difficulty: 2
+  prompt: 'Расставьте по порядку, что происходит с ответом `Cache-Control: max-age=60` и `ETag: "v42"`, если ресурс на сервере не изменился.'
+  explanation: "Пока ответ свеж, браузер вообще не ходит в сеть. Когда срок истёк, браузер делает условный запрос с `If-None-Match`. Сервер отвечает `304` без тела, и сохранённая копия снова считается свежей. Экономится трафик, но не сам запрос: чтобы обойтись без него, нужен `max-age`."
+  type: order
+  kind: timeline
+  steps:
+    - 'Сервер отдаёт 200 с телом, `max-age=60` и `ETag: "v42"`'
+    - Браузер сохраняет ответ и 60 секунд отдаёт его без запросов к серверу
+    - 'Срок свежести истёк, и браузер отправляет запрос с `If-None-Match: "v42"`'
+    - Сервер сравнивает присланный ETag с текущей версией ресурса
+    - Сервер отвечает `304 Not Modified` без тела
+    - Браузер берёт тело из кэша и обновляет срок свежести по новым заголовкам
+
+# idempotency-retries: принято из черновика 2026-10-13
+- id: idempotency-retries-lost-response
+  skill: idempotency-key
+  question: idempotency-retries
+  difficulty: 2
+  prompt: POST /api/payments дошёл до сервера, деньги списались, но ответ потерялся по таймауту. Как сделать повтор этого запроса безопасным?
+  explanation: "Клиент не знает, выполнилось ли действие, поэтому повтор неизбежен. Безопасным его делает пара: один ключ на операцию у клиента и дедупликация по ключу на сервере (уникальный индекс плюс сохранённый ответ). Блокировка кнопки и смена метода — не замена серверной идемпотентности."
+  type: quiz
+  options:
+    - label: Сгенерировать ключ один раз на операцию, повторять с тем же Idempotency-Key, а сервер по ключу вернёт сохранённый ответ
+      why: Верно. Сервер узнаёт повтор по ключу и отдаёт прошлый результат без повторного списания. Уникальный индекс по ключу защищает и от параллельных дубликатов.
+    - label: Блокировать кнопку оплаты через isPending, чтобы второй запрос не ушёл
+      why: "Это UX: защищает от двойного клика, но не от ретраев на сетевом уровне, перезагрузки страницы или повтора из очереди. Серверной защиты нет."
+    - label: "Поменять метод на PUT: он идемпотентен, значит повтор безопасен"
+      why: Идемпотентность PUT — это обещание семантики, а не свойство кода. Обработчик, который при каждом вызове списывает деньги, от смены метода безопаснее не станет.
+    - label: Не повторять POST автоматически, а показать ошибку и попросить нажать ещё раз
+      why: Пользователь нажмёт снова, и получится тот же дубликат, только вручную. Без ключа сервер не отличит повтор от новой оплаты.
+  answer: 0
+- id: idempotency-retries-key-per-attempt
+  skill: idempotency-key
+  question: idempotency-retries
+  difficulty: 2
+  prompt: Ретраи с ключом идемпотентности добавили, но при плохой сети пользователей всё равно списывают дважды. Найдите строку с ошибкой.
+  explanation: "Колбэк retry вызывается заново на каждую попытку, и вместе с ним каждый раз генерируется новый UUID. Для сервера каждый повтор — новая операция. Ключ нужно создать один раз до retry: const key = crypto.randomUUID(). Правило: один ключ на одну логическую операцию."
+  type: find-bug
+  language: ts
+  code: |-
+    async function pay(orderId: string, amount: number) {
+      return retry(() => fetch('/api/payments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': crypto.randomUUID(),
+        },
+        body: JSON.stringify({ orderId, amount }),
+      }), { attempts: 3 });
+    }
+  bugLines:
+    - 6
+  causes:
+    - Ключ генерируется внутри функции повтора, поэтому каждая попытка уходит с новым ключом и сервер не узнаёт дубликат
+    - crypto.randomUUID недоступен в браузере, поэтому заголовок уходит пустым
+    - Имя заголовка должно быть в нижнем регистре, иначе сервер его не прочитает
+    - POST нельзя повторять никогда, поэтому retry нужно убрать совсем
+  answer: 0
+- id: idempotency-retries-retry-policy
+  skill: retry-policy
+  question: idempotency-retries
+  difficulty: 2
+  prompt: "Допишите политику ретраев: повторять только временные ошибки, уважать подсказку сервера и не бить в сервис всем хором."
+  explanation: "Повторять стоит сетевые ошибки, 429, 502, 503 и 504: 4xx вроде 400 и 422 повтор не исправит. Если сервер прислал Retry-After, ждать нужно столько, сколько он просит. Иначе используйте экспоненту с jitter (Math.random), чтобы клиенты не повторяли синхронно."
+  type: fill-tokens
+  language: ts
+  code: |-
+    const RETRYABLE = [429, 502, 503, ___];
+
+    function shouldRetry(res: Response | null) {
+      if (res === null) return true; // network
+      return RETRYABLE.includes(res.status);
+    }
+
+    function getDelay(n: number, res: Response | null) {
+      const ra = res?.headers.get('___');
+      if (ra) return Number(ra) * 1000;
+      return 2 ** n * 300 + Math.___() * 300;
+    }
+  tokens:
+    - "504"
+    - Retry-After
+    - random
+  decoys:
+    - "422"
+    - "400"
+    - Cache-Control
+    - floor
+- id: idempotency-retries-server-handler
+  skill: idempotent-server-handler
+  question: idempotency-retries
+  difficulty: 3
+  prompt: Расставьте шаги обработчика POST /api/payments, который безопасно переживает повторы с одним и тем же ключом.
+  explanation: Сначала нужно проверить ключ и поискать готовый ответ. Побочный эффект выполняется вместе с записью ключа в одной транзакции, а уникальный индекс по key гарантирует, что параллельный дубликат упадёт на вставке и не спишет деньги второй раз.
+  type: order
+  kind: recipe
+  steps:
+    - Прочитать заголовок Idempotency-Key; если его нет, вернуть 400
+    - Найти сохранённую запись по ключу
+    - Если запись есть, вернуть сохранённые статус и тело без повторного действия
+    - В одной транзакции выполнить списание и вставить запись с ключом (уникальный индекс) и ответом
+    - Вернуть клиенту 201 с результатом
+
+# node-event-loop: принято из черновика 2026-10-13
+- id: node-event-loop-blocking-quiz
+  skill: node-event-loop-blocking
+  question: node-event-loop
+  difficulty: 2
+  prompt: Сервер на Node.js спокойно держит 1000 одновременных запросов к базе. Но один обработчик с синхронным циклом на 2 секунды «вешает» все запросы. Почему?
+  explanation: Async I/O — это не параллельные вычисления. Ожиданием сети и диска занимается libuv, а весь JS выполняется в одном потоке. Пока синхронный код занимает этот поток, event loop не может вызвать ни один колбэк. CPU-тяжёлую работу выносят в worker_threads, очередь или отдельный сервис.
+  type: quiz
+  options:
+    - label: "JS выполняется в одном потоке: пока цикл занимает его, event loop не может вызвать колбэки других запросов"
+      why: Верно. Запросы к БД ждут ответа в libuv и не занимают поток. Синхронный цикл занимает его целиком, и до конца цикла event loop стоит.
+    - label: libuv выделяет каждому запросу свой поток, но пул из 4 потоков быстро заканчивается
+      why: Сетевой I/O не использует пул потоков, а JS-обработчики не выполняются в пуле. Пул (UV_THREADPOOL_SIZE) нужен для fs, crypto, dns.lookup и zlib.
+    - label: Node.js ставит синхронный код в очередь с низким приоритетом, и остальные запросы ждут свою очередь
+      why: "Приоритетов у синхронного кода нет. Его нельзя прервать: он выполняется до конца, а очереди event loop в это время просто не обрабатываются."
+    - label: Если обернуть цикл в async-функцию, он уйдёт в фон и перестанет блокировать сервер
+      why: async не переносит код в другой поток. Тело функции до первого await выполняется синхронно, поэтому цикл всё равно займёт главный поток.
+  answer: 0
+- id: node-event-loop-io-callback-order
+  skill: node-event-loop-phases
+  question: node-event-loop
+  difficulty: 3
+  prompt: Скрипт запущен в Node.js как CommonJS-модуль. Что будет в консоли?
+  explanation: "Сначала выполняется синхронный код колбэка (io). Затем опустошаются очереди: сначала nextTick, потом микрозадачи промисов. Колбэк readFile выполняется в фазе poll, а следующая за ней фаза — check, поэтому setImmediate гарантированно сработает раньше setTimeout. Неопределённость их порядка есть только в главном модуле."
+  type: predict-output
+  language: js
+  code: |-
+    const fs = require('fs');
+    const log = console.log;
+
+    fs.readFile(__filename, () => {
+      setTimeout(() => log('timeout'), 0);
+      setImmediate(() => log('immediate'));
+      Promise.resolve().then(() => log('promise'));
+      process.nextTick(() => log('nextTick'));
+      log('io');
+    });
+  options:
+    - io → nextTick → promise → immediate → timeout
+    - io → promise → nextTick → immediate → timeout
+    - io → nextTick → promise → timeout → immediate
+    - nextTick → promise → io → immediate → timeout
+  answer: 0
+- id: node-event-loop-sync-crypto-login
+  skill: node-event-loop-blocking
+  question: node-event-loop
+  difficulty: 2
+  prompt: Под нагрузкой логин тормозит, а с ним и все остальные эндпоинты сервера. Найдите строку-виновника.
+  explanation: "scryptSync специально сделан медленным и выполняется прямо в главном потоке. Пока считается хэш, сервер не обслуживает ни один другой запрос. Асинхронный crypto.scrypt (через promisify) отдаёт работу пулу потоков libuv. Правило: синхронные API допустимы при старте приложения, но не в обработчике запроса."
+  type: find-bug
+  language: ts
+  code: |-
+    app.post('/login', async (c) => {
+      const { email, password } = await c.req.json();
+      const user = await db.users.find(email);
+      if (!user) return c.json({ ok: false }, 401);
+      const hash = crypto.scryptSync(
+        password, user.salt, 64);
+      const ok = crypto.timingSafeEqual(
+        hash, user.hash);
+      return c.json({ ok }, ok ? 200 : 401);
+    });
+  bugLines:
+    - 5
+    - 6
+  causes:
+    - Синхронный scryptSync занимает главный поток на время хэширования и блокирует event loop для всех запросов
+    - timingSafeEqual работает медленно, и его нужно заменить обычным сравнением ===
+    - await db.users.find блокирует поток, пока база не ответит
+    - Обработчик объявлен как async, поэтому Node.js выполняет его последовательно для всех запросов
+  answer: 0
+- id: node-event-loop-pdf-reports-offload
+  skill: node-cpu-offload-choice
+  question: node-event-loop
+  difficulty: 2
+  prompt: Эндпоинт генерирует PDF-отчёт за 20–40 секунд работы CPU. Задачи должны переживать рестарт при деплое и повторяться при сбое, а пользователь должен видеть статус. Что выбрать?
+  explanation: "Правило выбора: короткая CPU-работа внутри запроса — worker_threads. Долгие задачи, которые должны переживать рестарт, с повторами и статусом — очередь с отдельными воркерами. async/await не снимает нагрузку с CPU, а cluster масштабирует обработку запросов, но не изолирует тяжёлую работу."
+  type: choose-tool
+  options:
+    - label: Очередь задач (BullMQ) и отдельные процессы-воркеры
+      why: Задачи хранятся в Redis и переживают рестарт. Повторы, статусы и прогресс есть из коробки, а тяжёлая работа идёт вне API-процесса и масштабируется отдельно.
+    - label: worker_threads (например, пул Piscina) в API-процессе
+      why: Хороши для коротких CPU-задач, результат которых нужен в том же запросе. При рестарте задачи потеряются, а повторы и статусы придётся писать самому.
+    - label: Сделать генерацию async и вызывать через await
+      why: Ключевое слово async не уводит вычисления из главного потока. Подходит только для I/O, а CPU-работа так и продолжит блокировать event loop.
+    - label: Запустить несколько процессов через cluster
+      why: Подходит для масштабирования обычного трафика. Но каждый отчёт всё равно заблокирует свой процесс на 40 секунд, а гарантий выполнения и повторов не будет.
+  answer: 0
+
+# oauth-oidc: принято из черновика 2026-10-13
+- id: oauth-oidc-token-roles
+  skill: oauth-vs-oidc-tokens
+  question: oauth-oidc
+  difficulty: 2
+  prompt: После входа через OIDC клиент получил `id_token` и `access_token`. Как правильно понимать их роли?
+  explanation: "OAuth 2.0 делегирует доступ: `access_token` даёт право вызывать API. OIDC добавляет аутентификацию: `id_token` (JWT) сообщает клиенту, кто вошёл. В API отправляют только `access_token`, а API проверяет подпись, `iss`, `aud` и `exp`."
+  type: quiz
+  options:
+    - label: id_token сообщает клиенту, кто вошёл; access_token отправляют в API, и API проверяет его подпись, iss, aud и exp
+      why: Верно. OIDC добавляет поверх OAuth аутентификацию, а id_token предназначен клиенту. Доступ к API — задача access_token.
+    - label: "id_token удобнее отправлять в свой API: в нём уже есть email и sub, поэтому отдельная проверка прав не нужна"
+      why: Типичная ошибка. Аудитория id_token — клиент, а не API, и в нём нет scopes. API должен принимать access_token, выпущенный именно для него.
+    - label: "Это одно и то же в разных форматах: OIDC просто переименовал access_token и сделал его JWT"
+      why: Нет. Это два разных токена с разным назначением. Access_token вообще может быть непрозрачной строкой, а id_token в OIDC всегда JWT.
+    - label: OAuth 2.0 сам аутентифицирует пользователя, а OIDC нужен только для получения refresh_token
+      why: Наоборот. OAuth 2.0 — протокол делегирования доступа, аутентификацию поверх него добавляет OIDC. Refresh_token есть и в чистом OAuth.
+  answer: 0
+- id: oauth-pkce-flow-steps
+  skill: oauth-pkce-flow
+  question: oauth-oidc
+  difficulty: 2
+  prompt: Расставьте по порядку шаги входа по Authorization Code Flow с PKCE через свой сервер (BFF).
+  explanation: "Verifier и state создаются до редиректа и остаются у клиента, провайдеру уходит только хэш (challenge). State сверяют до обмена code на токены. Обмен на сервере позволяет не отдавать токены браузеру: тот получает только HttpOnly cookie сессии."
+  type: order
+  kind: timeline
+  steps:
+    - Сгенерировать state, code_verifier и code_challenge = SHA256(verifier), сохранить state и verifier
+    - Редирект на /authorize с response_type=code, scope, state и code_challenge
+    - Пользователь входит у провайдера, тот редиректит на redirect_uri с code и state
+    - Сверить пришедший state с сохранённым
+    - POST /token с code, code_verifier и redirect_uri — получить access, id и refresh токены
+    - Сохранить токены на сервере и выдать браузеру HttpOnly cookie сессии
+- id: oauth-callback-missing-state-check
+  skill: oauth-state-csrf
+  question: oauth-oidc
+  difficulty: 2
+  prompt: Это обработчик redirect_uri на BFF. Найдите строку с уязвимостью.
+  explanation: "Проверить, что state присутствует, мало: его нужно сравнить с сохранённым до редиректа значением. Иначе атакующий подсунет жертве ссылку со своим code и залогинит её в свой аккаунт (login CSRF). Правило: `state !== saved` → 400, и только потом обмен code."
+  type: find-bug
+  language: ts
+  code: |-
+    export async function GET(req: Request) {
+      const url = new URL(req.url);
+      const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
+      const saved = readCookie(req, 'oauth_state');
+      const verifier = readCookie(req, 'pkce');
+      if (!code || !state) {
+        return new Response('Bad', { status: 400 });
+      }
+      const tokens = await exchangeCode(code, verifier);
+      await createSession(tokens);
+      return Response.redirect(new URL('/', req.url));
+    }
+  bugLines:
+    - 7
+  causes:
+    - state не сравнивается с сохранённым значением, поэтому возможен login CSRF с подсунутым чужим code
+    - code_verifier нужно было отправить провайдеру ещё в /authorize, а не при обмене code
+    - Обмен code на токены должен происходить в браузере, иначе PKCE не работает
+    - "Response.redirect нельзя вызывать после создания сессии: cookie не успеет установиться"
+  answer: 0
+- id: oauth-spa-token-storage-choice
+  skill: oauth-token-storage
+  question: oauth-oidc
+  difficulty: 2
+  prompt: React SPA и свой Node-бэкенд на том же домене. Нужен вход через Google и вызовы своего API. Безопасность важнее простоты. Какую схему выбрать?
+  explanation: "Если есть свой сервер, самая надёжная схема — BFF: code обменивается на сервере, токены туда же и сохраняются, а браузер получает только HttpOnly cookie. Тогда XSS не украдёт токены. PKCE в браузере — выбор для чистой SPA без бэкенда. Implicit flow устарел."
+  type: choose-tool
+  options:
+    - label: "BFF: Code Flow + PKCE, обмен code на сервере, браузеру — HttpOnly cookie сессии"
+      why: Лучший вариант. Токены не попадают в JS, поэтому XSS не может их унести. Сервер сам обновляет access_token и вызывает API.
+    - label: Code Flow + PKCE прямо в SPA, токены в localStorage
+      why: PKCE в браузере уместен, когда своего бэкенда нет, но токены тогда лучше держать в памяти. localStorage читается любым скриптом при XSS.
+    - label: "Implicit flow: токен сразу во фрагменте URL"
+      why: "Устарел: токен попадает в адресную строку и историю, а PKCE нет. Сейчас его не стоит выбирать ни в каком сценарии."
+    - label: Передавать id_token в свой API как Bearer
+      why: id_token предназначен клиенту, чтобы узнать пользователя. Для API нужен access_token с проверкой aud, iss и exp.
+  answer: 0
+
+# queues-background-jobs: принято из черновика 2026-10-13
+- id: queues-main-idea
+  skill: background-jobs-purpose
+  question: queues-background-jobs
+  difficulty: 2
+  prompt: Зачем выносить генерацию отчёта или отправку письма из обработчика запроса в очередь с воркерами?
+  explanation: Очередь разделяет «принять запрос» и «выполнить работу». API отвечает 202, а воркер выполняет задачу с повторами. Пики сглаживаются, сбой внешнего сервиса не роняет запрос, воркеры масштабируются отдельно. Доставка обычно at-least-once, поэтому обработчик должен быть идемпотентным.
+  type: quiz
+  options:
+    - label: API быстро отвечает 202 и ставит задачу, воркер выполняет её отдельно с повторами — пики и сбои внешних сервисов не бьют по запросу
+      why: Верно. Запрос не ждёт медленную работу, повторы и масштабирование воркеров не зависят от API.
+    - label: "Очередь ускоряет саму задачу: отчёт строится быстрее, потому что воркеры работают параллельно"
+      why: Объём работы тот же, отчёт не станет быстрее. Выигрыш в том, что запрос не ждёт работу, а нагрузка распределяется во времени.
+    - label: Очередь гарантирует ровно однократное выполнение, поэтому о дублях можно не думать
+      why: "Большинство очередей дают at-least-once: после сбоя задачу доставят повторно. Без идемпотентности получатся двойные списания и записи."
+    - label: Очередь позволяет вернуть готовый результат в том же HTTP-ответе, обходя таймаут
+      why: "Наоборот: ответ уходит до выполнения работы. О результате клиент узнаёт позже через polling, SSE/WebSocket или уведомление."
+  answer: 0
+- id: queues-job-result-delivery
+  skill: job-result-delivery
+  question: queues-background-jobs
+  difficulty: 2
+  prompt: Отчёт строится в очереди 10–30 секунд, пользователь ждёт на экране со спиннером. Real-time-инфраструктуры в проекте нет, нужно просто и надёжно. Как фронтенду узнать результат?
+  explanation: Способ доставки результата зависит от длительности задачи и инфраструктуры. Секунды-минуты при открытом экране — polling статуса. Частые обновления или готовый real-time-канал — SSE/WebSocket. Часы или закрытая вкладка — письмо или push.
+  type: choose-tool
+  options:
+    - label: Polling GET /jobs/:id через TanStack Query с refetchInterval
+      why: "Лучший выбор: обычный REST, переживает обрывы и перезагрузки, а интервал можно отключить, когда статус стал done или failed."
+    - label: WebSocket-канал, в который воркер шлёт событие о завершении
+      why: Хорош, если real-time уже есть или нужен прогресс в реальном времени. Здесь это лишняя инфраструктура и переподключения ради одного события.
+    - label: Письмо со ссылкой на отчёт после завершения
+      why: Подходит для долгих задач (минуты–часы) или когда пользователь ушёл. Ждущему на экране неудобно идти в почту.
+    - label: Синхронный запрос с увеличенным таймаутом
+      why: "Возвращает проблему, которую решала очередь: соединение висит, прокси рвут его по таймауту, а повтор запускает работу заново."
+  answer: 0
+- id: queues-non-idempotent-charge
+  skill: idempotent-job-handlers
+  question: queues-background-jobs
+  difficulty: 3
+  prompt: Воркер списывает оплату за заказ. Найдите строку, из-за которой при повторной доставке задачи возможна беда.
+  explanation: Очередь доставляет задачу минимум один раз. Если процесс упал после charge, но до markPaid, задачу выполнят снова и спишут деньги дважды. Нужен ключ идемпотентности у платёжного шлюза (например, orderId) и проверка статуса заказа перед действием.
+  type: find-bug
+  language: ts
+  code: |-
+    new Worker('payments', async (job) => {
+      const { orderId, amount } = job.data;
+      const order = await db.orders.find(orderId);
+      if (!order) return;
+      await gateway.charge(order.card, amount);
+      await db.orders.markPaid(orderId);
+    }, { connection });
+  bugLines:
+    - 5
+  causes:
+    - "Списание без ключа идемпотентности: при сбое после charge задачу доставят повторно и деньги спишутся второй раз"
+    - Не задан concurrency — без него воркер не сможет обработать задачу
+    - Воркер ничего не возвращает, поэтому очередь сочтёт задачу проваленной и повторит
+    - Ошибку charge нужно ловить в try/catch, иначе очередь потеряет задачу
+  answer: 0
+- id: queues-outbox-recipe
+  skill: outbox-pattern
+  question: queues-background-jobs
+  difficulty: 3
+  prompt: Заказ сохраняется в БД, и для него нужно поставить задачу в очередь так, чтобы запись и задача не разошлись. Расставьте шаги outbox-паттерна.
+  explanation: "Если писать в БД и в очередь по отдельности, сбой между этими действиями даёт заказ без задачи или задачу без заказа. Outbox делает запись атомарной в одной транзакции, а публикацию повторяемой. Запись помечают после публикации: если релей упадёт между ними, событие опубликуют повторно, поэтому обработчик в воркере должен быть идемпотентным."
+  type: order
+  kind: recipe
+  steps:
+    - В одной транзакции записать заказ и событие в таблицу outbox
+    - Закоммитить транзакцию и ответить клиенту
+    - Отдельный процесс-релей читает неопубликованные записи outbox
+    - Релей публикует событие в очередь
+    - Релей помечает запись outbox как опубликованную
+
+# rest-api-design: принято из черновика 2026-10-13
+- id: rest-api-core-idea
+  skill: rest-resource-modeling
+  question: rest-api-design
+  difficulty: 1
+  prompt: Команда проектирует API заказов. Какой подход соответствует REST и делает API предсказуемым?
+  explanation: "REST строится вокруг ресурсов: `/orders/43` — существительное, `GET/POST/PATCH/DELETE` — действие, статус-код — результат. Тогда клиент, кэши и мониторинг понимают любой эндпоинт по одной схеме. Действия вне CRUD оформляют подресурсом: `POST /orders/43/cancel`."
+  type: quiz
+  options:
+    - label: URL описывает ресурс существительным во множественном числе, действие задаёт HTTP-метод, результат — статус-код
+      why: "Верно. Одна схема на весь API: зная ресурс, клиент угадывает URL, метод и коды ответов без чтения документации к каждому эндпоинту."
+    - label: "Каждому действию — свой понятный URL: /getOrders, /createOrder, /deleteOrder"
+      why: "Глагол в URL дублирует HTTP-метод. Имена становятся произвольными, и единообразие ломается: где-то /removeOrder, где-то /deleteItem."
+    - label: Один эндпоинт POST /api с полем action в теле — так проще расширять
+      why: Это RPC-стиль. Теряются кэширование GET, семантика и идемпотентность методов, а статус-коды ничего не говорят о результате.
+    - label: Всегда отвечать 200, а успех или ошибку передавать полем в теле
+      why: "Кэши, мониторинг и клиентские библиотеки сочтут ошибку успехом. Результат должен выражаться статус-кодом: 404, 409, 422 и т. д."
+  answer: 0
+- id: rest-api-feed-pagination
+  skill: rest-pagination
+  question: rest-api-design
+  difficulty: 2
+  prompt: Лента событий на миллионы записей, бесконечный скролл, новые события появляются каждую секунду. При подгрузке элементы не должны дублироваться или пропадать. Какую пагинацию выбрать?
+  explanation: "Cursor-пагинация: курсор кодирует позицию последнего элемента (например, createdAt + id), сервер делает `WHERE (created_at, id) < cursor ORDER BY ... LIMIT n` по индексу. Это быстро на любой глубине и стабильно при вставках. Offset оставьте для небольших таблиц с номерами страниц."
+  type: choose-tool
+  options:
+    - label: "Cursor: ?cursor=…&limit=20 → { items, nextCursor }"
+      why: Запрос идёт от позиции последнего элемента по индексу — скорость не зависит от глубины, а новые записи не сдвигают уже загруженные страницы.
+    - label: "Offset: ?page=3&limit=20"
+      why: Хорош для админки с номерами страниц и небольших таблиц. Здесь OFFSET на глубоких страницах медленный, а вставки сдвигают окно — появятся дубли.
+    - label: Отдать весь список и резать на клиенте
+      why: Годится для десятков-сотен статичных записей. Миллионы событий — огромный ответ, память и трафик, а данные устаревают сразу после загрузки.
+    - label: Параметр ?fields= для урезанных ответов
+      why: Уменьшает размер каждого элемента, когда клиенту нужно мало полей, но не решает пагинацию и проблему сдвига при вставках.
+  answer: 0
+- id: rest-api-error-with-200
+  skill: rest-status-codes
+  question: rest-api-design
+  difficulty: 1
+  prompt: Route handler создаёт заказ. Найдите строку, из-за которой клиент и мониторинг неверно поймут результат.
+  explanation: "`Response.json` по умолчанию отдаёт 200. Ошибка валидации с кодом 200 выглядит успехом для fetch-обёрток, TanStack Query, кэшей и алертов. Нужно `{ status: 422 }` и тело в едином формате, например Problem Details с перечнем полей: `errors: [{ field, message }]`."
+  type: find-bug
+  language: ts
+  code: |-
+    export async function POST(req: Request) {
+      const body = await req.json();
+      const parsed = OrderSchema.safeParse(body);
+      if (!parsed.success) {
+        return Response.json({ error: 'Invalid' });
+      }
+      const order = await createOrder(parsed.data);
+      return Response.json(order, {
+        status: 201,
+        headers: {
+          Location: `/api/v1/orders/${order.id}`,
+        },
+      });
+    }
+  bugLines:
+    - 5
+  causes:
+    - Ошибка валидации уходит со статусом 200 по умолчанию — нужен 422 (или 400) и единый формат ошибки с полями
+    - Для созданного ресурса нужно возвращать 200, а не 201
+    - Заголовок Location обязан содержать абсолютный URL с доменом
+    - Тело запроса нельзя читать через await req.json() в route handler
+  answer: 0
+- id: rest-api-etag-conflict-timeline
+  skill: rest-optimistic-locking
+  question: rest-api-design
+  difficulty: 3
+  prompt: Алиса и Борис одновременно редактируют заказ, API использует ETag + If-Match. Расставьте события по порядку.
+  explanation: "Оптимистическая блокировка: клиент присылает версию, которую видел (If-Match). Если ресурс уже изменили, сервер отвечает 412 и не затирает чужую правку. Без этого сработал бы last write wins и изменения Бориса молча потерялись бы."
+  type: order
+  kind: timeline
+  steps:
+    - 'Оба загружают заказ: GET → 200, ETag: "v7"'
+    - 'Борис отправляет PATCH с If-Match: "v7"'
+    - 'Версии совпали: сервер сохраняет правку и отдаёт ETag: "v8"'
+    - 'Алиса отправляет PATCH с If-Match: "v7"'
+    - Сервер отвечает 412 Precondition Failed, правка не применена
+    - Клиент Алисы перечитывает заказ и предлагает повторить правку
+
+# web-storage: принято из черновика 2026-10-13
+- id: web-storage-token-in-localstorage
+  skill: web-storage-security
+  question: web-storage
+  difficulty: 1
+  prompt: Команда хранит токен сессии в `localStorage`. Чем это хуже, чем `HttpOnly` cookie?
+  explanation: "`localStorage` открыт любому JS того же origin, поэтому XSS превращается в кражу токена. `HttpOnly` cookie скрипт не прочитает, а браузер сам отправит её на сервер. От XSS это спасает не полностью: скрипт может слать запросы от имени пользователя. Ещё cookie нужно защищать от CSRF через `SameSite`."
+  type: quiz
+  options:
+    - label: Любой скрипт на странице, в том числе внедрённый через XSS, прочитает токен и отправит его злоумышленнику
+      why: "Верно. `localStorage` доступен всему JS этого origin. `HttpOnly` cookie из скрипта не прочитать: её видит только браузер при отправке запроса."
+    - label: Содержимое localStorage уходит на сервер с каждым запросом, и токен можно перехватить
+      why: Неверно. С запросами автоматически уходят только cookies. `localStorage` на сервер сам не попадает.
+    - label: Токен пропадёт, как только пользователь закроет вкладку
+      why: Так ведёт себя `sessionStorage`. Данные в `localStorage` хранятся бессрочно.
+    - label: Токен смогут прочитать другие сайты, открытые в соседних вкладках
+      why: Неверно. Storage изолирован по origin, чужой сайт его не видит. Опасен скрипт, который выполняется на вашей же странице.
+  answer: 0
+- id: web-storage-form-draft-choice
+  skill: web-storage-choice
+  question: web-storage
+  difficulty: 1
+  prompt: Длинная форма заявки. Черновик должен пережить случайную перезагрузку страницы, но не появляться в других вкладках и не оставаться после закрытия вкладки. Где его хранить?
+  explanation: Выбирайте по времени жизни и по тому, кому нужны данные. Нужно на одну вкладку — `sessionStorage`. Нужно навсегда и во всех вкладках — `localStorage`. Нужно серверу — cookie. Большие или офлайн-данные — IndexedDB.
+  type: choose-tool
+  options:
+    - label: sessionStorage
+      why: Данные живут, пока открыта вкладка, и переживают перезагрузку. Каждая вкладка получает своё хранилище. Для небольшого черновика синхронного API хватает.
+    - label: localStorage
+      why: "Хранит бессрочно и общий для всех вкладок origin, поэтому черновик всплывёт в другой вкладке и после закрытия. Подходит для настроек UI: тема, свёрнутая панель."
+    - label: IndexedDB
+      why: Асинхронная база для больших объёмов и офлайн-кэша. Для текстового черновика это избыточно, и хранится она бессрочно — чистить пришлось бы вручную.
+    - label: Cookie
+      why: Уходит на сервер с каждым запросом и ограничена ~4 КБ. Её место — сессия и данные, которые нужны серверу, а не черновики UI.
+  answer: 0
+- id: web-storage-missing-stringify
+  skill: web-storage-serialization
+  question: web-storage
+  difficulty: 1
+  prompt: Приложение только клиентское, без SSR. Корзина вроде бы сохраняется, но после перезагрузки страница падает с SyntaxError в `JSON.parse`. Где ошибка?
+  explanation: 'Storage хранит только строки и молча вызывает `String()` для любого значения. Массив объектов превращается в `"[object Object],[object Object]"`, и JSON из этого не разобрать. Правило: запись через `JSON.stringify`, чтение через `JSON.parse` в `try/catch`.'
+  type: find-bug
+  language: jsx
+  code: |-
+    function useCart() {
+      const [items, setItems] = useState(() => {
+        const raw = localStorage.getItem('cart');
+        return raw ? JSON.parse(raw) : [];
+      });
+      useEffect(() => {
+        localStorage.setItem('cart', items);
+      }, [items]);
+      return [items, setItems];
+    }
+  bugLines:
+    - 7
+  causes:
+    - 'В `setItem` передан массив: он приводится к строке `"[object Object],..."`, и `JSON.parse` после перезагрузки падает'
+    - "Читать `localStorage` в ленивом инициализаторе `useState` нельзя: значение потеряется"
+    - В зависимостях эффекта не хватает `setItems`, поэтому запись срабатывает не всегда
+    - "`JSON.parse` возвращает строку, поэтому `items` никогда не станет массивом"
+  answer: 0
+- id: web-storage-session-cookie-flags
+  skill: session-cookie-flags
+  question: web-storage
+  difficulty: 2
+  prompt: Route handler в Next.js ставит cookie сессии. Заполните пропуски так, чтобы скрипт не мог её прочитать, она шла только по HTTPS и отправлялась при переходе по ссылке с чужого сайта, но не с кросс-сайтовыми POST.
+  explanation: "`httpOnly` прячет cookie от `document.cookie`, и XSS не может украсть токен. `secure` запрещает отправку по HTTP. `sameSite: 'lax'` — разумный дефолт: cookie уходит при навигации, но не с кросс-сайтовыми POST, что защищает от CSRF. `'strict'` сломал бы вход по внешней ссылке, `'none'` убрал бы защиту."
+  type: fill-tokens
+  language: ts
+  code: |-
+    export async function POST(req: Request) {
+      const token = await createSession(req);
+      const store = await cookies();
+      store.set('session', token, {
+        ___: true, // hidden from document.cookie
+        ___: true, // HTTPS only
+        sameSite: '___',
+        maxAge: 60 * 60 * 24 * 7,
+      });
+      return Response.json({ ok: true });
+    }
+  tokens:
+    - httpOnly
+    - secure
+    - lax
+  decoys:
+    - strict
+    - none
+    - readonly
+    - private

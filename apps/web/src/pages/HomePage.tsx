@@ -9,7 +9,7 @@ const MODES = [
     to: '/questions',
     icon: IconBook,
     title: 'Каталог',
-    text: 'Все 100 вопросов с краткими и развёрнутыми ответами, примерами на TypeScript и ссылками на документацию.',
+    text: 'Все 140 вопросов с краткими и развёрнутыми ответами, примерами на TypeScript и ссылками на документацию.',
     cta: 'Открыть каталог',
   },
   {
@@ -34,12 +34,12 @@ export function HomePage() {
 
   return (
     <>
-      <title>React Refresher — 100 вопросов для собеседования</title>
+      <title>React Refresher — 140 вопросов для собеседования</title>
       <section className="hero">
         <div className="hero__logo"><Logo size={72} /></div>
         <h1 className="hero__title">React Refresher</h1>
         <p className="hero__subtitle">
-          100 актуальных вопросов для собеседования на React-разработчика — от Junior до Senior.
+          140 актуальных вопросов для собеседования на React-разработчика — от Junior до Senior.
           Обновлено под React 19, Server Components и React Compiler.
         </p>
         <div className="hero__actions">
@@ -110,7 +110,7 @@ export function HomePage() {
             <h2 className="section__title">Что изменилось со старой версии</h2>
             <p className="section__lead">
               Исходный список из 50 вопросов писался во времена классов, <code>eject</code> и <code>mapStateToProps</code>.
-              Все старые вопросы сохранены — переписаны, объединены или заменены актуальными, а список вырос до 100.
+              Все старые вопросы сохранены — переписаны, объединены или заменены актуальными, а список вырос до 140.
             </p>
           </div>
           <Link to="/about#changes" className="btn btn--secondary">

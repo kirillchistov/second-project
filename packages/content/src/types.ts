@@ -12,7 +12,8 @@ export type TopicId =
   | 'testing'
   | 'architecture'
   | 'quality'
-  | 'ecosystem';
+  | 'ecosystem'
+  | 'fullstack';
 
 export interface Topic {
   id: TopicId;
@@ -26,7 +27,7 @@ export interface QuestionLink {
 }
 
 export interface Question {
-  /** Порядковый номер 1..100 — по уровню, затем по порядку в файлах */
+  /** Порядковый номер с 1 — по уровню, затем по порядку в файлах */
   number: number;
   slug: string;
   level: Level;
