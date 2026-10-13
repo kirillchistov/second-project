@@ -1,18 +1,19 @@
 import { Link } from 'react-router';
-import { DAILY_GOAL_XP, currentStreak, dueCount, localDay, reviewItems, type PathLesson, type PathUnit } from '@rr/core';
+import {
+  DAILY_GOAL_XP,
+  currentStreak,
+  dueCount,
+  lessonStatus,
+  localDay,
+  reviewItems,
+  type LessonStatus,
+  type PathLesson,
+  type PathUnit,
+} from '@rr/core';
 import { CONTENT, PATH, topicTitle } from './content';
 import { useNow } from './now';
 import { resetProgress } from './progress';
 import { useDemoProgress } from './useProgress';
-
-type LessonStatus = 'done' | 'next' | 'locked';
-
-function lessonStatus(unit: PathUnit, index: number, done: Record<string, number>): LessonStatus {
-  const lesson = unit.lessons[index];
-  if (lesson.id in done) return 'done';
-  if (index === 0 || unit.lessons[index - 1].id in done) return 'next';
-  return 'locked';
-}
 
 export function PathPage() {
   const progress = useDemoProgress();
@@ -56,7 +57,7 @@ export function PathPage() {
 
       <div className="units">
         {PATH.map((unit) => (
-          <Unit key={unit.id} unit={unit} done={progress.lessonsDone} />
+          <Unit key={unit.id} unit={unit} hasSkill={(skill) => skill in progress.cards} />
         ))}
       </div>
 
@@ -75,8 +76,9 @@ export function PathPage() {
   );
 }
 
-function Unit({ unit, done }: { unit: PathUnit; done: Record<string, number> }) {
-  const completed = unit.lessons.filter((lesson) => lesson.id in done).length;
+function Unit({ unit, hasSkill }: { unit: PathUnit; hasSkill: (skill: string) => boolean }) {
+  const statuses = unit.lessons.map((_, index) => lessonStatus(unit, index, hasSkill));
+  const completed = statuses.filter((status) => status === 'done').length;
   return (
     <section className="unit">
       <div className="unit__head">
@@ -94,7 +96,7 @@ function Unit({ unit, done }: { unit: PathUnit; done: Record<string, number> }) 
       </div>
       <ol className="commits">
         {unit.lessons.map((lesson, index) => (
-          <Commit key={lesson.id} lesson={lesson} status={lessonStatus(unit, index, done)} last={index === unit.lessons.length - 1} />
+          <Commit key={lesson.id} lesson={lesson} status={statuses[index]} last={index === unit.lessons.length - 1} />
         ))}
       </ol>
     </section>

@@ -1,7 +1,7 @@
 import { UNITS } from '@rr/content';
 import { loadExercises, loadQuestions } from '@rr/content/node';
 import { describe, expect, test } from 'vitest';
-import { buildPath, dueCount, lessonItems, QUESTIONS_PER_LESSON, reviewItems } from './path.ts';
+import { buildPath, cardSkill, dueCount, lessonItems, lessonStatus, QUESTIONS_PER_LESSON, reviewItems } from './path.ts';
 import { review, type StoredCard } from './srs.ts';
 
 const content = { units: UNITS, questions: loadQuestions(), exercises: loadExercises() };
@@ -41,6 +41,21 @@ describe('путь обучения', () => {
     const lesson = path.flatMap((u) => u.lessons).find((l) => l.exercises.some((e) => e.id === 'hook-after-early-return'))!;
     const ids = lessonItems(lesson).map((i) => i.id);
     expect(ids.indexOf('ex:hook-after-early-return')).toBeLessThan(ids.indexOf('q:rules-of-hooks'));
+  });
+
+  test('урок пройден, когда отвечены все его вопросы, — независимо от id урока', () => {
+    const unit = path.find((u) => u.lessons.length >= 3)!;
+    const [first, second] = unit.lessons;
+    const answered = new Set(first.questions.map(cardSkill));
+    const has = (skill: string) => answered.has(skill);
+    expect(lessonStatus(unit, 0, has)).toBe('done');
+    expect(lessonStatus(unit, 1, has)).toBe('next');
+    expect(lessonStatus(unit, 2, has)).toBe('locked');
+    // Новый вопрос в первом уроке (банк пополнился) — урок снова не пройден
+    answered.delete(cardSkill(first.questions.at(-1)!));
+    expect(lessonStatus(unit, 0, has)).toBe('next');
+    expect(lessonStatus(unit, 1, has)).toBe('locked');
+    expect(second.id).toBe(`${unit.id}-2`);
   });
 });
 

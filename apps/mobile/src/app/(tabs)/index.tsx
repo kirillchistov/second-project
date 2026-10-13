@@ -5,25 +5,15 @@ import { useNow } from '@/lib/now';
 import { useProgress } from '@/lib/progress';
 import { MONO, useColors, type Colors } from '@/lib/theme';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { currentStreak, DAILY_GOAL_XP, localDay, type PathLesson, type PathUnit } from '@rr/core';
+import { currentStreak, DAILY_GOAL_XP, localDay, lessonStatus, type LessonStatus, type PathLesson, type PathUnit } from '@rr/core';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-type LessonStatus = 'done' | 'next' | 'locked';
-
-/** Внутри юнита уроки открываются по порядку; юниты открыты все — это тренажёр для повторения, а не первый курс. */
-function lessonStatus(unit: PathUnit, index: number, done: ReadonlyMap<string, number>): LessonStatus {
-  const lesson = unit.lessons[index];
-  if (done.has(lesson.id)) return 'done';
-  if (index === 0 || done.has(unit.lessons[index - 1].id)) return 'next';
-  return 'locked';
-}
-
 export default function PathScreen() {
   const c = useColors();
-  const { activity, lessonsDone } = useProgress();
+  const { activity, cards } = useProgress();
   const today = localDay(useNow());
   const streak = currentStreak(activity.keys(), today);
   const xpToday = activity.get(today) ?? 0;
@@ -46,15 +36,16 @@ export default function PathScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         {PATH.map((unit) => (
-          <Unit key={unit.id} unit={unit} done={lessonsDone} c={c} />
+          <Unit key={unit.id} unit={unit} hasSkill={(skill) => cards.has(skill)} c={c} />
         ))}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function Unit({ unit, done, c }: { unit: PathUnit; done: ReadonlyMap<string, number>; c: Colors }) {
-  const completed = unit.lessons.filter((l) => done.has(l.id)).length;
+function Unit({ unit, hasSkill, c }: { unit: PathUnit; hasSkill: (skill: string) => boolean; c: Colors }) {
+  const statuses = unit.lessons.map((_, i) => lessonStatus(unit, i, hasSkill));
+  const completed = statuses.filter((s) => s === 'done').length;
   const released = completed === unit.lessons.length;
   return (
     <View style={styles.unit}>
@@ -71,7 +62,7 @@ function Unit({ unit, done, c }: { unit: PathUnit; done: ReadonlyMap<string, num
       </View>
       <View style={styles.commits}>
         {unit.lessons.map((lesson, i) => (
-          <Commit key={lesson.id} lesson={lesson} status={lessonStatus(unit, i, done)} last={i === unit.lessons.length - 1} c={c} />
+          <Commit key={lesson.id} lesson={lesson} status={statuses[i]} last={i === unit.lessons.length - 1} c={c} />
         ))}
       </View>
       <View style={[styles.release, { borderColor: released ? c.success : c.border }]}>

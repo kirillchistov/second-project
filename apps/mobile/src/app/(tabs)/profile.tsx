@@ -1,9 +1,10 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { PATH } from '@/lib/content';
 import { useNow } from '@/lib/now';
 import { setCardMode, useCardMode, type CardMode } from '@/lib/preferences';
 import { useProgress } from '@/lib/progress';
 import { useColors, type Colors } from '@/lib/theme';
-import { addDays, currentStreak, DAILY_GOAL_XP, isLearned, localDay, longestStreak, retrievability } from '@rr/core';
+import { addDays, currentStreak, DAILY_GOAL_XP, isLearned, isLessonDone, localDay, longestStreak, retrievability } from '@rr/core';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -81,7 +82,7 @@ function CardModeSetting({ c }: { c: Colors }) {
 
 export default function ProfileScreen() {
   const c = useColors();
-  const { activity, cards, lessonsDone, voice } = useProgress();
+  const { activity, cards, voice } = useProgress();
   const now = useNow();
   const totalXp = [...activity.values()].reduce((a, b) => a + b, 0);
   const learned = [...cards.values()].filter(isLearned).length;
@@ -92,7 +93,7 @@ export default function ProfileScreen() {
     { label: 'Стрик', value: `${currentStreak(activity.keys(), localDay(now))}` },
     { label: 'Рекорд', value: `${longestStreak(activity.keys())}` },
     { label: 'Всего XP', value: `${totalXp}` },
-    { label: 'Уроков', value: `${lessonsDone.size}` },
+    { label: 'Уроков', value: `${PATH.flatMap((u) => u.lessons).filter((l) => isLessonDone(l, (skill) => cards.has(skill))).length}` },
     { label: 'Навыков выучено', value: `${learned}/${cards.size}` },
     { label: 'Помнишь сейчас', value: reviewed.length ? `${Math.round(memory * 100)}%` : '—' },
     {

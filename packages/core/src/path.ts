@@ -96,6 +96,24 @@ export function buildPath(content: PathContent): PathUnit[] {
   });
 }
 
+export type LessonStatus = 'done' | 'next' | 'locked';
+
+/**
+ * Урок пройден, если по каждому его вопросу уже есть карточка навыка (на вопрос отвечали в уроке или в повторении).
+ * Считаем по вопросам, а не по id урока: при пополнении банка состав уроков сдвигается,
+ * и сохранённый id `hooks-3` начал бы указывать на другие вопросы.
+ */
+export function isLessonDone(lesson: PathLesson, hasSkill: (skill: string) => boolean): boolean {
+  return lesson.questions.every((q) => hasSkill(cardSkill(q)));
+}
+
+/** Внутри юнита уроки открываются по порядку; юниты открыты все — это тренажёр для повторения, а не первый курс. */
+export function lessonStatus(unit: PathUnit, index: number, hasSkill: (skill: string) => boolean): LessonStatus {
+  if (isLessonDone(unit.lessons[index], hasSkill)) return 'done';
+  if (index === 0 || isLessonDone(unit.lessons[index - 1], hasSkill)) return 'next';
+  return 'locked';
+}
+
 export function exerciseItem(exercise: Exercise): LessonItem {
   return { kind: 'exercise', id: `ex:${exercise.id}`, skill: exercise.skill, exercise };
 }
