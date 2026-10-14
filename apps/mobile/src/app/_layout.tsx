@@ -1,3 +1,4 @@
+import { ConfettiHost } from '@/components/ConfettiHost';
 import { ProgressProvider } from '@/components/ProgressProvider';
 import { useColors } from '@/lib/theme';
 import { Stack } from 'expo-router';
@@ -12,6 +13,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="lesson/[id]" options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
       </Stack>
+      <ConfettiHost />
     </ProgressProvider>
   );
 }

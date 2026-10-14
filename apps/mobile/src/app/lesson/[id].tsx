@@ -23,16 +23,53 @@ import {
   type LessonItem,
   type Outcome,
 } from '@rr/core';
+import { burst, celebrate } from '@/lib/confetti';
+import { ScrollLockContext } from '@/lib/scrollLock';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useReducer, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { AccessibilityInfo, Animated, Easing, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /** Урок мог открыться первым экраном (по ссылке или после перезагрузки) — тогда возвращаться некуда, идём на путь. */
 function leave() {
   if (router.canGoBack()) router.back();
   else router.replace('/');
+}
+
+/** «Идеальный коммит»: золотой заголовок выпрыгивает пружиной и мягко пульсирует, пока открыт экран. */
+function PerfectTitle() {
+  const c = useColors();
+  const [pop] = useState(() => new Animated.Value(0));
+  const [pulse] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    let loop: Animated.CompositeAnimation | undefined;
+    AccessibilityInfo.isReduceMotionEnabled().then((reduce) => {
+      if (reduce) {
+        pop.setValue(1);
+        return;
+      }
+      Animated.spring(pop, { toValue: 1, friction: 4, tension: 120, useNativeDriver: true }).start();
+      loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulse, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+          Animated.timing(pulse, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        ]),
+      );
+      loop.start();
+    });
+    return () => loop?.stop();
+  }, [pop, pulse]);
+  const scale = Animated.multiply(
+    pop.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }),
+    pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] }),
+  );
+  return (
+    <Animated.View accessibilityRole="header" style={{ opacity: pop, transform: [{ scale }], alignItems: 'center', gap: 2 }}>
+      <Text style={[styles.title, { color: c.warning }]}>✦ Идеальный коммит ✦</Text>
+      <Text style={[styles.perfectSub, { color: c.textMuted }]}>ни одной ошибки — merge без ревью</Text>
+    </Animated.View>
+  );
 }
 
 export default function LessonScreen() {
@@ -56,6 +93,7 @@ export default function LessonScreen() {
   const [saved, setSaved] = useState<SavedLesson | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const savingRef = useRef(false);
+  const [scrollLocked, setScrollLocked] = useState(false);
 
   const item = currentItem(state);
 
@@ -67,16 +105,20 @@ export default function LessonScreen() {
       .then((result) => {
         setSaved(result);
         Haptics.notificationAsync(result.perfect ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning);
+        // Идеальный коммит — салют; повторение и урок с ошибками — скромный хлопок
+        if (result.perfect && !isReview) celebrate();
+        else burst();
       })
       .catch((error) => {
         console.error('Не удалось сохранить урок', error);
         setSaveFailed(true);
       });
-  }, [state, items.length, lesson?.id, progress]);
+  }, [state, items.length, lesson?.id, progress, isReview]);
 
   const answer = (outcome: Outcome, feedback: boolean, meta?: AnswerMeta) => {
     if (!item) return;
     const correct = outcome !== 'again';
+    if (correct) burst();
     if (!feedback) {
       // Самооценка или разбор ИИ: результат уже на экране — отдельная панель не нужна
       dispatch({ type: 'answer', outcome, meta });
@@ -103,9 +145,11 @@ export default function LessonScreen() {
     return (
       <View style={[styles.center, sides, { backgroundColor: c.bg, paddingTop: insets.top, paddingBottom: insets.bottom + 24 }]}>
         <Text style={[styles.face, { color: c.text }]}>{fibiFace(saved?.perfect ? 'proud' : 'happy')}</Text>
-        <Text style={[styles.title, { color: c.text }]}>
-          {isReview ? 'Повторение завершено' : saved?.perfect ? 'Идеальный коммит!' : 'Коммит принят'}
-        </Text>
+        {!isReview && saved?.perfect ? (
+          <PerfectTitle />
+        ) : (
+          <Text style={[styles.title, { color: c.text }]}>{isReview ? 'Повторение завершено' : 'Коммит принят'}</Text>
+        )}
         {lesson && <Text style={[styles.hash, { color: c.textMuted }]}>commit {lesson.hash}</Text>}
         {saved && (
           <View style={styles.stats}>
@@ -157,9 +201,15 @@ export default function LessonScreen() {
         {state.combo >= 3 && <Text style={[styles.combo, { color: c.warning }]}>×{state.combo}</Text>}
       </View>
 
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 40 }]} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 40 }]}
+        keyboardShouldPersistTaps="handled"
+        scrollEnabled={!scrollLocked}
+      >
         {repeat && <Text style={[styles.repeat, { color: c.warning }]}>Повтор ошибки</Text>}
-        {item && <LessonItemView key={`${item.id}:${state.position}`} item={item} revealed={revealed} onAnswer={answer} />}
+        <ScrollLockContext value={setScrollLocked}>
+          {item && <LessonItemView key={`${item.id}:${state.position}`} item={item} revealed={revealed} onAnswer={answer} />}
+        </ScrollLockContext>
       </ScrollView>
 
       {revealed && graded && state.last && (
@@ -208,6 +258,7 @@ const styles = StyleSheet.create({
   feedbackAnswer: { fontSize: 15, lineHeight: 21, fontWeight: '600', marginBottom: 6 },
   feedbackText: { fontSize: 15, lineHeight: 21 },
   face: { fontSize: 44 },
+  perfectSub: { fontSize: 13, fontWeight: '600' },
   title: { fontSize: 26, fontWeight: '800', textAlign: 'center' },
   hash: { fontFamily: 'Menlo', fontSize: 14 },
   muted: { fontSize: 16, lineHeight: 22, textAlign: 'center' },

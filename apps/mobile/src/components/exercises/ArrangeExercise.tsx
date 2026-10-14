@@ -4,6 +4,7 @@ import { MONO, useColors } from '@/lib/theme';
 import { CODE_FONT, checkAnswer, shuffle } from '@rr/core';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { ReorderList } from './ReorderList';
 import type { ExerciseProps } from './types';
 
 type Piece = { id: number; text: string };
@@ -19,8 +20,9 @@ function shuffledPieces(items: string[], correct: string[]): Piece[] {
 }
 
 /**
- * «Порядок» (таймлайн, рецепт) и «Пазл Парсонса»: собрать последовательность тапами.
- * Тап по фишке внизу добавляет её в ответ, тап по шагу ответа — возвращает обратно.
+ * «Порядок» (таймлайн, рецепт): все шаги сразу в списке, их перетаскивают за ручку.
+ * «Пазл Парсонса»: тап по строке внизу добавляет её в ответ, тап по строке ответа возвращает обратно,
+ * собранные строки тоже можно переставлять перетаскиванием.
  */
 export function ArrangeExercise({ exercise, revealed, onSubmit }: ExerciseProps<'order' | 'parsons'>) {
   const c = useColors();
@@ -30,7 +32,7 @@ export function ArrangeExercise({ exercise, revealed, onSubmit }: ExerciseProps<
   const mono = [styles.mono, { fontSize: font.mode === 'manual' ? font.size : CODE_FONT.default }];
   const correct = isCode ? exercise.lines : exercise.steps;
   const [pool] = useState(() => shuffledPieces(isCode ? [...exercise.lines, ...exercise.distractors] : exercise.steps, correct));
-  const [answer, setAnswer] = useState<number[]>([]);
+  const [answer, setAnswer] = useState<number[]>(() => (isCode ? [] : pool.map((p) => p.id)));
 
   const byId = new Map(pool.map((p) => [p.id, p]));
   const label = isCode ? 'Собери код' : exercise.kind === 'timeline' ? 'Расставь по порядку' : 'Собери алгоритм';
@@ -40,23 +42,40 @@ export function ArrangeExercise({ exercise, revealed, onSubmit }: ExerciseProps<
     <View style={styles.root}>
       <Prompt label={label} text={exercise.prompt} />
 
+      {!isCode && !revealed && (
+        <Text style={[styles.hint, { color: c.textMuted }]}>Перетаскивай шаги за ручку ☰ слева</Text>
+      )}
       <View style={[styles.answer, { borderColor: c.border }]}>
         {answer.length === 0 && <Text style={[styles.placeholder, { color: c.textMuted }]}>Тапай фишки ниже по порядку</Text>}
-        {answer.map((id, i) => {
-          const piece = byId.get(id)!;
-          const state = revealed ? (piece.text === correct[i] ? 'correct' : 'wrong') : undefined;
-          return (
-            <OptionCard key={id} state={state} disabled={revealed} onPress={() => setAnswer(answer.filter((a) => a !== id))}>
+        <ReorderList
+          ids={answer}
+          onChange={setAnswer}
+          disabled={revealed}
+          describe={(id) => byId.get(id)!.text}
+          renderItem={(id, i) => {
+            const piece = byId.get(id)!;
+            const state = revealed ? (piece.text === correct[i] ? 'correct' : 'wrong') : undefined;
+            const content = (
               <View style={styles.row}>
                 {!isCode && <Text style={[styles.index, { color: c.textMuted }]}>{i + 1}</Text>}
                 <Text style={[styles.text, { color: c.text }, isCode && mono]}>{display(piece.text)}</Text>
               </View>
-            </OptionCard>
-          );
-        })}
+            );
+            // Шаг порядка тапом не убирается: он всегда в списке, его только переставляют
+            return isCode ? (
+              <OptionCard state={state} disabled={revealed} onPress={() => setAnswer(answer.filter((a) => a !== id))}>
+                {content}
+              </OptionCard>
+            ) : (
+              <OptionCard state={state} disabled>
+                {content}
+              </OptionCard>
+            );
+          }}
+        />
       </View>
 
-      {!revealed && (
+      {!revealed && isCode && (
         <View style={styles.pool}>
           {pool
             .filter((p) => !answer.includes(p.id))
@@ -84,6 +103,7 @@ const styles = StyleSheet.create({
   answer: { minHeight: 80, borderWidth: 2, borderStyle: 'dashed', borderRadius: 14, padding: 8, gap: 6 },
   placeholder: { textAlign: 'center', paddingVertical: 24, fontSize: 15 },
   pool: { gap: 8 },
+  hint: { textAlign: 'center', fontSize: 14 },
   row: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
   index: { fontWeight: '700', fontSize: 15, minWidth: 16 },
   text: { fontSize: 15, lineHeight: 21, flexShrink: 1 },
