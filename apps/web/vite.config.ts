@@ -45,14 +45,21 @@ export default defineConfig(({ mode }) => {
             groups: [
               { name: 'react', test: /node_modules[\\/](react|react-dom|react-router|scheduler|cookie)[\\/]/ },
               { name: 'prism', test: /node_modules[\\/]prism-react-renderer[\\/]/ },
-              // В демо банк больше 500 КБ. Вопросы и упражнения кешируются отдельно,
-              // а упражнения делятся надвое, чтобы ни один файл не перешагнул порог.
+              // Вопросы — в обеих сборках, двумя частями: так у банка есть запас до порога в 500 КБ
+              { name: 'questions-junior-middle', test: /packages[\\/]content[\\/]questions[\\/](junior|middle)-/ },
+              { name: 'questions-senior', test: /packages[\\/]content[\\/]questions[\\/]/ },
+              // В демо банк больше 1,5 МБ. Вопросы и упражнения кешируются отдельно и делятся
+              // на части примерно по 350 КБ, чтобы ни один файл не перешагнул порог в 500 КБ.
+              // Новую тему добавляйте в одну из групп упражнений (иначе она попадёт в последнюю).
               ...(pages
                 ? [
-                    { name: 'questions', test: /packages[\\/]content[\\/]questions[\\/]/ },
                     {
                       name: 'exercises-core',
-                      test: /packages[\\/]content[\\/]exercises[\\/](basics|hooks|rendering|state|modern)\.yaml/,
+                      test: /packages[\\/]content[\\/]exercises[\\/](basics|hooks|rendering|state)\.yaml/,
+                    },
+                    {
+                      name: 'exercises-modern',
+                      test: /packages[\\/]content[\\/]exercises[\\/](modern|server|performance|typescript|testing)\.yaml/,
                     },
                     { name: 'exercises-rest', test: /packages[\\/]content[\\/]exercises[\\/]/ },
                   ]
