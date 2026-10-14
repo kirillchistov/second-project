@@ -584,3 +584,611 @@ a.commit__link:hover {
     font-size: 1.15rem;
   }
 }
+
+/* ===== Общие ===== */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.confetti-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+/* ===== Идеальный коммит ===== */
+.lesson-end__perfect {
+  background: linear-gradient(90deg, var(--mid), #ffd76a, var(--good), var(--accent), var(--senior), var(--mid));
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: perfect-shine 3s linear infinite, perfect-pop 0.7s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+@keyframes perfect-shine {
+  to { background-position: 300% 0; }
+}
+
+@keyframes perfect-pop {
+  from { transform: scale(0.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* ===== Перетаскивание шагов ===== */
+.reorder {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reorder__item {
+  position: relative;
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.reorder__item.is-lifted {
+  z-index: 2;
+  transition: none;
+}
+
+.reorder__item.is-lifted .reorder__row {
+  border-color: var(--accent);
+  box-shadow: 0 12px 28px -10px rgb(11 127 168 / 0.45);
+  transform: scale(1.02);
+}
+
+.reorder.is-dragging {
+  user-select: none;
+}
+
+.reorder.is-dropping .reorder__item {
+  transition: none;
+}
+
+.reorder__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 10px 6px;
+  border: 2px solid var(--border);
+  border-bottom-width: 4px;
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+}
+
+.reorder__row.is-correct {
+  border-color: var(--good);
+  background: var(--junior-soft);
+}
+
+.reorder__row.is-wrong {
+  border-color: var(--low);
+  background: var(--pitfall-bg);
+}
+
+.reorder__row.is-mono .reorder__text {
+  font-family: var(--mono);
+  font-size: 0.92rem;
+  white-space: pre-wrap;
+}
+
+.reorder__text {
+  flex: 1;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.reorder__text {
+  cursor: pointer;
+}
+
+.reorder__handle {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-subtle);
+  cursor: grab;
+  touch-action: none;
+}
+
+.reorder__handle svg {
+  fill: currentColor;
+}
+
+.reorder__handle:hover,
+.reorder__handle:focus-visible {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.reorder.is-dragging .reorder__handle {
+  cursor: grabbing;
+}
+
+/* ===== Лендинг ===== */
+.landing {
+  display: grid;
+  gap: 72px;
+  padding-bottom: 32px;
+}
+
+.landing__block h2 {
+  margin: 0 0 12px;
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  letter-spacing: -0.02em;
+}
+
+.landing__lead {
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  line-height: 1.6;
+  max-width: 60ch;
+}
+
+.landing__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.landing__hero {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 32px;
+  align-items: center;
+}
+
+.landing__eyebrow {
+  margin: 0 0 12px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
+.landing__hero h1 {
+  margin: 0;
+  font-size: clamp(2rem, 6vw, 2.9rem);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+
+.landing__accent {
+  background: linear-gradient(90deg, var(--accent), var(--senior));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Ветка коммитов: узлы загораются по очереди, линия «дорастает» до релиза */
+.landing__branch {
+  position: relative;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 6px);
+  background:
+    radial-gradient(circle at 100% 0, var(--accent-soft), transparent 60%),
+    var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+
+.landing__branch-stats {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.landing__branch-stats b {
+  color: var(--mid);
+  font-size: 1.3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.landing__xp {
+  height: 10px;
+  margin: 10px 0 18px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+
+.landing__xp-bar {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--mid), #ffd76a);
+  transition: width 1.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.landing__branch.is-visible .landing__xp-bar {
+  width: 100%;
+}
+
+.landing__commits {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0 0 0 4px;
+  list-style: none;
+}
+
+.landing__commits::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  width: 3px;
+  height: calc(100% - 4px);
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.landing__commits::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  width: 3px;
+  height: 0;
+  border-radius: 2px;
+  background: var(--good);
+  transition: height 2.2s cubic-bezier(0.4, 0, 0.2, 1) 0.2s;
+}
+
+.landing__branch.is-visible .landing__commits::after {
+  height: calc(100% - 4px);
+}
+
+.landing__commits li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px auto 1fr;
+  gap: 10px;
+  align-items: center;
+  opacity: 0.45;
+  transition: opacity 0.4s calc(0.3s + var(--i) * 0.42s);
+}
+
+.landing__branch.is-visible .landing__commits li {
+  opacity: 1;
+}
+
+.landing__node {
+  width: 20px;
+  height: 20px;
+  border: 3px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  transition: background 0.3s, border-color 0.3s, transform 0.3s;
+  transition-delay: calc(0.3s + var(--i) * 0.42s);
+}
+
+.landing__branch.is-visible .landing__node {
+  border-color: var(--good);
+  background: var(--good);
+  animation: node-pop 0.5s cubic-bezier(0.2, 1.8, 0.4, 1) both;
+  animation-delay: calc(0.3s + var(--i) * 0.42s);
+}
+
+@keyframes node-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.45); box-shadow: 0 0 0 6px rgb(35 133 90 / 0.18); }
+  100% { transform: scale(1); }
+}
+
+.landing__commit-hash {
+  color: var(--text-subtle);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.landing__commit-title {
+  font-weight: 600;
+}
+
+.landing__release {
+  display: inline-block;
+  margin: 16px 0 0 34px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-subtle);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  transition: all 0.4s 2.4s;
+}
+
+.landing__branch.is-visible .landing__release {
+  border-color: var(--good);
+  background: var(--junior-soft);
+  color: var(--good);
+}
+
+/* Появление блоков при прокрутке */
+.landing__block:not(.landing__hero) {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.6s, transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.landing__block.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+.landing__steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.landing__step {
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.5s, transform 0.5s;
+  transition-delay: calc(var(--i) * 0.15s + 0.15s);
+}
+
+.is-visible .landing__step {
+  opacity: 1;
+  transform: none;
+}
+
+.landing__step-n {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-weight: 700;
+}
+
+.landing__step h3 {
+  margin: 6px 0;
+  font-size: 1.1rem;
+}
+
+.landing__step p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* Кривая забывания рисуется линией */
+.landing__chart {
+  margin: 20px 0 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+}
+
+.landing__chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.landing__axis {
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+}
+
+.landing__line {
+  fill: none;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+
+.landing__line--forget {
+  stroke: var(--low);
+  stroke-dasharray: 1;
+  opacity: 0.75;
+}
+
+.landing__line--review {
+  stroke: var(--good);
+}
+
+.is-visible .landing__line--forget {
+  animation: draw 1.6s ease-out 0.2s forwards;
+}
+
+.is-visible .landing__line--review {
+  animation: draw 2.4s ease-in-out 0.6s forwards;
+}
+
+@keyframes draw {
+  to { stroke-dashoffset: 0; }
+}
+
+.landing__dot {
+  fill: var(--good);
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.is-visible .landing__dot {
+  animation: dot-in 0.4s cubic-bezier(0.2, 1.8, 0.4, 1) forwards;
+  animation-delay: calc(1s + var(--i) * 0.6s);
+}
+
+@keyframes dot-in {
+  from { opacity: 0; transform: scale(0); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.landing__chart figcaption {
+  display: flex;
+  gap: 20px;
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.landing__legend::before {
+  content: '';
+  display: inline-block;
+  width: 18px;
+  height: 4px;
+  margin-right: 8px;
+  vertical-align: middle;
+  border-radius: 2px;
+}
+
+.landing__legend--review::before { background: var(--good); }
+.landing__legend--forget::before { background: var(--low); }
+
+/* Типы заданий */
+.landing__chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landing__chips li {
+  display: grid;
+  gap: 2px;
+  padding: 14px 16px;
+  border: 2px solid var(--border);
+  border-bottom-width: 4px;
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  opacity: 0;
+  transform: translateY(12px) scale(0.97);
+  transition: opacity 0.4s, transform 0.4s, border-color 0.2s;
+  transition-delay: calc(var(--i) * 0.08s + 0.1s), calc(var(--i) * 0.08s + 0.1s), 0s;
+}
+
+.is-visible .landing__chips li {
+  opacity: 1;
+  transform: none;
+}
+
+.landing__chips li:hover {
+  border-color: var(--accent);
+}
+
+.landing__chips span {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* Финал: граф активности заполняется по клеткам */
+.landing__final {
+  text-align: center;
+}
+
+.landing__final .landing__lead {
+  margin-inline: auto;
+}
+
+.landing__final .landing__actions {
+  justify-content: center;
+}
+
+.landing__graph {
+  display: grid;
+  grid-template-rows: repeat(7, 1fr);
+  grid-auto-flow: column;
+  gap: 4px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto 28px;
+}
+
+.landing__cell {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  transition: background 0.3s;
+  transition-delay: calc(var(--i) * 6ms);
+}
+
+.is-visible .landing__cell.is-l1 { background: color-mix(in srgb, var(--good) 30%, var(--bg-hover)); }
+.is-visible .landing__cell.is-l2 { background: color-mix(in srgb, var(--good) 55%, var(--bg-hover)); }
+.is-visible .landing__cell.is-l3 { background: color-mix(in srgb, var(--good) 80%, var(--bg-hover)); }
+.is-visible .landing__cell.is-l4 { background: var(--good); }
+
+@media (max-width: 700px) {
+  .landing {
+    gap: 56px;
+  }
+
+  .landing__hero {
+    grid-template-columns: 1fr;
+  }
+
+  .landing__steps {
+    grid-template-columns: 1fr;
+  }
+
+  .landing__cell {
+    width: 10px;
+    height: 10px;
+  }
+
+  .landing__graph {
+    gap: 3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing__block,
+  .landing__block *,
+  .landing__block *::before,
+  .landing__block *::after,
+  .lesson-end__perfect,
+  .reorder__item {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+  }
+
+  .landing__line {
+    stroke-dashoffset: 0;
+  }
+
+  .landing__block:not(.landing__hero),
+  .landing__step,
+  .landing__chips li,
+  .landing__dot {
+    opacity: 1;
+    transform: none;
+  }
+}

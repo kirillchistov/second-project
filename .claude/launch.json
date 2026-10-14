@@ -28,6 +28,21 @@
         "--go"
       ],
       "port": 8081
+    },
+    {
+      "name": "demo",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:pages",
+        "-w",
+        "@rr/web",
+        "--",
+        "--port",
+        "5189",
+        "--strictPort"
+      ],
+      "port": 5189
     }
   ]
 }

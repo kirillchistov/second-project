@@ -14,6 +14,7 @@ import {
   summarize,
   type LessonItem,
 } from '@rr/core';
+import { burst, celebrate } from './confetti';
 import { feedbackLine } from './copy';
 import { CONTENT, ITEMS, lessonById } from './content';
 import { LessonItemView } from './exercises/LessonItemView';
@@ -41,6 +42,7 @@ export function LessonPage({ review = false }: { review?: boolean }) {
   });
   const [state, dispatch] = useReducer(sessionReducer, items, startSession);
   const savedRef = useRef(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const title = !lesson && !review
     ? 'Урок не найден — React Refresher, демо'
     : review || items.length === 0
@@ -55,7 +57,10 @@ export function LessonPage({ review = false }: { review?: boolean }) {
     if (savedRef.current || state.phase !== 'done' || items.length === 0) return;
     savedRef.current = true;
     saveLesson(state, lesson?.id ?? null, new Date(), (itemId) => ITEMS.get(itemId)?.skill);
-  }, [state, items.length, lesson?.id]);
+    // Идеальный коммит — салют; повторение и урок с ошибками празднуем скромнее
+    if (!review && summarize(state).perfect) celebrate();
+    else burst();
+  }, [state, items.length, lesson?.id, review]);
 
   if (!review && !lesson) {
     return (
@@ -81,7 +86,9 @@ export function LessonPage({ review = false }: { review?: boolean }) {
     const streak = currentStreak(Object.keys(progress.activity), localDay(now));
     return (
       <div className="lesson-end">
-        <h1>{review ? 'Повторение завершено' : summary.perfect ? 'Идеальный коммит' : 'Коммит принят'}</h1>
+        <h1 className={!review && summary.perfect ? 'lesson-end__perfect' : undefined}>
+          {review ? 'Повторение завершено' : summary.perfect ? 'Идеальный коммит' : 'Коммит принят'}
+        </h1>
         {lesson && <p className="lesson-end__hash">commit {lesson.hash}</p>}
         <dl className="lesson-end__stats">
           <div><dt>XP</dt><dd>+{lessonXp(summary)}</dd></div>
@@ -112,7 +119,7 @@ export function LessonPage({ review = false }: { review?: boolean }) {
         </div>
         {state.combo >= 3 && <span className="lesson__combo">×{state.combo}</span>}
       </header>
-      <div className="lesson__body">
+      <div className="lesson__body" ref={bodyRef}>
         {repeat && <p className="lesson__repeat">Повтор ошибки</p>}
         {item && (
           <LessonItemView
@@ -120,6 +127,7 @@ export function LessonPage({ review = false }: { review?: boolean }) {
             item={item}
             revealed={revealed}
             onAnswer={(outcome, feedback, meta) => {
+              if (outcome !== 'again') burst(bodyRef.current);
               dispatch({ type: 'answer', outcome, meta });
               if (!feedback) dispatch({ type: 'continue' });
             }}

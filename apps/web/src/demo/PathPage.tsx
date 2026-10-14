@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router';
 import {
   DAILY_GOAL_XP,
@@ -11,11 +12,48 @@ import {
   type PathUnit,
 } from '@rr/core';
 import { CONTENT, PATH, topicTitle } from './content';
+import { Landing } from './Landing';
 import { useNow } from './now';
 import { resetProgress } from './progress';
 import { useDemoProgress } from './useProgress';
 
+const SKIP_LANDING = 'rr-demo-skip-landing';
+
+function landingSkipped(): boolean {
+  try {
+    return sessionStorage.getItem(SKIP_LANDING) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Новичку — лендинг; как только появился хоть какой-то прогресс, сразу путь. */
 export function PathPage() {
+  const progress = useDemoProgress();
+  const [skipped, setSkipped] = useState(landingSkipped);
+  const fresh = Object.keys(progress.cards).length === 0 && Object.keys(progress.activity).length === 0;
+  if (fresh && !skipped) {
+    return (
+      <>
+        <title>React Refresher — тренажёр по React, демо</title>
+        <Landing
+          onSkip={() => {
+            try {
+              sessionStorage.setItem(SKIP_LANDING, '1');
+            } catch {
+              // без sessionStorage лендинг просто покажется снова при перезагрузке
+            }
+            setSkipped(true);
+            window.scrollTo({ top: 0 });
+          }}
+        />
+      </>
+    );
+  }
+  return <Path />;
+}
+
+function Path() {
   const progress = useDemoProgress();
   const now = useNow();
   const today = localDay(now);
