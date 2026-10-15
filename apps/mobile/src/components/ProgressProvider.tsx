@@ -1,7 +1,9 @@
+import { syncProgress } from '@/lib/account';
 import { getDatabase, loadProgress, saveSession, startDay, type ProgressSnapshot } from '@/lib/db';
 import { useNow } from '@/lib/now';
 import { syncReminders, useReminderSettings } from '@/lib/reminders';
 import { ProgressContext } from '@/lib/progress';
+import { loadSession, useAccount } from '@/lib/session';
 import { localDay, type SessionState } from '@rr/core';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
@@ -40,13 +42,46 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     };
   }, [today]);
 
-  const save = useCallback(async (session: SessionState, lessonId: string | null) => {
-    const db = await getDatabase();
-    const now = new Date();
-    const saved = await saveSession(db, session, lessonId, now);
-    setSnapshot(await loadProgress(db, now));
-    return saved;
+  /** Синхронизация с сервером; если пришли прогоны с другого устройства — перечитываем прогресс */
+  const sync = useCallback(
+    () =>
+      syncProgress()
+        .then(async (imported) => (imported > 0 ? loadProgress(await getDatabase(), new Date()) : null))
+        .then((reloaded) => reloaded && setSnapshot(reloaded)),
+    [],
+  );
+
+  const save = useCallback(
+    async (session: SessionState, lessonId: string | null) => {
+      const db = await getDatabase();
+      const now = new Date();
+      const saved = await saveSession(db, session, lessonId, now);
+      setSnapshot(await loadProgress(db, now));
+      // Без await: итог урока не ждёт сети
+      void sync();
+      return saved;
+    },
+    [sync],
+  );
+
+  // Аккаунт: сессия из Keychain при старте, синхронизация после входа и в начале каждого дня
+  const account = useAccount();
+  const signedInAs = account.status === 'signed-in' ? account.user.id : null;
+  useEffect(() => {
+    void loadSession();
   }, []);
+  useEffect(() => {
+    if (!signedInAs) return;
+    // После входа прогресс перечитываем всегда: при смене аккаунта локальный прогресс очищается
+    let active = true;
+    syncProgress()
+      .then(async () => loadProgress(await getDatabase(), new Date()))
+      .then((reloaded) => active && setSnapshot(reloaded))
+      .catch((error) => console.warn('Не удалось синхронизировать', error));
+    return () => {
+      active = false;
+    };
+  }, [signedInAs, today]);
 
   // Расписание напоминаний следует за прогрессом и настройками: выполнил цель — сегодняшнее снимается
   const reminders = useReminderSettings();
@@ -55,6 +90,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     syncReminders(snapshot, new Date()).catch((error) => console.warn('Не удалось обновить напоминания', error));
   }, [snapshot, reminders]);
 
-  const value = useMemo(() => ({ ...(snapshot ?? EMPTY), ready: snapshot !== null, save }), [snapshot, save]);
+  const value = useMemo(() => ({ ...(snapshot ?? EMPTY), ready: snapshot !== null, save, sync }), [snapshot, save, sync]);
   return <ProgressContext value={value}>{children}</ProgressContext>;
 }

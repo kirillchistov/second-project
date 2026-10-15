@@ -2,7 +2,11 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { PATH } from '@/lib/content';
 import { useNow } from '@/lib/now';
 import { setCardMode, useCardMode, type CardMode } from '@/lib/preferences';
+import { signOut } from '@/lib/account';
 import { useProgress } from '@/lib/progress';
+import { useAccount } from '@/lib/session';
+import { router } from 'expo-router';
+import { Button } from '@/components/ui';
 import { disableReminders, enableReminders, setReminderTime, useReminderSettings } from '@/lib/reminders';
 import { useColors, type Colors } from '@/lib/theme';
 import { addDays, currentStreak, DAILY_GOAL_XP, isLearned, isLessonDone, localDay, longestStreak, retrievability, STASH_MAX } from '@rr/core';
@@ -82,6 +86,54 @@ function CardModeSetting({ c }: { c: Colors }) {
   );
 }
 
+/** Аккаунт: вход для гостя; ник, синхронизация и выход для вошедшего */
+function AccountPanel({ c }: { c: Colors }) {
+  const account = useAccount();
+  const { sync } = useProgress();
+  const [syncing, setSyncing] = useState(false);
+  if (account.status === 'loading') return null;
+  if (account.status === 'guest') {
+    return (
+      <View style={[styles.panel, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <Text style={[styles.panelTitle, { color: c.text }]}>Аккаунт</Text>
+        <Text style={[styles.note, { color: c.textMuted }]}>
+          Прогресс пока живёт только на этом телефоне. С аккаунтом он сохранится на сервере, а в «Лиге» появятся друзья.
+        </Text>
+        <Button title="Войти или создать аккаунт" onPress={() => router.push('/account')} />
+      </View>
+    );
+  }
+  const synced = account.syncedAt
+    ? `Синхронизировано в ${new Date(account.syncedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`
+    : 'Ещё не синхронизировано';
+  return (
+    <View style={[styles.panel, { backgroundColor: c.surface, borderColor: c.border }]}>
+      <View style={styles.switchRow}>
+        <Ionicons name="person-circle" size={40} color={c.accent} />
+        <View style={styles.modeText}>
+          <Text style={[styles.panelTitle, { color: c.text }]}>{account.user.nickname}</Text>
+          <Text style={[styles.note, { color: c.textMuted }]}>{account.user.email}</Text>
+        </View>
+      </View>
+      <Text style={[styles.note, { color: account.syncError ? c.danger : c.textMuted }]}>{account.syncError ?? synced}</Text>
+      <View style={styles.times}>
+        <Button
+          title={syncing ? 'Обновляю…' : 'Обновить'}
+          variant="secondary"
+          disabled={syncing}
+          style={styles.flex}
+          onPress={async () => {
+            setSyncing(true);
+            await sync();
+            setSyncing(false);
+          }}
+        />
+        <Button title="Выйти" variant="secondary" style={styles.flex} onPress={() => void signOut()} />
+      </View>
+    </View>
+  );
+}
+
 const REMINDER_TIMES = [
   { hour: 8, minute: 30 },
   { hour: 13, minute: 0 },
@@ -153,7 +205,7 @@ export default function ProfileScreen() {
   const stats = [
     { label: 'Стрик', value: `${currentStreak(activity.keys(), localDay(now), frozenDays)}` },
     { label: 'git stash в запасе', value: `${stash}/${STASH_MAX}` },
-    { label: 'Рекорд', value: `${longestStreak(activity.keys())}` },
+    { label: 'Рекорд', value: `${longestStreak(activity.keys(), frozenDays)}` },
     { label: 'Всего XP', value: `${totalXp}` },
     { label: 'Уроков', value: `${PATH.flatMap((u) => u.lessons).filter((l) => isLessonDone(l, (skill) => cards.has(skill))).length}` },
     { label: 'Навыков выучено', value: `${learned}/${cards.size}` },
@@ -169,6 +221,7 @@ export default function ProfileScreen() {
     <SafeAreaView style={[styles.root, { backgroundColor: c.bg }]} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={[styles.title, { color: c.text }]}>Профиль</Text>
+        <AccountPanel c={c} />
         <View style={[styles.panel, { backgroundColor: c.surface, borderColor: c.border }]}>
           <Text style={[styles.panelTitle, { color: c.text }]}>Активность</Text>
           <ContributionGraph activity={activity} now={now} c={c} />
@@ -214,5 +267,6 @@ const styles = StyleSheet.create({
   modeLabel: { fontSize: 15, fontWeight: '600' },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   times: { flexDirection: 'row', gap: 8 },
+  flex: { flex: 1 },
   time: { flex: 1, alignItems: 'center', borderWidth: 1, borderRadius: 12, paddingVertical: 10 },
 });

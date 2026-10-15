@@ -1,23 +1,27 @@
+import { sessionToken } from '@/lib/session';
 import type { GradeResult } from '@rr/core';
 import { randomUUID } from 'expo-crypto';
 import Storage from 'expo-sqlite/kv-store';
 
 /**
- * Клиент ИИ-прокси (apps/api). Ключ Claude живёт только на сервере; приложение знает адрес
- * и общий токен для своих. На симуляторе сервер на этом же Mac доступен как localhost.
+ * Клиент API (apps/api): проверка ответов ИИ, аккаунт, синхронизация, лидерборд.
+ * Ключ Claude живёт только на сервере. Авторизация — токен сессии пользователя, а без входа —
+ * общий токен для своих. На симуляторе сервер на этом же Mac доступен как localhost.
  */
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8787';
 const TOKEN = process.env.EXPO_PUBLIC_APP_TOKEN;
 const TIMEOUT_MS = 30_000;
 
-export type ApiErrorKind = 'offline' | 'limit' | 'unauthorized' | 'server';
+export type ApiErrorKind = 'offline' | 'limit' | 'unauthorized' | 'server' | 'rejected';
 
 export class ApiError extends Error {
-  constructor(
-    readonly kind: ApiErrorKind,
-    message: string,
-  ) {
+  readonly kind: ApiErrorKind;
+  /** Тело ответа с ошибкой — например, { error: 'email_taken' } или поля валидации */
+  readonly body?: unknown;
+  constructor(kind: ApiErrorKind, message: string, body?: unknown) {
     super(message);
+    this.kind = kind;
+    this.body = body;
   }
 }
 
@@ -26,6 +30,7 @@ const MESSAGES: Record<ApiErrorKind, string> = {
   limit: 'Лимит проверок на сегодня исчерпан. Можно оценить себя самому.',
   unauthorized: 'Сервер проверки не принял токен приложения.',
   server: 'Проверка не удалась. Попробуй ещё раз или оцени себя сам.',
+  rejected: 'Сервер отклонил запрос.',
 };
 
 /** Анонимный id устройства — только для дневной квоты на сервере. */
@@ -38,19 +43,21 @@ function deviceId(): string {
   return id;
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+export async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const auth = sessionToken() ?? TOKEN;
   let res: Response;
   try {
     res = await fetch(`${BASE_URL}${path}`, {
-      method: 'POST',
+      method,
       headers: {
         'content-type': 'application/json',
         'x-device-id': deviceId(),
-        ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}),
+        ...(auth ? { authorization: `Bearer ${auth}` } : {}),
+        ...headers,
       },
-      body: JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
     });
   } catch {
@@ -58,11 +65,14 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   } finally {
     clearTimeout(timer);
   }
-  if (res.status === 429) throw new ApiError('limit', MESSAGES.limit);
-  if (res.status === 401) throw new ApiError('unauthorized', MESSAGES.unauthorized);
+  if (res.status === 429) throw new ApiError('limit', MESSAGES.limit, await res.json().catch(() => undefined));
+  if (res.status === 401) throw new ApiError('unauthorized', MESSAGES.unauthorized, await res.json().catch(() => undefined));
+  if (res.status >= 400 && res.status < 500) throw new ApiError('rejected', MESSAGES.rejected, await res.json().catch(() => undefined));
   if (!res.ok) throw new ApiError('server', MESSAGES.server);
-  return (await res.json()) as T;
+  return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
 }
+
+const post = <T,>(path: string, body: unknown) => request<T>('POST', path, body);
 
 export function gradeAnswer(question: string, answer: string, hints: number): Promise<GradeResult> {
   return post('/v1/grade', { question, answer, hints });

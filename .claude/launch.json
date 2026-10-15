@@ -43,6 +43,17 @@
         "--strictPort"
       ],
       "port": 5189
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@rr/api"
+      ],
+      "port": 8787
     }
   ]
 }

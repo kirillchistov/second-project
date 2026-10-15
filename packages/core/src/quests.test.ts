@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { cardItem } from './path.ts';
-import { addDays, currentStreak, planFreezes, STASH_MAX } from './progress.ts';
+import { addDays, currentStreak, longestStreak, planFreezes, STASH_MAX } from './progress.ts';
 import { addDayStats, EMPTY_DAY, pickQuests, QUESTS_PER_DAY, questFrom, questProgress, sessionDayStats } from './quests.ts';
 import { sessionReducer, startSession } from './session.ts';
 import type { Question } from '@rr/content';
@@ -58,6 +58,9 @@ describe('заморозка стрика (git stash)', () => {
     expect(currentStreak(active, '2026-10-12')).toBe(0);
     expect(currentStreak(active, '2026-10-12', ['2026-10-11'])).toBe(3);
     expect(currentStreak([...active, '2026-10-12'], '2026-10-12', ['2026-10-11'])).toBe(4);
+    // Рекорд считается так же: с заморозкой 3 + 1, без неё — 3
+    expect(longestStreak([...active, '2026-10-12'], ['2026-10-11'])).toBe(4);
+    expect(longestStreak([...active, '2026-10-12'])).toBe(3);
   });
 
   test('закрывает пропуск, если хватает заморозок', () => {

@@ -32,6 +32,10 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="league"
+        options={{ title: 'Лига', tabBarIcon: ({ color, size }) => <Ionicons name="trophy" color={color} size={size} /> }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{ title: 'Профиль', tabBarIcon: ({ color, size }) => <Ionicons name="stats-chart" color={color} size={size} /> }}
       />

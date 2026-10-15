@@ -33,7 +33,8 @@
           "speechRecognitionPermission": "Распознавание речи превращает твой устный ответ в текст для проверки."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": false

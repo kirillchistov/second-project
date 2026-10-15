@@ -1,0 +1,20 @@
+# Postgres для локальной разработки API: docker compose up -d
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: refresher
+      POSTGRES_PASSWORD: refresher
+      POSTGRES_DB: refresher
+    ports:
+      # 5433 снаружи — чтобы не конфликтовать с локальным Postgres на 5432
+      - '5433:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U refresher']
+      interval: 2s
+      retries: 15
+
+volumes:
+  pgdata:

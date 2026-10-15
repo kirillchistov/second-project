@@ -11,6 +11,7 @@ import {
   questFrom,
   questProgress,
   review,
+  runFromSession,
   sessionDayStats,
   STASH_MAX,
   summarize,
@@ -20,6 +21,8 @@ import {
   type SessionState,
   type StoredCard,
 } from '@rr/core';
+import { backfillRuns, insertRun } from '@/lib/runs';
+import { randomUUID } from 'expo-crypto';
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
 /**
@@ -70,7 +73,25 @@ const MIGRATIONS: string[] = [
   CREATE TABLE inventory (item TEXT PRIMARY KEY NOT NULL, count INTEGER NOT NULL);
   INSERT INTO inventory (item, count) VALUES ('stash', 1);
   `,
+  // Аккаунты: прогоны — единица синхронизации с сервером; бонусный XP за квесты — локальный, отдельно
+  `
+  CREATE TABLE runs (
+    id TEXT PRIMARY KEY NOT NULL,
+    lesson_id TEXT,
+    day TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    results TEXT NOT NULL,
+    synced INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX runs_unsynced ON runs (synced);
+  CREATE TABLE bonus_xp (day TEXT PRIMARY KEY NOT NULL, xp INTEGER NOT NULL);
+  `,
 ];
+
+/** Шаги миграций, которые нельзя выразить SQL: номер миграции → функция внутри той же транзакции */
+const MIGRATION_STEPS: Record<number, (db: SQLiteDatabase) => Promise<void>> = {
+  3: backfillRuns,
+};
 
 async function migrate(db: SQLiteDatabase): Promise<void> {
   await db.execAsync('PRAGMA journal_mode = WAL');
@@ -79,6 +100,7 @@ async function migrate(db: SQLiteDatabase): Promise<void> {
   while (version < MIGRATIONS.length) {
     await db.withExclusiveTransactionAsync(async (txn) => {
       await txn.execAsync(MIGRATIONS[version]);
+      await MIGRATION_STEPS[version]?.(txn);
       await txn.execAsync(`PRAGMA user_version = ${version + 1}`);
     });
     version++;
@@ -278,6 +300,9 @@ export async function saveSession(
       }
     }
 
+    // Прогон — для синхронизации с сервером; уйдёт при следующей синхронизации
+    await insertRun(txn, runFromSession(session, { id: randomUUID(), lessonId, day: today, completedAt: at }), false);
+
     if (lessonId) {
       await txn.runAsync(
         `INSERT INTO lessons_done (lesson_id, completed_at, best_accuracy) VALUES (?, ?, ?)
@@ -318,7 +343,15 @@ export async function saveSession(
       if (chest === 'stash') await txn.runAsync("UPDATE inventory SET count = count + 1 WHERE item = 'stash'");
       else xp += CHEST_XP;
     }
-    if (xp > lesson) await txn.runAsync('UPDATE activity SET xp = xp + ? WHERE day = ?', xp - lesson, today);
+    if (xp > lesson) {
+      await txn.runAsync('UPDATE activity SET xp = xp + ? WHERE day = ?', xp - lesson, today);
+      // Награды за квесты не входят в XP прогона — храним отдельно, чтобы пересборка прогресса их не потеряла
+      await txn.runAsync(
+        'INSERT INTO bonus_xp (day, xp) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET xp = xp + excluded.xp',
+        today,
+        xp - lesson,
+      );
+    }
   });
 
   return { xp, accuracy: summary.accuracy, perfect: summary.perfect, quests: completed, chest };

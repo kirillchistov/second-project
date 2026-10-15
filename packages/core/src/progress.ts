@@ -73,13 +73,15 @@ export function planFreezes(opts: {
   return currentStreak(opts.activeDays, day, opts.frozenDays) > 0 ? missed : [];
 }
 
-/** Самая длинная серия за всё время. */
-export function longestStreak(activeDays: Iterable<string>): number {
-  const sorted = [...new Set(activeDays)].sort();
+/** Самая длинная серия за всё время. Замороженные дни, как и в текущем стрике, держат серию, но не прибавляются. */
+export function longestStreak(activeDays: Iterable<string>, frozenDays: Iterable<string> = []): number {
+  const active = new Set(activeDays);
+  const sorted = [...new Set([...active, ...frozenDays])].sort();
   let best = 0;
   let run = 0;
   sorted.forEach((day, i) => {
-    run = i > 0 && addDays(sorted[i - 1], 1) === day ? run + 1 : 1;
+    if (i > 0 && addDays(sorted[i - 1], 1) !== day) run = 0;
+    if (active.has(day)) run++;
     best = Math.max(best, run);
   });
   return best;
