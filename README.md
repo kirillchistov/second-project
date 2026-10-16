@@ -179,9 +179,32 @@ npm run radar -w @rr/content -- --no-generate   # только отчёт
 
 ## Деплой на Vercel
 
-Веб-версия — статическое SPA в `apps/web`. В настройках проекта на Vercel укажите **Root Directory** `apps/web`:
-Vercel сам определит Vite и npm workspaces, а `apps/web/vercel.json` перенаправит все пути на `index.html`.
-Эта сборка — каталог, тренировка и мок-собеседование. Демо-путь в неё не входит.
+Два проекта Vercel из одного репозитория, на одном домене (cookie сессии работают, потому что сайт и API — один сайт):
+
+| Проект | Root Directory | Домен |
+|---|---|---|
+| сайт | `apps/web` | `example.com`, `www.example.com` |
+| API | `apps/api` | `api.example.com` |
+
+1. **Домен** — Vercel → Domains → Buy. DNS сразу на Vercel.
+2. **Сайт** — Add New → Project → этот репозиторий, Root Directory `apps/web` (Vite определится сам;
+   `apps/web/vercel.json` направляет все пути на `index.html`). В Settings → Domains добавить домен и `www` с редиректом.
+3. **База** — Storage (Marketplace) → Neon, регион Frankfurt; подключить к проекту API — появится `DATABASE_URL`.
+4. **API** — новый проект из того же репозитория, Root Directory `apps/api`. Vercel находит Hono по `src/index.ts`
+   (default-экспорт приложения); `build` собирает `packages/content/dist/server.json` с вопросами и рубриками,
+   он встраивается в функцию. `apps/api/vercel.json`: регион `fra1` рядом с базой, `maxDuration` 60 с для проверки ответов ИИ.
+   Переменные: `DATABASE_URL` (адрес с пулом, `-pooler`), `ANTHROPIC_API_KEY` (и `ANTHROPIC_WORKSPACE_ID`, если нужен),
+   `ALLOWED_ORIGINS=https://example.com,https://www.example.com`, `DAILY_LIMIT`, по желанию `APP_TOKEN`.
+   `COOKIE_SECURE` не задавать. Домен `api.example.com`.
+5. **Миграции** — со своего компьютера, с прямым адресом Neon (без `-pooler`):
+   `DATABASE_URL='postgres://…' npm run db:migrate -w @rr/api`. Повторять после каждой новой миграции.
+6. **Проверка** — `curl https://api.example.com/health` → `{"ok":true,"rubrics":140,"accounts":true}`.
+7. **Приложение** — `EXPO_PUBLIC_API_URL=https://api.example.com` в `apps/mobile/.env` (и в окружении EAS для сборок).
+8. **Модератор форума** — в SQL-консоли Neon: `update users set role = 'moderator' where email = '…';`
+9. **Расходы** — лимит трат в Vercel (Settings → Billing → Spend Management) и месячный лимит ключа в Anthropic Console.
+
+Ограничение: лимиты попыток входа и квоты ИИ-проверки хранятся в памяти экземпляра функции. Для своих этого хватает;
+для точных лимитов на всех экземплярах — Upstash Redis из Marketplace.
 
 ## Демо на GitHub Pages
 

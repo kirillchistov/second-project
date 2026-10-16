@@ -10,13 +10,13 @@
   "scripts": {
     "dev": "npm run dev -w @rr/web --",
     "dev:pages": "npm run dev:pages -w @rr/web --",
-    "build": "tsc -b && npm run build -w @rr/web",
-    "build:pages": "tsc -b && npm run build:pages -w @rr/web",
+    "build": "npm run bundle -w @rr/content && tsc -b && npm run build -w @rr/web",
+    "build:pages": "npm run bundle -w @rr/content && tsc -b && npm run build:pages -w @rr/web",
     "bundle:content": "npm run bundle -w @rr/content",
     "lint": "oxlint",
     "test": "vitest run",
-    "typecheck": "tsc -b",
-    "check": "tsc -b && oxlint && vitest run",
+    "typecheck": "npm run bundle -w @rr/content && tsc -b",
+    "check": "npm run bundle -w @rr/content && tsc -b && oxlint && vitest run",
     "ios": "npm run ios -w @rr/mobile --"
   },
   "devDependencies": {

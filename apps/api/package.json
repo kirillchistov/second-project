@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "node --env-file-if-exists=../../.env --watch src/main.ts",
     "start": "node --env-file-if-exists=../../.env src/main.ts",
-    "db:generate": "drizzle-kit generate"
+    "build": "npm run bundle -w @rr/content",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node --env-file-if-exists=../../.env src/migrate.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
