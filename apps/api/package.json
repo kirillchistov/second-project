@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node --env-file-if-exists=../../.env --watch src/main.ts",
     "start": "node --env-file-if-exists=../../.env src/main.ts",
-    "build": "npm run bundle -w @rr/content",
+    "build": "npm run bundle -w @rr/content && node scripts/bundle-for-vercel.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file-if-exists=../../.env src/migrate.ts"
   },
@@ -22,6 +22,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
-    "drizzle-kit": "^0.31.11"
+    "drizzle-kit": "^0.31.11",
+    "esbuild": "0.28.2"
   }
 }

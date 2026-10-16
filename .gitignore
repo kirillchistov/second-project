@@ -28,3 +28,4 @@ dist-ssr
 
 # Пилотные прогоны генератора для сравнения моделей
 packages/content/pilot/
+apps/api/src/index.js
