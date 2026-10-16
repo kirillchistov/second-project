@@ -3,7 +3,17 @@
   "compilerOptions": {
     "tsBuildInfoFile": "../../node_modules/.tmp/api.tsbuildinfo",
     "types": ["node"],
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    // Дублируем ключевое из tsconfig.base.json: сборщик функций Vercel проверяет типы
+    // по этому файлу без учёта extends — без strict типы Zod (nullable, default) выводятся иначе
+    "strict": true,
+    "target": "es2023",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true
   },
   "include": ["src"]
 }
