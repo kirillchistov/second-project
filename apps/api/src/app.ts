@@ -10,6 +10,7 @@ import { cors } from 'hono/cors';
 import { z } from 'zod';
 import { accountRoutes, sessionMiddleware, type AuthEnv } from './accounts.ts';
 import type { Db } from './db/index.ts';
+import { forumRoutes } from './forum.ts';
 import { buildResult, type Examiner } from './examiner.ts';
 
 export interface AppOptions {
@@ -73,8 +74,10 @@ export function createApp(options: AppOptions) {
 
   if (db) {
     app.route('/v1', accountRoutes({ db, allowedOrigins, secureCookies: options.secureCookies ?? true, now }));
+    app.route('/v1/forum', forumRoutes({ db, allowedOrigins, questionSlugs: new Set(questionBySlug.keys()), now }));
   } else {
     app.all('/v1/auth/*', (c) => c.json({ error: 'accounts_disabled' }, 503));
+    app.all('/v1/forum/*', (c) => c.json({ error: 'accounts_disabled' }, 503));
   }
 
   /** Вопрос и рубрика по slug — или ответ с ошибкой */

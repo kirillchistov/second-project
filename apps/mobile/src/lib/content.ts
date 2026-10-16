@@ -10,3 +10,4 @@ export const LESSONS = PATH.flatMap((unit) => unit.lessons);
 export const lessonById = new Map(LESSONS.map((l) => [l.id, l]));
 export const ITEMS = itemsById(CONTENT);
 export const topicTitle = new Map(CONTENT.topics.map((t) => [t.id, t.title]));
+export const questionBySlug = new Map(CONTENT.questions.map((q) => [q.slug, q]));

@@ -23,10 +23,13 @@ import {
 import type { Db } from './db/index.ts';
 import { runs, sessions, users } from './db/schema.ts';
 
+export type Role = 'user' | 'moderator';
+
 export interface SessionUser {
   id: string;
   email: string;
   nickname: string;
+  role: Role;
 }
 
 export type AuthEnv = { Variables: { user: SessionUser | null; viaCookie: boolean } };
@@ -78,7 +81,7 @@ const runBody = z.object({
 const syncBody = z.object({ runs: z.array(runBody).max(200) });
 
 /** Простейший ограничитель частоты в памяти процесса: для своих достаточно, при масштабировании — Redis */
-class RateLimiter {
+export class RateLimiter {
   private hits = new Map<string, number[]>();
   private limit: number;
   private windowMs: number;
@@ -108,6 +111,20 @@ function bearer(c: Context): string | undefined {
   return header?.startsWith('Bearer ') ? header.slice(7).trim() : undefined;
 }
 
+/**
+ * CSRF: запрос с cookie, меняющий данные, принимаем только со своих Origin.
+ * Bearer-запросы браузер сам не отправляет, им проверка не нужна.
+ */
+export function csrfGuard(allowedOrigins: readonly string[]) {
+  return async (c: Context, next: () => Promise<void>) => {
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && !bearer(c)) {
+      const origin = c.req.header('origin');
+      if (origin && !allowedOrigins.includes(origin)) return c.json({ error: 'forbidden_origin' }, 403);
+    }
+    await next();
+  };
+}
+
 /** Понедельник недели, в которую попадает день `YYYY-MM-DD` */
 export function weekStart(day: string): string {
   const [y, m, d] = day.split('-').map(Number);
@@ -129,13 +146,13 @@ export function sessionMiddleware(opts: { db?: Db; appToken?: string; now: () =>
       if (token) {
         const now = opts.now();
         const [row] = await opts.db
-          .select({ id: users.id, email: users.email, nickname: users.nickname, expiresAt: sessions.expiresAt })
+          .select({ id: users.id, email: users.email, nickname: users.nickname, role: users.role, expiresAt: sessions.expiresAt })
           .from(sessions)
           .innerJoin(users, eq(users.id, sessions.userId))
           .where(eq(sessions.tokenHash, tokenHash(token)))
           .limit(1);
         if (row && row.expiresAt > now) {
-          c.set('user', { id: row.id, email: row.email, nickname: row.nickname });
+          c.set('user', { id: row.id, email: row.email, nickname: row.nickname, role: row.role as Role });
           c.set('viaCookie', token !== fromHeader);
           // Скользящий срок: продлеваем, когда прошла десятая часть срока, а не на каждый запрос
           if (row.expiresAt.getTime() - now.getTime() < SESSION_TTL_MS * 0.9) {
@@ -157,15 +174,7 @@ export function accountRoutes(opts: AccountsOptions) {
   const byIp = new RateLimiter(20, 10 * 60 * 1000);
   const byEmail = new RateLimiter(8, 15 * 60 * 1000);
 
-  // CSRF: запрос с cookie, меняющий данные, принимаем только со своих Origin.
-  // Bearer-запросы браузер сам не отправляет, им проверка не нужна.
-  app.use('*', async (c, next) => {
-    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && !bearer(c)) {
-      const origin = c.req.header('origin');
-      if (origin && !opts.allowedOrigins.includes(origin)) return c.json({ error: 'forbidden_origin' }, 403);
-    }
-    await next();
-  });
+  app.use('*', csrfGuard(opts.allowedOrigins));
 
   async function startSession(c: Context<AuthEnv>, user: SessionUser) {
     const token = newSessionToken();
@@ -203,14 +212,14 @@ export function accountRoutes(opts: AccountsOptions) {
       .insert(users)
       .values({ email, nickname, nicknameKey: nickname.toLowerCase(), passwordHash })
       .onConflictDoNothing()
-      .returning({ id: users.id, email: users.email, nickname: users.nickname });
+      .returning({ id: users.id, email: users.email, nickname: users.nickname, role: users.role });
     if (inserted.length === 0) {
       const [taken] = await db.select({ email: users.email }).from(users).where(eq(users.email, email)).limit(1);
       // Занятый ник подсказываем; про email — тоже, иначе пользователь не поймёт, почему не регистрируется.
       // Перебор адресов сдерживает лимит запросов.
       return c.json({ error: taken ? 'email_taken' : 'nickname_taken' }, 409);
     }
-    return c.json(await startSession(c, inserted[0]), 201);
+    return c.json(await startSession(c, { ...inserted[0], role: inserted[0].role as Role }), 201);
   });
 
   app.post('/auth/login', async (c) => {
@@ -221,7 +230,7 @@ export function accountRoutes(opts: AccountsOptions) {
     // Пароль проверяем и для несуществующего адреса — время ответа не выдаёт, зарегистрирован ли email
     const ok = await verifyPassword(body.data.password, user?.passwordHash ?? (await dummyPasswordHash()));
     if (!user || !ok) return c.json({ error: 'invalid_credentials' }, 401);
-    return c.json(await startSession(c, { id: user.id, email: user.email, nickname: user.nickname }));
+    return c.json(await startSession(c, { id: user.id, email: user.email, nickname: user.nickname, role: user.role as Role }));
   });
 
   app.post('/auth/logout', async (c) => {

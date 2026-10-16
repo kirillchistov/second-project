@@ -190,6 +190,7 @@ export default function LessonScreen() {
   // Что разбирать: упражнение или карточку, пройденную через варианты
   const graded = item?.kind === 'exercise' ? item.exercise : item?.quiz;
   const repeat = item ? state.results[item.id] !== undefined && !revealed : false;
+  const discussSlug = item ? (item.kind === 'exercise' ? item.exercise.question : item.question.slug) : undefined;
 
   return (
     <View style={[styles.root, sides, { backgroundColor: c.bg, paddingTop: insets.top }]}>
@@ -224,6 +225,18 @@ export default function LessonScreen() {
               <InlineText text={`Правильно: ${correctAnswerText(graded)}`} style={[styles.feedbackAnswer, { color: c.text }]} />
             )}
             <InlineText text={graded.explanation} style={[styles.feedbackText, { color: c.text }]} />
+            {discussSlug && (
+              // Обсуждения открываются поверх урока: вернувшись, продолжишь с того же места
+              <Pressable
+                accessibilityRole="link"
+                onPress={() => router.push(`/forum/about/${discussSlug}`)}
+                style={styles.discuss}
+                hitSlop={8}
+              >
+                <Ionicons name="chatbubbles-outline" size={16} color={c.accent} />
+                <Text style={[styles.discussText, { color: c.accent }]}>Обсудить вопрос на форуме</Text>
+              </Pressable>
+            )}
           </ScrollView>
           <Button
             title="Дальше"
@@ -259,6 +272,8 @@ const styles = StyleSheet.create({
   feedbackText: { fontSize: 15, lineHeight: 21 },
   face: { fontSize: 44 },
   perfectSub: { fontSize: 13, fontWeight: '600' },
+  discuss: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
+  discussText: { fontSize: 14, fontWeight: '700' },
   title: { fontSize: 26, fontWeight: '800', textAlign: 'center' },
   hash: { fontFamily: 'Menlo', fontSize: 14 },
   muted: { fontSize: 16, lineHeight: 22, textAlign: 'center' },

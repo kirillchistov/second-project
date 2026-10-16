@@ -9,6 +9,8 @@ export interface AccountUser {
   id: string;
   email: string;
   nickname: string;
+  /** moderator — может удалять чужие сообщения на форуме; у старых сессий поля нет */
+  role?: 'user' | 'moderator';
 }
 
 export type AccountState =
