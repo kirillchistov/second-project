@@ -147,7 +147,7 @@ function QuizMode({
           >
             <View style={styles.option}>
               <InlineText text={quiz.options[i].label} style={styles.optionText} />
-              {revealed && <Text style={[styles.why, { color: c.textMuted }]}>{quiz.options[i].why}</Text>}
+              {revealed && <InlineText text={quiz.options[i].why} style={[styles.why, { color: c.textMuted }]} />}
             </View>
           </OptionCard>
         ))}

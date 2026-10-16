@@ -4,7 +4,7 @@ import { useColors } from '@/lib/theme';
 import { useShuffledOrder } from '@/lib/useShuffled';
 import { checkAnswer } from '@rr/core';
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import type { ExerciseProps } from './types';
 
 /** «Предскажи вывод» и «Выбери инструмент»: выбрать один вариант. */
@@ -28,7 +28,7 @@ export function ChoiceExercise({ exercise, revealed, onSubmit }: ExerciseProps<'
               <View style={styles.optionBody}>
                 <InlineText text={label} style={[styles.optionText, !isTool && styles.optionMono]} />
                 {/* После проверки «Выбери инструмент» объясняет каждый вариант — так запоминается граница применимости */}
-                {revealed && typeof option !== 'string' && <Text style={[styles.why, { color: c.textMuted }]}>{option.why}</Text>}
+                {revealed && typeof option !== 'string' && <InlineText text={option.why} style={[styles.why, { color: c.textMuted }]} />}
               </View>
             </OptionCard>
           );

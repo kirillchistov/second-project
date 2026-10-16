@@ -1,5 +1,5 @@
 import { LessonItemView } from '@/components/exercises/LessonItemView';
-import { Button, ProgressBar } from '@/components/ui';
+import { Button, InlineText, ProgressBar } from '@/components/ui';
 import { CONTENT, lessonById } from '@/lib/content';
 import type { SavedLesson } from '@/lib/db';
 import { fibiFace, fibiLine } from '@/lib/fibi';
@@ -221,9 +221,9 @@ export default function LessonScreen() {
           </Text>
           <ScrollView style={{ maxHeight: feedbackMaxHeight }}>
             {!state.last.correct && (
-              <Text style={[styles.feedbackAnswer, { color: c.text }]}>Правильно: {correctAnswerText(graded)}</Text>
+              <InlineText text={`Правильно: ${correctAnswerText(graded)}`} style={[styles.feedbackAnswer, { color: c.text }]} />
             )}
-            <Text style={[styles.feedbackText, { color: c.text }]}>{graded.explanation}</Text>
+            <InlineText text={graded.explanation} style={[styles.feedbackText, { color: c.text }]} />
           </ScrollView>
           <Button
             title="Дальше"

@@ -73,7 +73,12 @@ export function OptionCard({
       style={({ pressed }) => [styles.option, { borderColor: border, backgroundColor: bg, opacity: pressed ? 0.8 : 1 }]}
     >
       {typeof children === 'string' ? (
-        <Text style={[styles.optionText, { color: c.text }, mono && styles.mono]}>{children}</Text>
+        // Моноширинный вариант — код как есть; обычный текст может содержать `код` и **акценты**
+        mono ? (
+          <Text style={[styles.optionText, { color: c.text }, styles.mono]}>{children}</Text>
+        ) : (
+          <InlineText text={children} style={[styles.optionText, { color: c.text }]} />
+        )
       ) : (
         children
       )}
