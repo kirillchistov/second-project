@@ -138,7 +138,9 @@ npm run dev -w @rr/api        # http://localhost:8787, читает .env в ко
 
 ## Аккаунты, синхронизация, лига и форум
 
-Своя авторизация в `apps/api` (Hono + Postgres через Drizzle), без внешних сервисов.
+Своя авторизация в `apps/api` (Hono + Postgres через Drizzle), без внешних сервисов. Один аккаунт работает
+и на сайте (`apps/web` — `/account`, `apps/web/src/lib/account.ts`), и в мобильном приложении: войти можно
+с любого устройства тем же email и паролем.
 
 ```bash
 docker compose up -d          # Postgres на localhost:5433
@@ -189,6 +191,7 @@ npm run radar -w @rr/content -- --no-generate   # только отчёт
 1. **Домен** — Vercel → Domains → Buy. DNS сразу на Vercel.
 2. **Сайт** — Add New → Project → этот репозиторий, Root Directory `apps/web` (Vite определится сам;
    `apps/web/vercel.json` направляет все пути на `index.html`). В Settings → Domains добавить домен и `www` с редиректом.
+   Переменная `VITE_API_URL=https://api.example.com` — без неё вход на сайте стучится в `localhost:8787`.
 3. **База** — Storage (Marketplace) → Neon, регион Frankfurt; подключить к проекту API — появится `DATABASE_URL`.
 4. **API** — новый проект из того же репозитория, Root Directory `apps/api`. Vercel находит Hono по `src/index.ts`
    (default-экспорт приложения); `build` собирает `packages/content/dist/server.json` с вопросами и рубриками,

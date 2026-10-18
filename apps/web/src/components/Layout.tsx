@@ -1,9 +1,30 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, ScrollRestoration, useLocation } from 'react-router';
+import { loadSession } from '../lib/account';
 import { onOpenSearch } from '../lib/search';
+import { useAccount } from '../lib/session';
 import { IconClose, IconMenu, IconSearch, Logo } from './Icons';
 import { SearchDialog } from './SearchDialog';
 import { ThemeToggle } from './ThemeToggle';
+
+function AccountLink() {
+  const account = useAccount();
+  if (account.status === 'loading') return null;
+  return (
+    <NavLink to="/account" className="icon-btn account-btn" aria-label={account.status === 'signed-in' ? account.user.nickname : 'Войти'}>
+      {account.status === 'signed-in' ? account.user.nickname.slice(0, 1).toUpperCase() : <IconAccount />}
+    </NavLink>
+  );
+}
+
+function IconAccount() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 20c0-4.4 3.6-7 8-7s8 2.6 8 7" />
+    </svg>
+  );
+}
 
 const NAV = [
   { to: '/questions', label: 'Вопросы' },
@@ -33,6 +54,10 @@ export function Layout() {
       window.removeEventListener('keydown', onKey);
       offOpen();
     };
+  }, []);
+
+  useEffect(() => {
+    void loadSession();
   }, []);
 
   // При переходе на другую страницу закрываем мобильное меню
@@ -71,6 +96,7 @@ export function Layout() {
             <button type="button" className="icon-btn search-icon-btn" onClick={() => setSearchOpen(true)} aria-label="Поиск">
               <IconSearch />
             </button>
+            <AccountLink />
             <ThemeToggle />
             <button
               type="button"

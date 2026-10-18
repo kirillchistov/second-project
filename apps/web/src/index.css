@@ -1243,6 +1243,71 @@ h3 {
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
 }
 
+/* ===== Аккаунт ===== */
+.account-btn {
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.auth-switch {
+  display: inline-flex;
+  padding: 4px;
+  gap: 4px;
+  border-radius: 999px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+.auth-switch__item {
+  padding: 8px 20px;
+  border-radius: 999px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.auth-switch__item.is-active {
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+}
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 380px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field__label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.field input {
+  height: 44px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+.field input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.field__error {
+  color: var(--low);
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin: 0;
+}
+
 .option-cards {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
