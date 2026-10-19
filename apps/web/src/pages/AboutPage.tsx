@@ -28,7 +28,7 @@ export function AboutPage() {
             самооценкой и списком того, что повторить.
           </li>
           <li>
-            <strong><Link to="/interview">Мок-собеседование</Link></strong> — подборка под грейд с общим таймером и
+            <strong><Link to="/interview">Мок-собес</Link></strong> — подборка под грейд с общим таймером и
             отчётом по темам.
           </li>
           <li>Горячие клавиши: <code>⌘K</code> или <code>/</code> — поиск; в тренировке <code>Пробел</code> — показать ответ, <code>1</code>–<code>3</code> — оценка.</li>
