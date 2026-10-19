@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ContentBundle, ServerBundle } from '../src/bundle.ts';
+import type { ContentBundle, QuizBundle, ServerBundle } from '../src/bundle.ts';
 import { LEGACY } from '../src/legacy.ts';
 import { CONTENT_ROOT, loadExercises, loadQuestions, loadRubrics } from '../src/node.ts';
 import { LEVELS, TOPICS } from '../src/topics.ts';
@@ -37,6 +37,11 @@ writeFileSync(outFile, JSON.stringify(bundle));
 const server: ServerBundle = { version, questions: content.questions, rubrics: loadRubrics() };
 writeFileSync(join(outDir, 'server.json'), JSON.stringify(server));
 
+// Первая quiz-карточка на вопрос: остальные (если есть) — варианты того же вопроса, сайту хватает одной
+const quizzes: QuizBundle = {};
+for (const ex of content.exercises) if (ex.type === 'quiz' && !(ex.question in quizzes)) quizzes[ex.question] = ex;
+writeFileSync(join(outDir, 'quizzes.json'), JSON.stringify(quizzes));
+
 console.log(
-  `content ${version}: ${content.questions.length} вопросов, ${content.exercises.length} упражнений, ${server.rubrics.length} рубрик → ${outDir}`,
+  `content ${version}: ${content.questions.length} вопросов, ${content.exercises.length} упражнений, ${server.rubrics.length} рубрик, ${Object.keys(quizzes).length} quiz → ${outDir}`,
 );

@@ -27,3 +27,11 @@ export interface ServerBundle {
   questions: Question[];
   rubrics: Rubric[];
 }
+
+export type QuizExercise = Extract<Exercise, { type: 'quiz' }>;
+
+/**
+ * Формат `dist/quizzes.json` — карточки с вариантами для «Тренировки» на сайте: slug вопроса → quiz.
+ * Отдельно от content.json, потому что веб-сайту не нужны остальные типы упражнений (код, шаги, пропуски).
+ */
+export type QuizBundle = Record<string, QuizExercise>;

@@ -9,7 +9,8 @@
     "./node": "./src/node.ts",
     "./bundle.json": "./dist/content.json",
     "./rubrics": "./src/rubrics.ts",
-    "./server.json": "./dist/server.json"
+    "./server.json": "./dist/server.json",
+    "./quizzes.json": "./dist/quizzes.json"
   },
   "scripts": {
     "bundle": "node scripts/bundle.ts",
