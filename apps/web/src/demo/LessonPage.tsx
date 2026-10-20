@@ -14,7 +14,7 @@ import {
   summarize,
   type LessonItem,
 } from '@rr/core';
-import { burst, celebrate } from './confetti';
+import { burst, celebrate } from '../lib/confetti';
 import { feedbackLine } from './copy';
 import { CONTENT, ITEMS, lessonById } from './content';
 import { LessonItemView } from './exercises/LessonItemView';

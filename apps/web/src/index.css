@@ -1349,6 +1349,13 @@ h3 {
 }
 
 /* ===== Сессия ===== */
+/* Вопрос, варианты и результат — по возможности без скролла: карточка растягивается на
+   доступную высоту экрана, а если контент всё же не влез, прокручивается только она сама. */
+.session {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - var(--topbar-h) - 104px);
+}
 .session__top {
   display: flex;
   align-items: center;
@@ -1391,11 +1398,16 @@ h3 {
 }
 
 .flashcard {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   padding: 32px;
   border-radius: 16px;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   box-shadow: var(--shadow);
+  overflow-y: auto;
 }
 .flashcard__meta {
   display: flex;
@@ -1466,6 +1478,15 @@ h3 {
   flex-basis: 100%;
   color: var(--text-muted);
   font-size: 0.9rem;
+}
+
+.confetti-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 1000;
 }
 
 .notes {
@@ -1847,6 +1868,32 @@ h3 {
   .grade__btn kbd,
   .btn kbd {
     display: none;
+  }
+}
+
+/* Невысокий экран (ноутбук в альбомном окне, телефон горизонтально) — сжимаем карточку сессии плотнее */
+@media (max-height: 760px) {
+  .page {
+    padding-top: 24px;
+    padding-bottom: 32px;
+  }
+  .session {
+    height: calc(100dvh - var(--topbar-h) - 56px);
+  }
+  .flashcard {
+    padding: 20px 24px;
+  }
+  .flashcard__title {
+    margin: 10px 0 14px;
+  }
+  .progress {
+    margin: 8px 0 16px;
+  }
+  .choices {
+    gap: 6px;
+  }
+  .choice {
+    padding: 9px 14px;
   }
 }
 

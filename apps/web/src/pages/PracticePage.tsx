@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState } from 'react';
+import { useEffect, useRef, useReducer, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { LevelBadge, TopicTag } from '../components/Badges';
 import { IconClock } from '../components/Icons';
@@ -7,6 +7,7 @@ import { LEVELS, TOPICS, topicById, type Level, type Question, type QuizExercise
 import { checkAnswer, formatDuration, plural, shuffle, TIMER_MODE_OPTIONS, type TimerMode } from '@rr/core';
 import { QUESTIONS } from '../data/questions';
 import { quizByQuestion } from '../data/quizzes';
+import { burst, celebrate } from '../lib/confetti';
 import { useElapsedSeconds } from '../lib/timer';
 
 type Grade = 'know' | 'partial' | 'dont';
@@ -114,6 +115,7 @@ export function PracticePage() {
         <PracticeResults
           questions={state.questions}
           grades={state.grades}
+          answerMode={state.answerMode}
           onRetry={(questions) =>
             dispatch({ type: 'start', questions: shuffle(questions), timer: state.timer, answerMode: state.answerMode })
           }
@@ -438,9 +440,15 @@ function QuizCard({
   const [selected, setSelected] = useState<number | null>(null);
   const [order] = useState(() => shuffle(quiz.options.map((_, i) => i)));
   const correct = selected !== null && checkAnswer(quiz, { kind: 'choice', index: selected });
+  const cardRef = useRef<HTMLElement>(null);
+
+  // Срабатывает один раз на вопрос: QuizCard пересоздаётся с новым key при переходе дальше
+  useEffect(() => {
+    if (revealed && correct) burst(cardRef.current);
+  }, [revealed, correct]);
 
   return (
-    <section className="flashcard">
+    <section className="flashcard" ref={cardRef}>
       <div className="flashcard__meta">
         <LevelBadge level={question.level} />
         <TopicTag topic={question.topic} />
@@ -490,17 +498,26 @@ function QuizCard({
 function PracticeResults({
   questions,
   grades,
+  answerMode,
   onRetry,
   onReset,
 }: {
   questions: Question[];
   grades: Record<string, Grade>;
+  answerMode: AnswerMode;
   onRetry: (questions: Question[]) => void;
   onReset: () => void;
 }) {
   const count = (g: Grade) => questions.filter((q) => grades[q.slug] === g).length;
   const weak = questions.filter((q) => grades[q.slug] !== 'know');
   const weakTopics = [...new Set(weak.map((q) => q.topic))];
+  const clean = answerMode === 'quiz' && questions.length > 0 && weak.length === 0;
+
+  // Чистый коммит в режиме вариантов: ни одной ошибки за всю сессию. Срабатывает один раз,
+  // на вход в экран итогов — PracticeResults пересоздаётся при каждом retry/reset.
+  useEffect(() => {
+    if (clean) celebrate();
+  }, [clean]);
 
   if (questions.length === 0) {
     return (
