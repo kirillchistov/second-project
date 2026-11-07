@@ -1141,3 +1141,2172 @@
     - label: Хранить пользователей в Context и синхронизировать его из useEffect после мутации
       why: Context не кеширует и не перезапрашивает, а эффект-синхронизация легко рассинхронизируется и перерисует всех потребителей.
   answer: 0
+
+# websocket-basics: принято из черновика 2026-11-07
+- id: websocket-vs-http-core
+  skill: websocket-vs-http
+  question: websocket-basics
+  difficulty: 1
+  prompt: Чем WebSocket принципиально отличается от обычного HTTP-запроса через fetch?
+  explanation: "HTTP — это пары «запрос → ответ», и инициатор всегда клиент. WebSocket стартует как HTTP-запрос с `Upgrade: websocket`, а затем остаётся открытым TCP-каналом: обе стороны шлют сообщения когда угодно. Поэтому он нужен, когда сервер сам инициирует события: чат, котировки, совместное редактирование."
+  type: quiz
+  options:
+    - label: После рукопожатия через HTTP Upgrade соединение остаётся открытым, и сервер может слать сообщения сам, без запроса клиента
+      why: "Верно. Главное отличие — долгоживущий двусторонний канал: сообщения идут в обе стороны без нового запроса на каждое."
+    - label: "Это облегчённый fetch: каждый send открывает короткое соединение, но без HTTP-заголовков"
+      why: Нет. Соединение открывается один раз при рукопожатии, а все send идут по нему же. Новое соединение на сообщение — это как раз модель HTTP.
+    - label: WebSocket работает поверх UDP, поэтому быстрее HTTP и может терять сообщения
+      why: "Нет. WebSocket работает поверх TCP, как и HTTP/1.1: порядок и доставка гарантированы. Выигрыш — в отсутствии нового запроса на каждое сообщение."
+    - label: Сервер может писать клиенту в любой момент, но клиент отправляет данные только обычными HTTP-запросами
+      why: "Это описание Server-Sent Events: там канал односторонний (сервер → клиент). В WebSocket клиент тоже шлёт сообщения по тому же соединению."
+  answer: 0
+- id: websocket-overkill-report-status
+  skill: realtime-transport-choice
+  question: websocket-basics
+  difficulty: 2
+  prompt: В админке нужно показывать статус ночной генерации отчёта. Статус меняется раз в несколько минут, задержка в 30–60 секунд не критична. Что выбрать?
+  explanation: "Правило: постоянное соединение оправдано, когда событий много и задержка важна. Двусторонний частый обмен — WebSocket, односторонний поток от сервера — SSE, редкие изменения без жёстких требований к задержке — обычный polling. Лишний сокет — это сложность и на клиенте, и на сервере."
+  type: choose-tool
+  options:
+    - label: "Polling: useQuery с refetchInterval"
+      why: "Лучший выбор: изменения редкие, задержка не важна. Один GET раз в 30 секунд проще поддерживать, а кэш и обработка ошибок уже есть."
+    - label: WebSocket с подпиской на статус
+      why: Подошёл бы для частого двустороннего обмена (чат, совместное редактирование). Здесь это лишняя инфраструктура, переподключения и состояние на сервере.
+    - label: Server-Sent Events
+      why: Хорош для частого одностороннего потока сервер → клиент (лента событий, прогресс). Для пары изменений за ночь держать открытый канал избыточно.
+    - label: Long polling
+      why: Компромисс, когда push нужен, а WebSocket/SSE недоступны. Требует поддержки на сервере и не нужен там, где хватает простого опроса.
+  answer: 0
+- id: websocket-effect-no-cleanup
+  skill: websocket-effect-cleanup
+  question: websocket-basics
+  difficulty: 1
+  prompt: Пользователь переключает комнаты чата. Через какое-то время сообщения начинают дублироваться и приходят из чужих комнат. Где ошибка?
+  explanation: "Эффект открывает сокет, но не возвращает cleanup. При смене roomId старый WebSocket остаётся открытым и продолжает вызывать setMsgs, а при размонтировании сокеты утекают. Правило: кто открыл соединение в эффекте, тот закрывает его в cleanup — `return () => ws.close();`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Chat({ roomId }: { roomId: string }) {
+      const [msgs, setMsgs] = useState<string[]>([]);
+      useEffect(() => {
+        const ws = new WebSocket(`wss://x.io/${roomId}`);
+        ws.onmessage = (e) =>
+          setMsgs((m) => [...m, e.data]);
+      }, [roomId]);
+      return <MessageList items={msgs} />;
+    }
+  bugLines:
+    - 7
+  causes:
+    - "Эффект не возвращает cleanup с ws.close(): старые сокеты остаются открытыми и продолжают дописывать сообщения"
+    - Функциональный апдейтер в setMsgs теряет сообщения — нужно писать setMsgs([...msgs, e.data])
+    - WebSocket нужно создавать в теле компонента, а не в эффекте, чтобы он был доступен в JSX
+    - roomId не должен быть в зависимостях, иначе сокет пересоздаётся — нужен пустой массив
+  answer: 0
+- id: websocket-reconnect-recipe
+  skill: websocket-reconnect
+  question: websocket-basics
+  difficulty: 2
+  prompt: Расставьте шаги переподключения к WebSocket после разрыва связи так, чтобы не потерять сообщения и не завалить сервер.
+  explanation: Экспоненциальная задержка с джиттером не даёт тысячам клиентов одновременно ломиться на сервер после сбоя. Намеренное закрытие (размонтирование) нельзя путать с разрывом, иначе сокет оживёт после ухода со страницы. Последний id нужен, чтобы догрузить пропущенное.
+  type: order
+  kind: recipe
+  steps:
+    - В onmessage запоминать id последнего полученного сообщения
+    - В onclose проверить, что закрытие не намеренное (не размонтирование и не ws.close())
+    - "Посчитать задержку: экспонента от числа попыток, с потолком и джиттером"
+    - По таймеру создать новый WebSocket и навесить те же обработчики
+    - В onopen сбросить счётчик попыток и заново отправить join с последним id
+
+# why-redux: принято из черновика 2026-11-07
+- id: why-redux-purpose
+  skill: redux-purpose
+  question: why-redux
+  difficulty: 1
+  prompt: Какую задачу решает Redux, которую `useState` и `Context` сами по себе не решают?
+  explanation: "`useState` хранит локальное состояние, Context только передаёт значение вниз. Redux даёт единое хранилище, переходы action → reducer, подписку через селекторы и трассировку изменений в DevTools. Он оправдан, когда клиентское состояние общее для многих несвязанных частей и важно понимать, кто и почему его поменял."
+  type: quiz
+  options:
+    - label: Единое место для логики изменений, предсказуемые переходы action → reducer, селекторы и трассировка в DevTools
+      why: Верно. Этих гарантий нет ни у useState, ни у Context. Context + useReducer даёт лишь ручную мини-версию без middleware и DevTools.
+    - label: "Избавляет от prop drilling: Context не умеет передавать значение глубоко в дерево"
+      why: Неверно. Context как раз и решает prop drilling. Он не решает хранение, изменение и выборочную подписку.
+    - label: Redux быстрее useState, потому что хранит состояние вне React
+      why: Неверно. Redux не ускоряет обновления сам по себе. Выигрыш даёт выборочная подписка через селекторы, а не место хранения.
+    - label: Redux нужен, чтобы кешировать данные с сервера между экранами
+      why: Это типичная ошибка. Для серверного состояния есть TanStack Query или RTK Query, а сам Redux предназначен для клиентского состояния.
+  answer: 0
+- id: why-redux-context-rerenders
+  skill: context-rerenders
+  question: why-redux
+  difficulty: 2
+  prompt: Пользователь печатает в поиске, и при каждом символе перерисовывается Sidebar, хотя user не менялся. Найдите причину.
+  explanation: "Любой потребитель Context перерисовывается, когда меняется значение контекста, даже если он читает только одно поле. Селекторов у Context нет. Есть два решения: разделить контексты (user отдельно, query отдельно) или взять стор с селекторами — Redux, Zustand или useSyncExternalStore."
+  type: find-bug
+  language: tsx
+  code: |-
+    const AppCtx = createContext<AppValue | null>(null);
+
+    function AppProvider({ children }: Props) {
+      const [user, setUser] = useState<User | null>(null);
+      const [query, setQuery] = useState('');
+      const value = { user, setUser, query, setQuery };
+      return <AppCtx value={value}>{children}</AppCtx>;
+    }
+
+    function Sidebar() {
+      const { user } = useContext(AppCtx)!;
+      return <Avatar user={user} />;
+    }
+  bugLines:
+    - 6
+  causes:
+    - "Часто меняющийся query лежит в одном контексте с user: при новом значении перерисовываются все потребители, селекторов нет"
+    - Sidebar не обёрнут в memo, поэтому рендерится вместе с AppProvider
+    - Деструктуризация { user } подписывает компонент на каждое поле отдельно
+    - useContext нужно обернуть в useMemo, чтобы он не возвращал новый объект
+  answer: 0
+- id: why-redux-editor-state
+  skill: client-state-choice
+  question: why-redux
+  difficulty: 2
+  prompt: "Большой редактор документов. Выделение, undo/redo, панели и хоткеи читают и меняют десятки несвязанных компонентов. Команда хочет, чтобы каждое изменение было явным сериализуемым действием: видеть в DevTools, какое действие что поменяло, и единообразно логировать каждое в аналитику. Что выбрать?"
+  explanation: "Redux оправдан, когда выполняются три условия: клиентское состояние действительно глобальное, переходы сложные, нужна трассировка действий и middleware. Если хотя бы одного не хватает, обычно достаточно чего-то проще: поднятого state, Context или Zustand. Серверные данные в любом случае идут в TanStack Query или RTK Query."
+  type: choose-tool
+  options:
+    - label: Redux Toolkit
+      why: "Здесь сходятся все показания: общее клиентское состояние, явные action-объекты, middleware для аналитики, time-travel в DevTools, селекторы."
+    - label: Context + useReducer
+      why: Ручная мини-версия Redux без middleware и DevTools, и при каждом изменении перерисуются все потребители. Годится для редких изменений.
+    - label: Zustand
+      why: "Стор с селекторами и devtools-middleware, но без модели сериализуемых действий: имена и логирование каждого set придётся задавать вручную."
+    - label: TanStack Query
+      why: "Это инструмент для серверного состояния: кэш, refetch, инвалидация. Выделение и undo/redo — клиентское UI-состояние."
+  answer: 0
+- id: why-redux-state-placement
+  skill: state-placement-algorithm
+  question: why-redux
+  difficulty: 1
+  prompt: Расставьте по порядку вопросы, которые стоит задать себе, прежде чем тянуть Redux.
+  explanation: "Сначала отсекаем серверное состояние: оно должно жить в специализированном кэше. Дальше идём от самого локального решения к самому глобальному. Redux берём только тогда, когда остальные варианты не справляются, а не «на будущее»."
+  type: order
+  kind: recipe
+  steps:
+    - Это копия данных с сервера? → TanStack Query или RTK Query
+    - Нужно только одному компоненту? → useState рядом с ним
+    - Нужно паре соседних компонентов? → поднять state к общему предку
+    - Нужно глубоко в дереве и меняется редко (тема, локаль)? → Context
+    - Общее для многих несвязанных частей и нужна трассировка? → Redux
+
+# use-websocket-hook: принято из черновика 2026-11-07
+- id: use-websocket-strict-mode-double-connect
+  skill: strict-mode-double-effect
+  question: use-websocket-hook
+  difficulty: 2
+  prompt: "В dev-режиме во вкладке Network видно: хук открыл WebSocket, тот сразу закрылся, и открылось второе соединение. Как к этому относиться?"
+  explanation: StrictMode в разработке намеренно прогоняет mount → cleanup → mount, чтобы проверить, что cleanup корректно отменяет эффект. Если после этого живёт ровно одно соединение — хук написан правильно. Чинить нужно, только если сокеты копятся, то есть cleanup отсутствует. В production двойного монтирования нет.
+  type: quiz
+  options:
+    - label: "Это StrictMode: эффект монтируется, размонтируется и снова монтируется, cleanup закрыл первый сокет. В production так не будет"
+      why: Верно. Это проверка того, что cleanup есть. Одно живое соединение после двойного монтирования — признак корректного хука.
+    - label: "Это баг: нужно запомнить в ref, что сокет уже создан, и не открывать его повторно"
+      why: "Такой флаг ломает логику: после cleanup первый сокет закрыт, а новый не создастся. Заодно он маскирует реальные проблемы с очисткой."
+    - label: "Это утечка: сокет нужно создавать не в эффекте, а прямо в теле компонента"
+      why: Тело компонента — это render, он должен быть чистым. Там сокет будет создаваться на каждый рендер, и закрыть его будет негде.
+    - label: Браузер переподключился после неудачного handshake — на стороне React делать ничего не нужно
+      why: WebSocket в браузере сам не переподключается. Второе соединение создал ваш код при повторном запуске эффекта.
+  answer: 0
+- id: use-websocket-stale-messages
+  skill: state-updater-stale-closure
+  question: use-websocket-hook
+  difficulty: 2
+  prompt: Сообщения приходят, но в списке всегда только последнее. Найдите строку с ошибкой.
+  explanation: "Эффект запускается один раз на url, и обработчик onmessage навсегда замыкает messages первого рендера — пустой массив. Каждое сообщение даёт [last]. Добавить messages в зависимости — плохая идея: сокет будет переподключаться на каждое сообщение. Правильно — функциональный апдейтер setMessages(prev => [...prev, msg])."
+  type: find-bug
+  language: tsx
+  code: |-
+    function useMessages(url: string) {
+      const [messages, setMessages] =
+        useState<Message[]>([]);
+      useEffect(() => {
+        const ws = new WebSocket(url);
+        ws.onmessage = (e) =>
+          setMessages([...messages, JSON.parse(e.data)]);
+        return () => ws.close();
+      }, [url]);
+      return messages;
+    }
+  bugLines:
+    - 7
+  causes:
+    - onmessage замкнул messages первого рендера ([]), поэтому каждое сообщение записывается поверх пустого массива
+    - "setMessages асинхронный: при batching сообщения из одного тика теряются"
+    - cleanup закрывает сокет после каждого сообщения, и список начинается заново
+    - JSON.parse каждый раз возвращает новый объект, и React отбрасывает обновление
+  answer: 0
+- id: use-websocket-effect-cleanup
+  skill: effect-subscription-cleanup
+  question: use-websocket-hook
+  difficulty: 1
+  prompt: "Допишите эффект хука: сокет должен быть доступен функции send, сообщения — копиться в state, а при смене url старое соединение — закрываться."
+  explanation: "Соединение живёт столько же, сколько эффект: создаётся при монтировании или смене url и закрывается в cleanup. Без close() сокеты будут копиться при каждой смене url. Ссылку кладут в ref.current, чтобы send видел актуальный сокет и при этом не было лишних ререндеров."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    useEffect(() => {
+      const ws = new WebSocket(url);
+      wsRef.___ = ws;
+      ws.___ = (e) =>
+        setMessages((prev) => [
+          ...prev,
+          JSON.parse(e.data),
+        ]);
+      return () => ws.___();
+    }, [___]);
+  tokens:
+    - current
+    - onmessage
+    - close
+    - url
+  decoys:
+    - onopen
+    - disconnect
+    - messages
+    - value
+- id: use-websocket-socket-storage
+  skill: ref-vs-state-for-instances
+  question: use-websocket-hook
+  difficulty: 2
+  prompt: В хуке useWebSocket нужно хранить объект соединения, чтобы функция send могла им пользоваться. Пересоздание сокета не должно вызывать лишних ререндеров. Где его хранить?
+  explanation: "Изменяемые объекты-«ручки» (сокеты, таймеры, инстансы библиотек) хранят в useRef: значение переживает рендеры и не вызывает их. Создают такой объект в эффекте, а очищают в его cleanup. В state кладут только то, что влияет на разметку, — например, сообщения или статус соединения."
+  type: choose-tool
+  options:
+    - label: useRef, запись в ref.current внутри эффекта
+      why: Ref переживает рендеры, его изменение не вызывает ререндер, а send через ref.current всегда видит актуальный сокет.
+    - label: useState с объектом WebSocket
+      why: "Подходит для данных, которые рисуются на экране. Сокет к ним не относится: каждое пересоздание даст лишний рендер, а send придётся пересоздавать."
+    - label: useMemo(() => new WebSocket(url), [url])
+      why: useMemo вызывается в render, а побочный эффект там недопустим. Закрыть старый сокет негде, и React вправе сбросить мемо и создать новый.
+    - label: Переменная на уровне модуля
+      why: Годится для одного глобального соединения на всё приложение. Для хука она общая у всех экземпляров, и два компонента затрут сокет друг друга.
+  answer: 0
+
+# websocket-reconnect: принято из черновика 2026-11-07
+- id: websocket-reconnect-lost-messages
+  skill: websocket-message-recovery
+  question: websocket-reconnect
+  difficulty: 2
+  prompt: "Чат на WebSocket: соединение пропало на 20 секунд, затем клиент переподключился с backoff. Что случилось с сообщениями, которые сервер отправил за это время?"
+  explanation: WebSocket — это транспорт, а гарантии доставки задаёт протокол поверх него. Реконнект открывает **новое** соединение, в котором старых сообщений нет. Чтобы их не потерять, клиент хранит id или cursor последнего события и после реконнекта запрашивает у сервера всё, что было `since` этого места. Сервер должен хранить историю.
+  type: quiz
+  options:
+    - label: "Они потеряны, если протокол не умеет догружать: после реконнекта клиент должен запросить у сервера события since последнего cursor"
+      why: "Верно. Реконнект восстанавливает только транспорт. Пропущенное возвращает отдельный механизм: история на сервере и запрос по since/cursor."
+    - label: Браузер буферизует входящие сообщения и отдаст их в onmessage после переподключения
+      why: Браузер ничего не копит между соединениями. bufferedAmount относится к исходящим данным открытого сокета, а новый WebSocket — это новое соединение.
+    - label: TCP гарантирует доставку, поэтому сервер дошлёт их в новое соединение
+      why: Гарантии TCP действуют только в пределах одного соединения. Когда оно оборвалось, неотправленные данные пропадают вместе с ним.
+    - label: "Их вернёт heartbeat: на ping сервер отвечает pong с пропущенными сообщениями"
+      why: Heartbeat только проверяет, что соединение живо. Сообщения он не переносит, но помогает быстрее заметить разрыв.
+  answer: 0
+- id: websocket-reconnect-after-unmount
+  skill: websocket-reconnect-lifecycle
+  question: websocket-reconnect
+  difficulty: 2
+  prompt: Эффект внутри хука держит WebSocket. После ухода со страницы в Network продолжают появляться новые подключения. Найдите строки с ошибкой.
+  explanation: "`ws.close()` в cleanup генерирует событие close. `onclose` не отличает намеренное закрытие от разрыва и безусловно планирует реконнект уже после размонтирования. Исправление: в cleanup выставить флаг `disposed = true` и вызвать `clearTimeout` для запланированного таймера, а в onclose не планировать реконнект, если `disposed`."
+  type: find-bug
+  language: tsx
+  code: |-
+    useEffect(() => {
+      let ws: WebSocket;
+      const open = (attempt: number) => {
+        ws = new WebSocket(url);
+        ws.onopen = () => { attempt = 0; };
+        ws.onmessage = (e) => onMsg(JSON.parse(e.data));
+        ws.onclose = () => {
+          const delay = Math.min(1000 * 2 ** attempt, 30000);
+          setTimeout(() => open(attempt + 1), delay);
+        };
+      };
+      open(0);
+      return () => ws.close();
+    }, [url]);
+  bugLines:
+    - 9
+    - 13
+  causes:
+    - close() в cleanup вызывает onclose, и тот планирует реконнект после размонтирования; нужен флаг disposed и clearTimeout
+    - attempt = 0 в onopen не влияет на onclose, поэтому задержка растёт бесконечно и соединения копятся
+    - url в массиве зависимостей вызывает бесконечный цикл переподключений
+    - Обработчики нужно назначать через addEventListener, иначе при реконнекте они дублируются
+  answer: 0
+- id: websocket-resume-recipe
+  skill: websocket-reconnect-recipe
+  question: websocket-reconnect
+  difficulty: 2
+  prompt: Расставьте шаги надёжного переподключения к WebSocket без потери сообщений.
+  explanation: "Cursor копят заранее, иначе после разрыва не с чего продолжить. Разрыв приходит в onclose: там планируют попытку с backoff, потолком и jitter, чтобы клиенты не ударили по серверу разом. В onopen сбрасывают счётчик, запускают heartbeat и шлют resume с cursor. Ответ применяют, отбрасывая дубликаты по id: события на границе разрыва могут прийти повторно."
+  type: order
+  kind: recipe
+  steps:
+    - Запоминать id/cursor последнего обработанного сообщения
+    - "В onclose запланировать реконнект: экспоненциальный backoff с потолком и jitter"
+    - В onopen сбросить счётчик попыток, запустить heartbeat и отправить resume с последним cursor (since)
+    - Применить пропущенные события из ответа, отбрасывая дубликаты по id
+- id: websocket-stale-connection-detect
+  skill: websocket-heartbeat
+  question: websocket-reconnect
+  difficulty: 2
+  prompt: Мобильный пользователь переключился с Wi‑Fi на LTE. Сокет формально открыт, onclose не пришёл, но сообщения перестали поступать на минуты. Как быстрее обнаружить такое соединение?
+  explanation: "Подвисшее соединение бывает «открытым» долго: ОС и TCP могут узнать о разрыве лишь через минуты. Надёжнее всего прикладной heartbeat: клиент шлёт ping по интервалу и ждёт pong с таймаутом. Нет ответа — закрываем сокет сами и запускаем обычный реконнект с resume."
+  type: choose-tool
+  options:
+    - label: "Прикладной heartbeat: ping по интервалу, нет pong за N секунд — close() и реконнект"
+      why: "Лучший выбор: работает поверх любого транспорта и замечает подвисание за предсказуемое время, которое задаёте вы сами."
+    - label: Положиться на TCP keepalive
+      why: Из браузера его не настроишь, а интервалы по умолчанию измеряются минутами и часами. Он защищает инфраструктуру, а не UX вашего приложения.
+    - label: Слушать события online/offline и navigator.onLine
+      why: "Полезно как дополнительный сигнал сразу переподключиться. Но «онлайн» не значит, что сервер отвечает: подвисший сокет так не обнаружить."
+    - label: Уменьшить начальную задержку backoff
+      why: Backoff начинает работать только после onclose. Здесь onclose не наступил, поэтому быстрее он ничего не обнаружит.
+  answer: 0
+
+# redux-middleware: принято из черновика 2026-11-07
+- id: redux-middleware-dispatch-flow
+  skill: redux-middleware-chain
+  question: redux-middleware
+  difficulty: 2
+  prompt: Что происходит, когда вызывают `dispatch(action)` в сторе с подключёнными middleware?
+  explanation: Middleware — это обёртка вокруг `dispatch`. Action идёт по цепочке, и каждое звено решает, что с ним делать, а затем вызывает `next`. Код до `next(action)` видит старый state, код после него — уже новый. Асинхронность живёт в middleware (thunk), потому что reducer обязан быть чистым и синхронным.
+  type: quiz
+  options:
+    - label: "Action идёт по цепочке middleware: каждый может его изменить, задержать или остановить и через next передаёт дальше до reducer"
+      why: Верно. Последний `next` в цепочке — это исходный dispatch стора, который вызывает reducer.
+    - label: Сначала reducer вычисляет новый state, затем middleware получают action и готовое состояние, как подписчики
+      why: Так работают подписчики `subscribe`. Middleware срабатывает до reducer и может вообще не пропустить action. Новый state он видит, только если прочитает его после `next`.
+    - label: Все middleware вызываются параллельно с одним и тем же action, а reducer ждёт, пока они завершатся
+      why: "Цепочка последовательная: каждый middleware получает `next` следующего звена. Reducer ничего не ждёт — его вызывает последний `next`."
+    - label: Middleware только читают action, а для асинхронности reducer может вернуть Promise, который Redux дождётся
+      why: Reducer должен быть чистым и синхронным, Redux не ждёт промисы. Асинхронность добавляют именно через middleware, например thunk.
+  answer: 0
+- id: redux-middleware-chain-order
+  skill: redux-middleware-chain
+  question: redux-middleware
+  difficulty: 2
+  prompt: Стор уже создан. Что выведется в консоль за один вызов `store.dispatch` в последней строке?
+  explanation: Цепочка работает как луковица. Код до `next` выполняется в порядке подключения (A, затем B), потом вызывается reducer, а код после `next` — в обратном порядке (B, затем A). Поэтому logger видит новый state сразу после `next(action)`.
+  type: predict-output
+  language: ts
+  code: |-
+    const log = (name: string): Middleware =>
+      () => (next) => (action) => {
+        console.log(name, 'before');
+        const result = next(action);
+        console.log(name, 'after');
+        return result;
+      };
+
+    const store = configureStore({
+      reducer: (s = 0) => { console.log('reducer'); return s; },
+      middleware: (gDM) => gDM().concat(log('A'), log('B')),
+    });
+
+    store.dispatch({ type: 'ping' });
+  options:
+    - A before → B before → reducer → B after → A after
+    - A before → B before → reducer → A after → B after
+    - A before → A after → B before → B after → reducer
+    - reducer → A before → A after → B before → B after
+  answer: 0
+- id: redux-middleware-missing-next
+  skill: redux-middleware-next
+  question: redux-middleware
+  difficulty: 2
+  prompt: После подключения middleware аналитики часть кнопок перестала менять состояние. Найдите строку с ошибкой.
+  explanation: "Для отслеживаемых actions middleware делает `return` и не вызывает `next`. Цепочка обрывается, и action не доходит до reducer. Правило: если middleware не отменяет action намеренно, он всегда вызывает `next(action)` и возвращает результат."
+  type: find-bug
+  language: ts
+  code: |-
+    const analytics: Middleware =
+      () => (next) => (action) => {
+        if (isTracked(action)) {
+          track(action.type);
+          return;
+        }
+        return next(action);
+      };
+  bugLines:
+    - 5
+  causes:
+    - Для отслеживаемых actions не вызывается next — они не доходят до reducer, и состояние не меняется
+    - Middleware обязан возвращать новый state, а не результат next(action)
+    - Первый аргумент store обязателен — без него applyMiddleware не соберёт цепочку
+    - track нужно вызывать асинхронно, иначе он блокирует reducer
+  answer: 0
+- id: redux-side-effect-on-login
+  skill: redux-side-effects-choice
+  question: redux-middleware
+  difficulty: 3
+  prompt: Проект на Redux Toolkit. Action `loggedIn` диспатчат из трёх мест. После каждого такого action нужно загрузить настройки пользователя, а при `loggedOut` — отменить незавершённую загрузку. Что выбрать?
+  explanation: "Есть два класса эффектов. Если эффект запускают явно, подходит thunk или createAsyncThunk. Если эффект — реакция на чужие actions, нужна подписка: в RTK это listener middleware, в сложных процессах с каналами и гонками — redux-saga. Fetch внутри reducer недопустим никогда."
+  type: choose-tool
+  options:
+    - label: createListenerMiddleware
+      why: "Встроен в RTK: реагирует на любой dispatch `loggedIn` через startListening и умеет отменять эффект. Вызывающему коду ничего менять не нужно."
+    - label: createAsyncThunk
+      why: Хорош, когда эффект запускают явно. Здесь пришлось бы заменить dispatch во всех трёх местах, а на чужие actions thunk не реагирует.
+    - label: redux-saga
+      why: Тоже решит задачу через takeLatest и cancel. Но это отдельная зависимость и генераторы — оправдано для сложных долгих сценариев, если saga уже есть в проекте.
+    - label: fetch в reducer для loggedIn
+      why: "Reducer обязан быть чистым и синхронным: Redux не дождётся промиса, а побочный эффект сломает предсказуемость и time-travel."
+  answer: 0
+
+# redux-selectors-reselect: принято из черновика 2026-11-07
+- id: redux-selectors-new-reference-rerender
+  skill: selector-reference-stability
+  question: redux-selectors-reselect
+  difficulty: 2
+  prompt: Компонент вызывает `useSelector((s) => s.todos.items.filter((t) => t.done))`. Почему он перерисовывается при любом dispatch, даже не связанном с todos?
+  explanation: "useSelector перезапускает селектор после каждого dispatch и сравнивает результат с прошлым через ===. Вычисляемый селектор без мемоизации каждый раз отдаёт новую ссылку, и React-Redux считает это изменением. Правило: селектор, который создаёт массив или объект, оборачивай в createSelector."
+  type: quiz
+  options:
+    - label: filter каждый раз возвращает новый массив, а useSelector сравнивает результат по === и видит «изменение»
+      why: Верно. Данные те же, но ссылка новая, поэтому проверка === не проходит и компонент перерисовывается.
+    - label: useSelector подписывает компонент на весь стор и перерисовывает его после любого action
+      why: Селектор действительно вызывается после каждого action, но перерисовка будет, только если результат изменился по ===.
+    - label: Стрелочная функция-селектор создаётся на каждом рендере, и useSelector из-за этого переподписывается
+      why: "Новая функция-селектор сама по себе не страшна: React-Redux просто вызывает её. Проблема в том, что она возвращает новую ссылку."
+    - label: Каждый action создаёт новую копию state.todos.items, потому что Redux иммутабелен
+      why: Редьюсер копирует только изменённые ветки. Если todos не трогали, items сохраняет прежнюю ссылку.
+  answer: 0
+- id: redux-selectors-created-in-render
+  skill: reselect-selector-placement
+  question: redux-selectors-reselect
+  difficulty: 2
+  prompt: Компонент вложен в часто перерисовываемого родителя. Почему createSelector здесь не спасает от пересчёта и новых ссылок?
+  explanation: Кэш живёт внутри конкретного экземпляра селектора. Если вызывать createSelector в теле компонента, на каждом рендере появляется новый селектор с пустым кэшем. Селектор выносят на уровень модуля. Если ему нужен параметр из props, фабрику оборачивают в useMemo.
+  type: find-bug
+  language: tsx
+  code: |-
+    function DoneTodos() {
+      const selectDone = createSelector(
+        (s: RootState) => s.todos.items,
+        (items) => items.filter((t) => t.done),
+      );
+      const done = useSelector(selectDone);
+      return <TodoList items={done} />;
+    }
+  bugLines:
+    - 2
+  causes:
+    - "createSelector вызывается в теле компонента: каждый рендер создаёт новый селектор с пустым кэшем, и filter снова отдаёт новый массив"
+    - Входной селектор должен возвращать копию items, иначе мемоизация не заметит изменений
+    - В useSelector нельзя передавать мемоизированный селектор, только инлайн-функцию
+    - Внутри результирующей функции нужно обернуть filter в useMemo
+  answer: 0
+- id: redux-selectors-cache-by-inputs
+  skill: reselect-memoization-inputs
+  question: redux-selectors-reselect
+  difficulty: 2
+  prompt: Что выведет console.log? `selectDone` создан на уровне модуля через createSelector из Redux Toolkit.
+  explanation: При r2 state новый, но input-селектор вернул ту же ссылку items, поэтому взят кэш. При r3 items — новый массив с тем же содержимым, и результирующая функция пересчиталась. Reselect сравнивает результаты input-селекторов по ссылке, а не по содержимому.
+  type: predict-output
+  language: ts
+  code: |-
+    const selectDone = createSelector(
+      (s: State) => s.items,
+      (items) => items.filter((t) => t.done),
+    );
+
+    const a = { id: 1, done: true };
+    const s1 = { items: [a], query: '' };
+
+    const r1 = selectDone(s1);
+    const r2 = selectDone({ ...s1, query: 'x' });
+    const r3 = selectDone({ ...s1, items: [a] });
+
+    console.log(r1 === r2, r2 === r3);
+  options:
+    - true false
+    - false false
+    - true true
+    - false true
+  answer: 0
+- id: redux-selectors-shared-derived-list
+  skill: derived-state-choice
+  question: redux-selectors-reselect
+  difficulty: 2
+  prompt: Отфильтрованный и отсортированный список просроченных задач (тысячи элементов) нужен в трёх компонентах. Он же служит входом для счётчика в шапке. Стор часто меняется из-за несвязанных событий. Что выбрать?
+  explanation: Производные данные из Redux храни как мемоизированные селекторы на уровне модуля. Так получается один кэш на всё приложение, пересчёт только при смене входов и композиция с другими селекторами. useMemo — локальная оптимизация одного компонента, а shallowEqual лишь отсекает лишние рендеры.
+  type: choose-tool
+  options:
+    - label: createSelector на уровне модуля
+      why: Один кэш на всех потребителей. Сортировка выполняется, только когда меняются items, а селектор можно использовать как вход для селектора счётчика.
+    - label: useMemo в каждом компоненте над items из useSelector
+      why: Годится для одного компонента. Здесь каждый экземпляр сортировал бы отдельно, а переиспользовать результат в других селекторах нельзя.
+    - label: useSelector с shallowEqual вторым аргументом
+      why: Поэлементное сравнение отсечёт лишние рендеры, но фильтр и сортировка тысяч элементов всё равно выполнятся после каждого dispatch.
+    - label: Хранить готовый список в сторе и обновлять в редьюсерах
+      why: "Это дублирование источника истины: копию придётся синхронизировать во всех редьюсерах. Оправдано разве что для очень дорогих вычислений с редкими изменениями."
+  answer: 0
+
+# redux-devtools: принято из черновика 2026-11-07
+- id: redux-devtools-time-travel-why
+  skill: redux-time-travel-purity
+  question: redux-devtools
+  difficulty: 2
+  prompt: Почему Redux DevTools может «отмотать» стор к любому прошлому action и показать diff после каждого?
+  explanation: "Time-travel опирается на два правила Redux: reducer — чистая функция, а состояние не мутируется. Тогда initialState + список actions однозначно задают любое промежуточное состояние. Мутация в reducer ломает diff и перемотку, потому что «прошлые» состояния указывают на тот же изменённый объект."
+  type: quiz
+  options:
+    - label: "Reducer чистый, состояние неизменяемо: из начального state и списка actions можно заново вычислить любое промежуточное состояние"
+      why: Верно. Детерминированный reducer + иммутабельные снимки позволяют пересчитать или показать любой шаг истории.
+    - label: После каждого action DevTools сохраняет снимок DOM и дерева компонентов и при перемотке восстанавливает его
+      why: DevTools работает со стором, а не с DOM. UI просто перерисовывается из восстановленного состояния через подписки.
+    - label: Для каждого action DevTools записывает обратную операцию и при перемотке выполняет их в обратном порядке
+      why: В Redux нет обратных actions. Перемотка — это не undo, а выбор или пересчёт состояния из истории.
+    - label: Расширение перехватывает любые изменения состояния в браузере, поэтому способ обновления state не важен
+      why: "Важен: DevTools видит только dispatch через стор. Мутации в обход reducer или внутри него история не отразит корректно."
+  answer: 0
+- id: redux-devtools-mutating-reducer
+  skill: redux-reducer-immutability
+  question: redux-devtools
+  difficulty: 2
+  prompt: Reducer написан вручную, без createSlice. После todos/added список на экране не обновляется, а перемотка в DevTools назад не возвращает старый список. Где ошибка?
+  explanation: "push мутирует существующий массив, и reducer возвращает ту же ссылку. useSelector видит прежнюю ссылку и не перерисовывает компонент, а прошлые состояния в истории указывают на тот же изменённый массив, поэтому перемотка «портится». Нужно вернуть новый объект: { ...state, items: [...state.items, action.payload] }."
+  type: find-bug
+  language: js
+  code: |-
+    function todosReducer(state = initial, action) {
+      switch (action.type) {
+        case 'todos/added':
+          state.items.push(action.payload);
+          return state;
+        default:
+          return state;
+      }
+    }
+  bugLines:
+    - 4
+    - 5
+  causes:
+    - Reducer мутирует текущий state и возвращает ту же ссылку — прошлые шаги истории и подписчики видят один изменённый объект
+    - В default нужно выбрасывать ошибку, иначе DevTools не отличит неизвестный action
+    - DevTools видит только actions, созданные через createAction, а строковый type он не отслеживает
+    - "В configureStore нужно явно передать devTools: true, иначе перемотка не работает"
+  answer: 0
+- id: redux-devtools-safe-config
+  skill: redux-devtools-config
+  question: redux-devtools
+  difficulty: 2
+  prompt: "Допишите настройку стора: DevTools только вне production, а payload логина скрыт из истории."
+  explanation: configureStore подключает DevTools сам, а опцией devTools можно отключить его в production и передать настройки расширения. actionSanitizer заменяет action перед отправкой в DevTools, поэтому пароль не попадёт в историю. Для state есть отдельный stateSanitizer.
+  type: fill-tokens
+  language: js
+  code: |-
+    const store = ___({
+      reducer: rootReducer,
+      ___: process.env.NODE_ENV ___ 'production' && {
+        ___: (action) =>
+          action.type === 'auth/login'
+            ? { ...action, payload: '<hidden>' }
+            : action,
+      },
+    });
+  tokens:
+    - configureStore
+    - devTools
+    - "!=="
+    - actionSanitizer
+  decoys:
+    - createStore
+    - ===
+    - stateSanitizer
+    - devToolsEnhancer
+- id: redux-devtools-bug-to-test
+  skill: redux-bug-reproduction
+  question: redux-devtools
+  difficulty: 2
+  prompt: "QA прислал JSON-экспорт истории Redux DevTools: после серии действий корзина показывает неверную сумму. Расставьте шаги отладки по порядку."
+  explanation: "Сначала импортируем сценарий QA в DevTools, затем по Diff находим первый action со сломанной суммой и подтверждаем гипотезу через Skip. Потом фиксируем баг падающим тестом: прогоняем те же actions через reducer — это детерминировано, ведь reducer чистый. Только после этого правим reducer. Следите, чтобы в экспорте не было токенов и паролей."
+  type: order
+  kind: recipe
+  steps:
+    - Импортировать присланный JSON с историей в Redux DevTools
+    - Найти первый action, после которого Diff показывает неверную сумму, и через Skip убедиться, что без него сумма верна
+    - "Написать тест: прогнать эти actions через reducer от начального state и убедиться, что проверка суммы падает"
+    - Исправить reducer и убедиться, что тест стал зелёным
+
+# rtk-entity-adapter-relations: принято из черновика 2026-11-07
+- id: rtk-entity-relations-why-ids
+  skill: rtk-normalized-relations
+  question: rtk-entity-adapter-relations
+  difficulty: 2
+  prompt: Посты и пользователи лежат в отдельных `EntityAdapter`. Почему в посте хранят `authorId`, а объект автора собирают в селекторе?
+  explanation: "Нормализация даёт один источник правды: каждая сущность лежит в одном месте, связи хранятся через id. Денормализованный вид (пост + автор) собирает мемоизированный селектор. Он пересчитывается только при изменении входов и иначе отдаёт ту же ссылку."
+  type: quiz
+  options:
+    - label: "Автор хранится в одном месте: правка в usersSlice сразу видна во всех постах, а селектор собирает вид без дублей"
+      why: Верно. Нет копий, которые могут рассинхронизироваться. Мемоизация не даёт создавать новый объект на каждый вызов.
+    - label: createEntityAdapter не умеет хранить сущности, у которых поля — объекты
+      why: Неверно. Адаптер хранит любые значения. Вложенный author сохранится, но его придётся вручную чинить во всех постах.
+    - label: Immer не отслеживает изменения во вложенных объектах, поэтому их нужно выносить
+      why: Неверно. Immer корректно работает с любой глубиной вложенности. Проблема в дублировании данных, а не в иммутабельных обновлениях.
+    - label: Главная цель — уменьшить размер state, а согласованность данных тут ни при чём
+      why: Экономия памяти — побочный эффект. Главное — единственная копия автора, которая не расходится при обновлениях.
+  answer: 0
+- id: rtk-entity-relations-unmemoized-join
+  skill: rtk-memoized-denormalize-selector
+  question: rtk-entity-adapter-relations
+  difficulty: 2
+  prompt: Каждый `PostCard` вызывает `useSelector((s) => selectPostWithAuthor(s, id))`. Найдите строку, из-за которой карточки перерисовываются при любом dispatch.
+  explanation: "useSelector сравнивает результат по ссылке. Спред создаёт новый объект на каждый вызов, поэтому любой dispatch, даже несвязанный, считается изменением. В dev-режиме react-redux ещё и предупредит об этом. Решение — `createSelector`: он вернёт прежнюю ссылку, пока не изменились пост и словарь пользователей."
+  type: find-bug
+  language: tsx
+  code: |-
+    const postsSel = postsAdapter.getSelectors(
+      (s: RootState) => s.posts,
+    );
+    const usersSel = usersAdapter.getSelectors(
+      (s: RootState) => s.users,
+    );
+    const selectPostWithAuthor = (
+      s: RootState, id: string,
+    ) => {
+      const post = postsSel.selectById(s, id);
+      if (!post) return undefined;
+      const author = usersSel.selectById(s, post.authorId);
+      return { ...post, author };
+    };
+  bugLines:
+    - 13
+  causes:
+    - Селектор без мемоизации каждый раз возвращает новый объект, и useSelector видит новую ссылку на каждый dispatch
+    - selectById адаптера нельзя вызывать внутри другого селектора — только в компоненте
+    - Объект author нужно было хранить прямо в посте, тогда склейка не понадобилась бы
+    - getSelectors нужно вызывать внутри селектора, иначе он запомнит устаревший state
+  answer: 0
+- id: rtk-entity-relations-create-selector
+  skill: rtk-memoized-denormalize-selector
+  question: rtk-entity-adapter-relations
+  difficulty: 2
+  prompt: Допишите мемоизированный селектор, который возвращает пост вместе с объектом автора.
+  explanation: "`createSelector` передаёт `(state, id)` всем входным селекторам: `selectById` получит id сам. `selectEntities` даёт словарь `{ [id]: user }` с поиском за O(1). Связь хранится в `authorId`, поле `author` появляется только в результате селектора."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const postsSel = postsAdapter.getSelectors(
+      (s: RootState) => s.posts,
+    );
+    const usersSel = usersAdapter.getSelectors(
+      (s: RootState) => s.users,
+    );
+    export const selectPostWithAuthor = ___(
+      [postsSel.selectById, usersSel.___],
+      (post, usersById) => post
+        ? { ...post, author: usersById[post.___] }
+        : undefined,
+    );
+  tokens:
+    - createSelector
+    - selectEntities
+    - authorId
+  decoys:
+    - createAction
+    - selectAll
+    - selectIds
+    - author
+- id: rtk-entity-relations-kanban-choice
+  skill: rtk-normalization-choice
+  question: rtk-entity-adapter-relations
+  difficulty: 3
+  prompt: "Канбан: задачи с исполнителями и комментариями с авторами приходят одним ответом. Пользователь меняет аватар — он должен сразу смениться на всех карточках и в комментариях без перезапроса. Как хранить?"
+  explanation: "Если одна сущность встречается во многих местах и меняется локально, её нормализуют: отдельный адаптер на каждую сущность, связи через id, склейка в мемоизированных селекторах. RTK Query хорош, когда сервер — источник правды и перезапрос по тегам допустим."
+  type: choose-tool
+  options:
+    - label: Отдельные адаптеры users, tasks, comments, связи через id, вид собирать в createSelector
+      why: Пользователь лежит в одном месте. Обновили его в usersSlice — все селекторы задач и комментариев сразу отдают новый аватар.
+    - label: Один tasksAdapter, где assignee и comments хранятся вложенными, как пришли с API
+      why: Подходит для read-only данных без общих сущностей. Здесь при смене аватара пришлось бы обходить все задачи и комментарии.
+    - label: Кэш RTK Query и invalidatesTags на мутации профиля
+      why: "Хорошо, когда перезапрос допустим: кэш хранится по эндпоинтам и не нормализуется между ними. Без refetch пришлось бы вручную вызывать updateQueryData в каждом кэше."
+    - label: Пользователей держать в React Context, задачи — в Redux
+      why: "Context просто передаёт значение: нет нормализации и селекторов, а любое изменение перерисует всех потребителей. Состояние к тому же расползается по двум хранилищам."
+  answer: 0
+
+# rtk-query-vs-tanstack-query: принято из черновика 2026-11-07
+- id: rtk-vs-tanstack-no-redux-choice
+  skill: server-state-library-choice
+  question: rtk-query-vs-tanstack-query
+  difficulty: 2
+  prompt: Проект на Next.js, UI-состояние в Zustand, Redux нет. Нужен кэш серверных данных. Тимлид предлагает RTK Query, «потому что он мощнее». Что ответить?
+  explanation: "Обе библиотеки решают одну задачу: кэш серверного состояния, инвалидация, повторы, пагинация. Главное различие архитектурное: RTK Query живёт в Redux store, а TanStack Query самодостаточна. Правило: если Redux уже есть, RTK Query ставят рядом с ним; если Redux нет, берут TanStack Query."
+  type: quiz
+  options:
+    - label: "Лучше TanStack Query: она не зависит от стейт-менеджера, а тянуть Redux ради RTK Query — лишняя зависимость"
+      why: Верно. По возможностям библиотеки сопоставимы, а RTK Query требует Redux store. Без Redux это лишний слой и новые концепции ради того же результата.
+    - label: "Да, RTK Query: бесконечная прокрутка и зависимые запросы есть только в нём"
+      why: Неверно. У TanStack Query есть useInfiniteQuery, зависимые запросы через enabled и отмена. Набор сценариев у библиотек схож, различия в деталях API.
+    - label: "Взять обе: RTK Query для списков, TanStack Query для карточек"
+      why: "Неверно. Два независимых кэша для одних и тех же сущностей рассинхронизируются: мутация в одном не инвалидирует данные в другом."
+    - label: "Можно RTK Query: он хранит кэш сам по себе, Redux подключать не придётся"
+      why: Неверно. RTK Query построен поверх Redux Toolkit, и его кэш — это слайс в Redux store. Даже ApiProvider создаёт store под капотом, а redux и react-redux остаются зависимостями.
+  answer: 0
+- id: rtk-vs-tanstack-existing-redux
+  skill: server-state-library-choice
+  question: rtk-query-vs-tanstack-query
+  difficulty: 2
+  prompt: "Большое приложение на Redux Toolkit: корзина, фильтры, свои middleware, команда живёт в Redux DevTools. Для нового модуля нужен кэш серверных данных с инвалидацией после мутаций. Что выбрать?"
+  explanation: "Если Redux уже есть, RTK Query встраивается в тот же store: общие DevTools, middleware, единые паттерны, данные кэша доступны селекторам. TanStack Query тут добавила бы второй источник правды и второй набор концепций."
+  type: choose-tool
+  options:
+    - label: RTK Query
+      why: "Лучший выбор: кэш в том же store, видно в Redux DevTools, работают существующие middleware, инвалидация по тегам из коробки."
+    - label: TanStack Query
+      why: Отличный выбор для проекта без Redux. Здесь — отдельный кэш вне store и вторая модель данных, которую придётся согласовывать с Redux.
+    - label: createAsyncThunk + обычный слайс
+      why: Годится для разовых запросов, но кэш, дедупликацию, статусы, рефетч и инвалидацию придётся писать вручную — ровно то, что даёт RTK Query.
+    - label: useEffect + useState в компонентах
+      why: Нет общего кэша между экранами, гонки запросов и обновление после мутаций решаются вручную. Подходит разве что для одиночного некритичного запроса.
+  answer: 0
+- id: rtk-query-tags-invalidation
+  skill: rtk-query-tag-invalidation
+  question: rtk-query-vs-tanstack-query
+  difficulty: 2
+  prompt: Допишите API (baseQuery опущен для краткости) так, чтобы после addPost список постов перезапросился автоматически.
+  explanation: "В RTK Query связь явная: query объявляет, какие теги он предоставляет (providesTags), мутация — какие инвалидирует (invalidatesTags). Совпали теги — кэш помечается устаревшим, активные подписки перезапрашиваются. Забытый providesTags — тихий баг без обновления."
+  type: fill-tokens
+  language: ts
+  code: |-
+    const api = createApi({
+      tagTypes: ['Post'],
+      endpoints: (b) => ({
+        getPosts: b.query<Post[], void>({
+          query: () => '/posts',
+          ___: ['Post'],
+        }),
+        addPost: b.___<Post, NewPost>({
+          query: (body) =>
+            ({ url: '/posts', method: 'POST', body }),
+          ___: ['Post'],
+        }),
+      }),
+    });
+  tokens:
+    - providesTags
+    - mutation
+    - invalidatesTags
+  decoys:
+    - invalidateQueries
+    - query
+    - useMutation
+    - tags
+- id: tanstack-invalidate-key-prefix
+  skill: tanstack-query-key-invalidation
+  question: rtk-query-vs-tanstack-query
+  difficulty: 2
+  prompt: После добавления задачи список не обновляется ни при каком фильтре. Найдите ошибку.
+  explanation: "invalidateQueries по умолчанию сопоставляет ключи по префиксу: ['todos'] инвалидирует и ['todos', 'all'], и ['todos', 'done']. Но ['todo'] не является префиксом ['todos', filter], поэтому ничего не совпало. Ключи проектируют иерархично и выносят в фабрику ключей, чтобы не опечататься."
+  type: find-bug
+  language: tsx
+  code: |-
+    function useTodos(filter: string) {
+      return useQuery({
+        queryKey: ['todos', filter],
+        queryFn: () => fetchTodos(filter),
+      });
+    }
+    function useAddTodo() {
+      const qc = useQueryClient();
+      return useMutation({
+        mutationFn: addTodo,
+        onSuccess: () =>
+          qc.invalidateQueries({ queryKey: ['todo'] }),
+      });
+    }
+  bugLines:
+    - 12
+  causes:
+    - Ключ ['todo'] не является префиксом ['todos', filter] — ни один запрос не помечен устаревшим
+    - invalidateQueries требует точный ключ с filter, поэтому надо передать ['todos', filter]
+    - Промис из invalidateQueries нужно обязательно await, иначе инвалидация не сработает
+    - useQueryClient нельзя вызывать внутри кастомного хука
+  answer: 0
+
+# rtk-create-slice: принято из черновика 2026-11-07
+- id: rtk-create-slice-quiz
+  skill: rtk-create-slice-immer
+  question: rtk-create-slice
+  difficulty: 2
+  prompt: Что делает `createSlice` и какую роль в нём играет Immer?
+  explanation: "`createSlice` избавляет от `switch` и строковых констант: из `name` и ключей `reducers` он генерирует типы вида `todos/added`, action creators и общий reducer. Immer даёт редьюсеру черновик-прокси и по записанным изменениям собирает новое состояние. Неизменённые части он переиспользует по ссылке."
+  type: quiz
+  options:
+    - label: Генерирует action creators и reducer из name и reducers; Immer превращает «мутации» черновика в новое иммутабельное состояние
+      why: Верно. Ручные типы и switch не нужны, а `state.push(x)` меняет только draft. Исходный state остаётся нетронутым.
+    - label: Создаёт отдельный store для фичи, а Immer глубоко копирует состояние перед каждым вызовом редьюсера
+      why: "Slice — не store, его reducer подключают в `configureStore`. Immer не копирует всё подряд: он копирует только изменённые ветки, остальные делит по ссылке."
+    - label: "Immer отключает иммутабельность: state меняется на месте, а подписчиков уведомляет прокси"
+      why: Исходный объект не меняется, корень получает новую ссылку. Иначе селекторы и `useSelector` не увидели бы изменений.
+    - label: Генерирует только строковые action types, а редьюсеры всё равно пишутся через switch и spread
+      why: Генерируются и action creators, и итоговый reducer. Spread писать не нужно, хотя вернуть новое значение явно тоже можно.
+  answer: 0
+- id: rtk-create-slice-fill
+  skill: rtk-create-slice-api
+  question: rtk-create-slice
+  difficulty: 1
+  prompt: "Допишите slice: редьюсер с типизированным payload, экспорт action creator и reducer для store."
+  explanation: Объект case-редьюсеров передаётся в `reducers`, а `extraReducers` нужен для чужих actions, например от `createAsyncThunk`. Тип payload задаёт `PayloadAction<T>`. Action creators лежат в `slice.actions`, итоговый редьюсер для `configureStore` — в `slice.reducer`.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const todosSlice = createSlice({
+      name: 'todos',
+      initialState: [] as Todo[],
+      ___: {
+        added: (state, action: ___<Todo>) => {
+          state.push(action.payload);
+        },
+      },
+    });
+    export const { added } = todosSlice.___;
+    export default todosSlice.___;
+  tokens:
+    - reducers
+    - PayloadAction
+    - actions
+    - reducer
+  decoys:
+    - extraReducers
+    - Action
+    - creators
+- id: rtk-create-slice-arrow-return
+  skill: immer-mutate-or-return
+  question: rtk-create-slice
+  difficulty: 2
+  prompt: При диспатче `added` Redux Toolkit бросает ошибку. Найдите причину.
+  explanation: "Стрелка без фигурных скобок возвращает результат `push`, то есть новую длину массива. Получается, что редьюсер и мутирует draft, и возвращает значение. Immer запрещает смешивать эти подходы и бросает ошибку. Правило: либо мутируйте draft в теле `{ }`, либо возвращайте новое состояние целиком."
+  type: find-bug
+  language: tsx
+  code: |-
+    const cartSlice = createSlice({
+      name: 'cart',
+      initialState: { items: [] as Item[] },
+      reducers: {
+        added: (state, action: PayloadAction<Item>) =>
+          state.items.push(action.payload),
+        cleared: (state) => {
+          state.items = [];
+        },
+      },
+    });
+  bugLines:
+    - 5
+    - 6
+  causes:
+    - Стрелка без скобок возвращает результат push (число), и редьюсер одновременно мутирует draft и возвращает значение
+    - "Присваивание `state.items = []` не работает в Immer: нужно возвращать новый объект"
+    - push мутирует исходный state из store, потому что Immer не оборачивает вложенные массивы
+    - PayloadAction нельзя использовать без функции prepare
+  answer: 0
+- id: rtk-create-slice-structural-sharing
+  skill: immer-structural-sharing
+  question: rtk-create-slice
+  difficulty: 3
+  prompt: Что выведет код в консоль?
+  explanation: "Тип action собирается как `name/ключ`. Immer создаёт новые ссылки только на пути изменения: корень и `items`. Нетронутая `meta` переиспользуется, поэтому `prev.meta === next.meta`. Исходный массив не меняется, и его длина остаётся 0. Благодаря этому мемоизированные селекторы по `meta` не пересчитываются."
+  type: predict-output
+  language: tsx
+  code: |-
+    const s = createSlice({
+      name: 'todos',
+      initialState: { items: [] as string[], meta: { page: 1 } },
+      reducers: {
+        added: (state, a: PayloadAction<string>) => {
+          state.items.push(a.payload);
+        },
+      },
+    });
+    const prev = s.getInitialState();
+    const next = s.reducer(prev, s.actions.added('x'));
+    console.log(s.actions.added('x').type);
+    console.log(prev === next, prev.items === next.items);
+    console.log(prev.meta === next.meta, prev.items.length);
+  options:
+    - todos/added → false false → true 0
+    - added → false false → true 0
+    - todos/added → true true → true 1
+    - todos/added → false false → false 0
+  answer: 0
+
+# rtk-create-async-thunk: принято из черновика 2026-11-07
+- id: rtk-async-thunk-lifecycle-quiz
+  skill: rtk-async-thunk-lifecycle
+  question: rtk-create-async-thunk
+  difficulty: 2
+  prompt: Что происходит при `dispatch(fetchUser('42'))`, если `fetchUser` создан через `createAsyncThunk`?
+  explanation: createAsyncThunk генерирует три action creators (`pending`, `fulfilled`, `rejected`) и сам диспатчит их по ходу промиса. Хранить status и error в state и писать ветки в `extraReducers` — ваша задача. Если `rejected` не обработать, UI навсегда останется в loading.
+  type: quiz
+  options:
+    - label: Сразу уходит pending, затем fulfilled с результатом в payload или rejected с ошибкой в error (или в payload через rejectWithValue)
+      why: Верно. Аргумент вызова лежит в `action.meta.arg`, а у всех трёх actions общий `meta.requestId`.
+    - label: Уходит pending, затем fulfilled; при ошибке исключение пробрасывается из dispatch, и его нужно ловить в try/catch
+      why: Неверно. Промис от dispatch всегда резолвится финальным action. Исключение бросает только `.unwrap()`.
+    - label: Уходит только fulfilled; pending и rejected нужно создать вручную через createAction
+      why: Неверно. Избавить от ручного написания трёх action creators — ровно та задача, ради которой создан createAsyncThunk.
+    - label: Thunk сам добавляет в слайс поля status и error и обновляет их без extraReducers
+      why: Неверно. Thunk только диспатчит actions. Как реагировать на них, вы описываете в `builder.addCase`. Готовый кэш со статусами даёт RTK Query.
+  answer: 0
+- id: rtk-async-thunk-fetch-not-ok
+  skill: rtk-async-thunk-errors
+  question: rtk-create-async-thunk
+  difficulty: 2
+  prompt: На неверный пароль сервер отвечает 401 с JSON `{ code, message }`, но в store срабатывает `login.fulfilled`. Найдите ошибку.
+  explanation: "`fetch` отклоняет промис только при сетевой ошибке: 401 и 500 для него — успешный ответ. Thunk вернул тело ошибки, и RTK отправил fulfilled. Правило: проверяйте `res.ok` и для бизнес-ошибок делайте `return rejectWithValue(data)`, тогда структурированная ошибка попадёт в `action.payload` у rejected."
+  type: find-bug
+  language: tsx
+  code: |-
+    const login = createAsyncThunk(
+      'auth/login',
+      async (creds: Creds, { rejectWithValue }) => {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(creds),
+        });
+        const data = await res.json();
+        return data as Session;
+      },
+    );
+  bugLines:
+    - 10
+  causes:
+    - "Нет проверки `res.ok`: fetch не отклоняет промис на 4xx/5xx, и тело ошибки уходит в fulfilled как payload"
+    - Не передан `signal` из thunkAPI, поэтому ошибочный ответ не может попасть в rejected
+    - Без try/catch вокруг fetch createAsyncThunk не умеет отправлять rejected
+    - Приведение `as Session` заставляет RTK считать любой ответ успешным
+  answer: 0
+- id: rtk-async-thunk-reject-with-value
+  skill: rtk-async-thunk-errors
+  question: rtk-create-async-thunk
+  difficulty: 2
+  prompt: Допишите код так, чтобы в `state.error` попало поле `message` из JSON-ответа сервера, а не текст исключения.
+  explanation: "`rejectWithValue` берут из thunkAPI (второй аргумент payloadCreator) и **возвращают**. Тогда rejected получит значение в `action.payload`, типизированное через `rejectValue`. В `action.error.message` в этом случае будет просто 'Rejected'. `payload` может быть undefined, если thunk упал с исключением, поэтому нужен `?.`."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const login = createAsyncThunk<
+      Session, Creds, { rejectValue: ApiError }
+    >('auth/login', async (creds, { ___ }) => {
+      const res = await postLogin(creds);
+      if (!res.ok) return ___(await res.json());
+      return res.json();
+    });
+
+    builder.addCase(login.___, (state, action) => {
+      state.error = action.___?.message;
+    });
+  tokens:
+    - rejectWithValue
+    - rejectWithValue
+    - rejected
+    - payload
+  decoys:
+    - fulfillWithValue
+    - error
+    - pending
+    - reject
+- id: rtk-async-thunk-dispatch-no-throw
+  skill: rtk-async-thunk-unwrap
+  question: rtk-create-async-thunk
+  difficulty: 3
+  prompt: Сервер вернул 401, и thunk `login` выполнил `return rejectWithValue(data)`. Что выведет код в компоненте?
+  explanation: "Промис, который возвращает `dispatch(thunk())`, никогда не отклоняется: он резолвится финальным action, здесь `auth/login/rejected`. Поэтому catch не сработает. Чтобы получить payload или исключение, вызывайте `await dispatch(login(creds)).unwrap()`: при rejectWithValue он бросит переданное значение."
+  type: predict-output
+  language: tsx
+  code: |-
+    try {
+      const r = await dispatch(login(creds));
+      console.log('ok', r.type);
+    } catch (e) {
+      console.log('catch', e);
+    }
+  options:
+    - ok auth/login/rejected
+    - "catch { code: 401, message: ... }"
+    - ok auth/login/fulfilled
+    - "catch Error: Rejected"
+  answer: 0
+
+# rtk-configure-store: принято из черновика 2026-11-07
+- id: rtk-configure-store-defaults-quiz
+  skill: rtk-configure-store-defaults
+  question: rtk-configure-store
+  difficulty: 2
+  prompt: Вы вызвали `configureStore({ reducer })` без других опций. Что Redux Toolkit включил за вас?
+  explanation: "`configureStore` — это `createStore` с разумными настройками по умолчанию: thunk, DevTools и dev-проверки на мутации и сериализуемость. Через `middleware` и `devTools` их можно донастроить, но отключать проверки целиком почти никогда не нужно: лучше точечно указать исключения."
+  type: quiz
+  options:
+    - label: thunk middleware, Redux DevTools и dev-проверки на мутации state и несериализуемые значения
+      why: Верно. Это стандартный набор из getDefaultMiddleware плюс подключение DevTools Extension. Проверки работают только в разработке.
+    - label: "Только combineReducers: middleware и DevTools нужно подключать вручную через applyMiddleware"
+      why: Так работал классический createStore. configureStore и нужен для того, чтобы не писать этот шаблонный код.
+    - label: thunk, redux-logger и сохранение state в localStorage
+      why: "Логгер и персистентность в набор по умолчанию не входят: их добавляют сами, например через concat или redux-persist."
+    - label: thunk и DevTools, а проверки на мутации и сериализуемость работают и в продакшене
+      why: Проверки дорогие, поэтому включены только в development. В продакшен-сборке их нет.
+  answer: 0
+- id: rtk-configure-store-lost-thunk
+  skill: rtk-custom-middleware
+  question: rtk-configure-store
+  difficulty: 2
+  prompt: После добавления логгера `dispatch(fetchTodos())` падает с ошибкой «Actions must be plain objects». Найдите причину.
+  explanation: "Колбэк `middleware` полностью заменяет стандартный набор. Если вернуть только logger, пропадут thunk и dev-проверки. Правильно так: `(getDefault) => getDefault().concat(logger)`."
+  type: find-bug
+  language: ts
+  code: |-
+    import { configureStore, Tuple } from '@reduxjs/toolkit';
+    import { logger } from './logger';
+
+    export const store = configureStore({
+      reducer: { todos: todosReducer },
+      middleware: () => new Tuple(logger),
+    });
+
+    // в компоненте, fetchTodos — createAsyncThunk
+    dispatch(fetchTodos());
+  bugLines:
+    - 6
+  causes:
+    - "Колбэк middleware заменяет стандартный набор: thunk больше не подключён, и функция уходит в редьюсер как action"
+    - logger обязательно должен идти первым, иначе он ломает обработку асинхронных action
+    - Tuple нельзя использовать в middleware, нужен обычный массив
+    - Перед dispatch результат fetchTodos() нужно дождаться через await
+  answer: 0
+- id: rtk-configure-store-ignore-file-action
+  skill: rtk-custom-middleware
+  question: rtk-configure-store
+  difficulty: 2
+  prompt: Добавьте logger, не потеряв стандартные middleware, и отключите проверку сериализуемости только для action с объектом File.
+  explanation: "`getDefaultMiddleware` принимает настройки встроенных проверок. Поле `serializableCheck.ignoredActions` точечно отключает предупреждение для легитимного случая, а `.concat` добавляет свой middleware к стандартным вместо замены."
+  type: fill-tokens
+  language: ts
+  code: |-
+    const store = configureStore({
+      reducer: { upload: uploadReducer },
+      middleware: (___) =>
+        getDefaultMiddleware({
+          ___: {
+            ignoredActions: ['upload/fileSelected'],
+          },
+        }).___(logger),
+    });
+  tokens:
+    - getDefaultMiddleware
+    - serializableCheck
+    - concat
+  decoys:
+    - immutableCheck
+    - push
+    - applyMiddleware
+    - ignoredPaths
+- id: rtk-serializable-date-in-state
+  skill: redux-serializable-state
+  question: rtk-configure-store
+  difficulty: 2
+  prompt: "В слайс кладут `createdAt: new Date()`, и в консоли появилось предупреждение о несериализуемом значении. Заказы нужно сортировать по дате и сохранять state в localStorage. Как поступить?"
+  explanation: "State в Redux должен быть сериализуемым: на этом держатся DevTools, time-travel и персистентность. Сериализуемый эквивалент (timestamp или ISO-строка) лучше, чем глушить проверку. Исключения через ignored* оставьте для действительно несериализуемых значений вроде File."
+  type: choose-tool
+  options:
+    - label: Хранить timestamp (число) или ISO-строку, а в Date превращать в селекторе или UI
+      why: "Лучший вариант: значение сериализуемо, без потерь проходит через JSON и localStorage, сортируется по числу, а DevTools показывают его корректно."
+    - label: "Отключить проверку целиком: serializableCheck: false"
+      why: Это заглушит предупреждение, но Date всё равно испортится при сохранении в JSON, а будущие ошибки с Map или функциями станет не видно.
+    - label: Добавить путь в serializableCheck.ignoredPaths
+      why: Подходит для временного значения, которое не сохраняют и не сравнивают. Здесь нужна персистентность, а Date после JSON станет строкой.
+    - label: Хранить Date в React Context рядом со store
+      why: Разносит одни и те же данные заказа по двум источникам. Context не решает ни сортировку, ни сохранение, а синхронизировать их придётся вручную.
+  answer: 0
+
+# rtk-entity-adapter: принято из черновика 2026-11-07
+- id: rtk-entity-adapter-purpose
+  skill: rtk-entity-adapter
+  question: rtk-entity-adapter
+  difficulty: 2
+  prompt: Зачем в Redux Toolkit нужен `createEntityAdapter`?
+  explanation: "Адаптер — это нормализация «словарь по id» без boilerplate: формат `{ ids, entities }`, готовые CRUD-редьюсеры, мемоизированные селекторы и опциональная сортировка через `sortComparer`. Серверный кэш — задача RTK Query, мутабельный синтаксис — Immer."
+  type: quiz
+  options:
+    - label: Хранит коллекцию нормализованно в `{ ids, entities }` и даёт готовые CRUD-редьюсеры и мемоизированные селекторы
+      why: "Верно. Не нужно вручную писать addOne/updateOne/removeOne и поиск по id: обновление по id за O(1), а selectAll не создаёт новый массив без изменений."
+    - label: Кэширует данные с сервера, дедуплицирует запросы и сам делает рефетч при фокусе
+      why: Это RTK Query. Адаптер ничего не знает о сети, он лишь описывает форму state и операции над ней. Внутри RTK Query его можно использовать для нормализации.
+    - label: Позволяет «мутировать» state в редьюсерах, сохраняя иммутабельность
+      why: Это делает Immer внутри createSlice. Методы адаптера тоже работают через Immer, но их главная ценность не в этом.
+    - label: Заменяет createSlice и генерирует слайс с экшенами целиком
+      why: Адаптер даёт функции-редьюсеры, initialState и селекторы, а слайс вы всё равно создаёте через createSlice и сами решаете, какие экшены завести.
+  answer: 0
+- id: rtk-entity-adapter-manual-entities
+  skill: rtk-entity-adapter
+  question: rtk-entity-adapter
+  difficulty: 2
+  prompt: После `dispatch(added(todo))` новая задача не появляется в `selectAll`. Найдите ошибку.
+  explanation: "Нормализованный state — это две согласованные структуры: `ids` задаёт состав и порядок, `entities` хранит данные. `selectAll` строит массив по ids, поэтому запись только в entities не видна. Используйте `todosAdapter.addOne`: он обновит обе структуры и учтёт sortComparer."
+  type: find-bug
+  language: tsx
+  code: |-
+    const todosAdapter = createEntityAdapter<Todo>();
+
+    const todosSlice = createSlice({
+      name: 'todos',
+      initialState: todosAdapter.getInitialState(),
+      reducers: {
+        added(state, action: PayloadAction<Todo>) {
+          state.entities[action.payload.id] =
+            action.payload;
+        },
+        removed: todosAdapter.removeOne,
+      },
+    });
+  bugLines:
+    - 8
+    - 9
+  causes:
+    - Сущность записана в entities, но её id не добавлен в ids, а selectAll собирает массив именно по ids
+    - "Мутировать state напрямую нельзя: редьюсер должен вернуть новый объект"
+    - Метод адаптера removeOne нельзя передавать в reducers напрямую, нужна обёртка
+    - getInitialState нужно вызывать с начальным массивом сущностей
+  answer: 0
+- id: rtk-entity-adapter-update-sorted
+  skill: rtk-entity-adapter
+  question: rtk-entity-adapter
+  difficulty: 2
+  prompt: "Допишите код: задачи всегда отсортированы по title, а `toggled` меняет только поле done у одной задачи."
+  explanation: "`sortComparer` поддерживает порядок ids при каждом изменении, пересортировка вручную не нужна. `updateOne` принимает `{ id, changes }` и делает частичное обновление. `setOne` заменил бы сущность целиком, а `upsertOne` ждёт саму сущность, а не патч."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const todosAdapter = createEntityAdapter<Todo>({
+      ___: (a, b) =>
+        a.title.localeCompare(b.title),
+    });
+
+    // внутри reducers слайса:
+    toggled(state, action: PayloadAction<Todo>) {
+      const t = action.payload;
+      todosAdapter.___(state, {
+        id: t.id,
+        ___: { done: !t.done },
+      });
+    },
+  tokens:
+    - sortComparer
+    - updateOne
+    - changes
+  decoys:
+    - sortBy
+    - setOne
+    - patch
+    - compare
+- id: rtk-entity-adapter-kanban-choice
+  skill: normalized-collection-choice
+  question: rtk-entity-adapter
+  difficulty: 2
+  prompt: "Канбан-доска на Redux Toolkit: тысячи карточек, частые обновления одной карточки по id (drag-and-drop, события из WebSocket), список отсортирован по позиции. Как хранить карточки?"
+  explanation: Если коллекция живёт в Redux, часто обновляется по id и читается разными компонентами, нормализуйте её. `createEntityAdapter` даёт это без ручного кода. Массивы и вложенность хороши для маленьких статичных данных, а Context не решает вопросы хранения.
+  type: choose-tool
+  options:
+    - label: createEntityAdapter с sortComparer
+      why: Словарь по id даёт обновление за O(1), готовые updateOne/upsertMany для событий из сокета, порядок держит sortComparer, а селекторы уже мемоизированы.
+    - label: Массив карточек в слайсе + findIndex
+      why: Годится для небольших списков. На тысячах карточек каждое обновление стоит O(n), а CRUD и сортировку придётся писать и тестировать вручную.
+    - label: Вложенная структура columns[].cards[]
+      why: Удобна для чтения, если данные статичны. Перенос карточки и поиск по id требуют обхода колонок, а дублирование данных грозит рассинхроном.
+    - label: React Context с Map карточек
+      why: Context лишь передаёт значение. Любое изменение перерисует всех потребителей, а без Redux пропадут DevTools и middleware, на которых уже построено приложение.
+  answer: 0
+
+# rtk-query-basics: принято из черновика 2026-11-07
+- id: rtk-query-create-api-quiz
+  skill: rtk-query-setup
+  question: rtk-query-basics
+  difficulty: 2
+  prompt: Что на самом деле даёт `createApi` в RTK Query по сравнению с `useEffect` + `fetch`?
+  explanation: "`createApi` — декларативное описание эндпоинтов: `query` для чтения, `mutation` для изменений. Из него генерируются хуки, а кэш, статусы, дедупликация и инвалидация по тегам работают через `api.reducer` и `api.middleware` в общем Redux store."
+  type: quiz
+  options:
+    - label: Декларативно описывает эндпоинты, генерирует хуки и берёт на себя кэш, статусы загрузки и дедупликацию запросов
+      why: "Верно. Не нужно вручную хранить isLoading/error и данные: всё лежит в кэше в store, а хуки на него подписываются."
+    - label: Генерирует хуки-обёртки над fetch, но кэш и статусы нужно хранить в своём slice
+      why: Кэш и статусы RTK Query хранит сам в `api.reducer`. Писать свой slice для этих же данных — дублирование.
+    - label: "Работает отдельно от Redux: подключать api к configureStore не обязательно"
+      why: RTK Query построен на Redux. Без `api.reducer` и `api.middleware` в store хуки не будут корректно работать.
+    - label: "query и mutation отличаются только HTTP-методом: query — GET, mutation — POST/PUT/DELETE"
+      why: "Различие в семантике: query кешируется и подписывается на данные, mutation запускается вручную и инвалидирует теги. query может использовать и POST."
+  answer: 0
+- id: rtk-query-missing-middleware
+  skill: rtk-query-setup
+  question: rtk-query-basics
+  difficulty: 2
+  prompt: Данные загружаются, но после мутаций список не обновляется по тегам, а кэш не чистится после размонтирования. Найдите ошибку.
+  explanation: "Редьюсер хранит кэш, а `api.middleware` управляет его жизнью: подписками, удалением неиспользуемых данных, инвалидацией тегов, polling. Правильно так: `getDefault().concat(api.middleware)`."
+  type: find-bug
+  language: ts
+  code: |-
+    import { configureStore } from '@reduxjs/toolkit';
+    import { api } from './api';
+    import { authSlice } from './authSlice';
+
+    export const store = configureStore({
+      reducer: {
+        auth: authSlice.reducer,
+        [api.reducerPath]: api.reducer,
+      },
+      middleware: (getDefault) => getDefault(),
+    });
+  bugLines:
+    - 10
+  causes:
+    - Не добавлен `api.middleware` — без него не работают инвалидация по тегам, очистка кэша и polling
+    - Ключ редьюсера должен быть строкой 'api', а не `[api.reducerPath]`
+    - RTK Query нельзя совмещать с обычными слайсами в одном store
+    - "`getDefault()` отключает встроенный кэш RTK Query, middleware нужно убрать совсем"
+  answer: 0
+- id: rtk-query-define-endpoints
+  skill: rtk-query-endpoints
+  question: rtk-query-basics
+  difficulty: 1
+  prompt: "Допишите api: список задач читается, новая задача создаётся через POST, наружу экспортируются сгенерированные хуки."
+  explanation: "`fetchBaseQuery` — встроенная обёртка над fetch. Чтение — `builder.query`, изменение — `builder.mutation`. Имена хуков строятся по имени эндпоинта: `use` + Имя + `Query` или `Mutation`."
+  type: fill-tokens
+  language: ts
+  code: |-
+    export const api = createApi({
+      reducerPath: 'api',
+      baseQuery: ___({ baseUrl: '/api' }),
+      endpoints: (builder) => ({
+        getTodos: builder.___<Todo[], void>({ query: () => 'todos' }),
+        addTodo: builder.___<Todo, string>({
+          query: (title) => ({ url: 'todos', method: 'POST', body: { title } }),
+        }),
+      }),
+    });
+    export const { useGetTodosQuery, ___ } = api;
+  tokens:
+    - fetchBaseQuery
+    - query
+    - mutation
+    - useAddTodoMutation
+  decoys:
+    - fetch
+    - useAddTodoQuery
+    - action
+    - createBaseQuery
+- id: rtk-query-vs-alternatives
+  skill: server-state-choice
+  question: rtk-query-basics
+  difficulty: 2
+  prompt: "Приложение уже построено на Redux Toolkit. Нужно добавить десяток CRUD-экранов с REST API: кэш, без дублирующихся запросов от разных компонентов, всё видно в Redux DevTools. Что выбрать?"
+  explanation: Серверному состоянию нужна библиотека с кэшем. Если Redux Toolkit уже есть, RTK Query естественно встаёт в тот же store и DevTools. Без Redux равноценный выбор — TanStack Query. Ручные thunk и эффекты оправданы только для единичных нестандартных запросов.
+  type: choose-tool
+  options:
+    - label: RTK Query (createApi)
+      why: Использует тот же store и DevTools, даёт кэш, дедупликацию одинаковых запросов и инвалидацию по тегам из коробки.
+    - label: createAsyncThunk + slice на каждый ресурс
+      why: Подходит для единичной нестандартной логики. Для CRUD придётся вручную писать кэш, статусы и защиту от повторных запросов.
+    - label: TanStack Query
+      why: Отличный выбор без Redux. Здесь он добавит второй, отдельный кэш, которого не видно в Redux DevTools.
+    - label: useEffect + fetch в компонентах
+      why: "Нет общего кэша и дедупликации: каждый компонент шлёт свой запрос, статусы и гонки придётся обрабатывать вручную."
+  answer: 0
+
+# rtk-query-tags: принято из черновика 2026-11-07
+- id: rtk-query-tags-invalidation-quiz
+  skill: rtk-query-tag-invalidation
+  question: rtk-query-tags
+  difficulty: 2
+  prompt: "Мутация с `invalidatesTags: [{ type: 'Todo', id: 'LIST' }]` успешно завершилась. Что сделает RTK Query?"
+  explanation: Теги связывают мутации и запросы без прямых ссылок друг на друга. Запрос объявляет в `providesTags`, что он кеширует. Мутация объявляет в `invalidatesTags`, что она изменила. Совпали теги — запросы с активными подписками перезапрашиваются автоматически, и компоненту не нужно знать о мутации.
+  type: quiz
+  options:
+    - label: Найдёт записи кэша, предоставившие этот тег в providesTags, и перезапросит те, на которые есть активные подписки
+      why: Верно. Связь идёт только через совпадение тегов. Компонент со списком ничего не знает о мутации, но получит свежие данные.
+    - label: Перезапросит все активные запросы этого api, раз данные на сервере изменились
+      why: Нет. Перезапрашиваются только запросы с совпавшим тегом. Именно поэтому точные теги лучше одного общего тега на всё.
+    - label: Положит ответ мутации в кэш списка, не делая нового запроса
+      why: Нет. Это ручное обновление через `updateQueryData` (оптимистичное или пессимистичное). Инвалидация по тегам делает refetch.
+    - label: Пометит список устаревшим, а перезапрос случится только при ручном refetch() или следующем монтировании
+      why: Нет. Для запросов с активными подписками refetch запускается автоматически. Ручной `refetch()` как раз и не нужен.
+  answer: 0
+- id: rtk-query-tags-missing-list
+  skill: rtk-query-list-tag
+  question: rtk-query-tags
+  difficulty: 2
+  prompt: После addTodo уже отрендеренный список не обновляется, хотя запрос на сервер прошёл успешно. Найдите ошибку.
+  explanation: "Мутация инвалидирует `{ type: 'Todo', id: 'LIST' }`, но список его не предоставляет: в providesTags есть только теги отдельных элементов. Нового элемента среди них нет, поэтому ни один тег не совпал. Правило: список всегда дополнительно провайдит тег LIST, в том числе при пустом результате."
+  type: find-bug
+  language: tsx
+  code: |-
+    getTodos: builder.query<Todo[], void>({
+      query: () => 'todos',
+      providesTags: (result = []) =>
+        result.map(({ id }) => ({ type: 'Todo' as const, id })),
+    }),
+    addTodo: builder.mutation<Todo, string>({
+      query: (title) => ({
+        url: 'todos',
+        method: 'POST',
+        body: { title },
+      }),
+      invalidatesTags: [{ type: 'Todo', id: 'LIST' }],
+    }),
+  bugLines:
+    - 3
+    - 4
+  causes:
+    - "Список предоставляет только теги элементов и не провайдит `{ type: 'Todo', id: 'LIST' }` — инвалидировать нечего"
+    - После мутации нужно вручную вызвать refetch() у getTodos — теги сами ничего не перезапрашивают
+    - invalidatesTags должен быть функцией, статический массив игнорируется
+    - "`as const` ломает сравнение тегов, поэтому совпадения не находятся"
+  answer: 0
+- id: rtk-query-tags-update-by-id
+  skill: rtk-query-tags-setup
+  question: rtk-query-tags
+  difficulty: 2
+  prompt: Допишите API так, чтобы правка одной задачи перезапрашивала только запросы, предоставившие тег этой задачи.
+  explanation: "Типы тегов объявляются в `tagTypes` у createApi. Функция `invalidatesTags` получает (result, error, arg). Из аргумента берём id и инвалидируем `{ type: 'Todo', id }`. Так обновится только то, что провайдило тег этой задачи: её детальный запрос и список, где она есть. Другие детальные запросы не тронутся."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const api = createApi({
+      baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
+      ___: ['Todo'],
+      endpoints: (builder) => ({
+        updateTodo: builder.mutation<Todo, Todo>({
+          query: (todo) => ({
+            url: `todos/${todo.id}`,
+            method: 'PATCH',
+            body: todo,
+          }),
+          ___: (result, error, { ___ }) => [{ type: 'Todo', id }],
+        }),
+      }),
+    });
+  tokens:
+    - tagTypes
+    - invalidatesTags
+    - id
+  decoys:
+    - providesTags
+    - tags
+    - refetch
+- id: rtk-query-tags-invalidation-timeline
+  skill: rtk-query-tag-invalidation
+  question: rtk-query-tags
+  difficulty: 2
+  prompt: Расставьте по порядку, что происходит после вызова addTodo, если на экране смонтирован список через useGetTodosQuery.
+  explanation: Инвалидация запускается по результату мутации. RTK Query вычисляет теги из invalidatesTags и сверяет их с тегами, которые записи кэша объявили в providesTags. Затем перезапрашивает записи с активными подписками. Компоненты обновляются через свои хуки, ручной refetch не нужен.
+  type: order
+  kind: timeline
+  steps:
+    - Компонент вызывает addTodo, мутация отправляет POST
+    - Сервер отвечает успехом, мутация завершается
+    - RTK Query вычисляет теги из invalidatesTags
+    - Находит записи кэша, которые провайдили эти теги
+    - Перезапрашивает записи с активными подписками
+    - useGetTodosQuery отдаёт новые данные, список перерисовывается
+
+# rtk-query-mutations: принято из черновика 2026-11-07
+- id: rtk-query-mutation-await-result
+  skill: rtk-query-mutation-unwrap
+  question: rtk-query-mutations
+  difficulty: 2
+  prompt: Сервер ответил 500 на `await addTodo(title)` (без `.unwrap()`) внутри `try/catch`. Что произойдёт?
+  explanation: "Промис триггера мутации в RTK Query по умолчанию всегда резолвится объектом `{ data }` или `{ error }`. Так забытый `catch` не превращается в unhandled rejection. Если логика строится на `try/catch` (закрыть модалку только после успеха), вызывайте `.unwrap()`: он вернёт `data` или выбросит ошибку."
+  type: quiz
+  options:
+    - label: Промис резолвится объектом `{ error }`, `catch` не сработает, код после `await` продолжит выполняться
+      why: Верно. Триггер не реджектится при ошибке запроса, ошибка лежит в результате и в `error` состояния хука.
+    - label: Промис реджектится, сработает `catch`, а `error` в состоянии хука останется пустым
+      why: "Промис реджектится только при `.unwrap()`. Состояние хука при этом всё равно получит error: оно не зависит от способа обработки промиса."
+    - label: "`await` вернёт `undefined`, ошибку можно узнать только из `error` хука"
+      why: "Результат не пустой: в нём есть поле `error` с ошибкой baseQuery, например `{ status: 500, data }`."
+    - label: Возникнет unhandled rejection, потому что `catch` не перехватывает ошибки RTK Query
+      why: "Наоборот: промис специально не реджектится, чтобы необработанных исключений не было. С `.unwrap()` обычный `catch` их ловит."
+  answer: 0
+- id: rtk-query-mutation-missing-unwrap
+  skill: rtk-query-mutation-unwrap
+  question: rtk-query-mutations
+  difficulty: 2
+  prompt: Модалка закрывается, даже когда сервер вернул ошибку, а toast не показывается. Найдите строку с ошибкой.
+  explanation: "Без `.unwrap()` промис триггера резолвится объектом `{ error }`, поэтому `close()` выполняется всегда, а `catch` не вызывается никогда. Исправление: `await updateTodo({ ... }).unwrap()`. Правило: если после мутации есть ветвление «успех/ошибка» через `try/catch`, нужен `.unwrap()`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function EditTodoModal({ todo, close }: Props) {
+      const [updateTodo, { isLoading }] =
+        useUpdateTodoMutation();
+
+      async function save(title: string) {
+        try {
+          await updateTodo({ id: todo.id, title });
+          close();
+        } catch {
+          toast.error('Save failed');
+        }
+      }
+      return <TodoForm onSubmit={save} busy={isLoading} />;
+    }
+  bugLines:
+    - 7
+  causes:
+    - "Триггер без `.unwrap()` резолвится и при ошибке: `close()` вызовется, а `catch` не сработает"
+    - "`isLoading` нельзя брать из кортежа мутации, для этого нужен свой `useState`"
+    - Триггер мутации можно вызывать только внутри `useEffect`, а не в обработчике
+    - "Аргументы нужно передавать позиционно: `updateTodo(todo.id, title)`"
+  answer: 0
+- id: rtk-query-mutation-endpoint-definition
+  skill: rtk-query-mutation-endpoint
+  question: rtk-query-mutations
+  difficulty: 2
+  prompt: "Допишите endpoint так, чтобы это была мутация, после неё перезапрашивались запросы с `providesTags: ['Todo']`, а наружу экспортировался хук."
+  explanation: Мутации объявляются через `build.mutation`, запросы на чтение — через `build.query`. `invalidatesTags` помечает теги устаревшими, и запросы с теми же `providesTags` перезапрашиваются сами. Для мутации RTK Query генерирует хук `use<Name>Mutation`, он возвращает кортеж [trigger, state].
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const api = createApi({
+      baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
+      tagTypes: ['Todo'],
+      endpoints: (build) => ({
+        addTodo: build.___<Todo, string>({
+          query: (title) => ({
+            url: '/todos', method: 'POST',
+            body: { title },
+          }),
+          ___: ['Todo'],
+        }),
+      }),
+    });
+    export const { ___ } = api;
+  tokens:
+    - mutation
+    - invalidatesTags
+    - useAddTodoMutation
+  decoys:
+    - query
+    - providesTags
+    - useAddTodoQuery
+    - useMutation
+- id: rtk-query-shared-mutation-status
+  skill: rtk-query-shared-mutation-state
+  question: rtk-query-mutations
+  difficulty: 3
+  prompt: Форма запускает мутацию `saveDraft`. Индикатор «Сохраняется…» и текст ошибки нужно показать в шапке, которая находится в другой ветке дерева. Что выбрать?
+  explanation: "По умолчанию у каждого вызова хука мутации своё состояние: оно отражает только запуски через его собственный триггер. `fixedCacheKey` связывает вызовы хука с одной записью в кэше мутаций, и все компоненты видят общие `isLoading`, `data` и `error`. Свой стейт заводите, только если RTK Query этот статус не хранит."
+  type: choose-tool
+  options:
+    - label: Одинаковый `fixedCacheKey` в `useSaveDraftMutation` в форме и в шапке
+      why: Оба вызова хука читают одну запись кэша мутации, поэтому шапка видит статус запуска из формы без проброса пропсов и без своего стейта.
+    - label: Вызвать `useSaveDraftMutation()` без опций в обоих компонентах
+      why: У каждого вызова своё состояние, и шапка не узнает о запуске из формы. Такой вариант подходит, когда статус нужен только там, где мутацию запускают.
+    - label: Свой `isSaving` в `useState` и проброс через Context
+      why: Дублирует то, что RTK Query уже хранит, и легко рассинхронизируется. Оправдан, если статус объединяет несколько разных запросов или не-RTK логику.
+    - label: Слайс с `extraReducers` на `matchPending`/`matchFulfilled` эндпоинта
+      why: Работает, но требует много шаблонного кода. Подходит, если на мутацию должен реагировать другой редьюсер, а не только UI.
+  answer: 0
+
+# rtk-query-polling: принято из черновика 2026-11-07
+- id: rtk-query-polling-unsubscribe
+  skill: rtk-query-polling-lifecycle
+  question: rtk-query-polling
+  difficulty: 2
+  prompt: "Экран котировок использует `useGetPricesQuery(undefined, { pollingInterval: 5000 })`. Пользователь ушёл на другой экран, и все компоненты с этим хуком размонтировались. Что будет с опросом?"
+  explanation: "Polling в RTK Query привязан к подписке: пока есть хотя бы один подписанный компонент, запрос повторяется, а без подписчиков опрос прекращается. Сами данные остаются в кэше ещё keepUnusedDataFor секунд (по умолчанию 60). Ручной setInterval поверх не нужен: он только дублирует логику и может пережить компонент."
+  type: quiz
+  options:
+    - label: "Опрос остановится сам: подписчиков не осталось. Данные ещё полежат в кэше keepUnusedDataFor секунд"
+      why: Верно. Хук отписывается при размонтировании, а polling живёт только при активной подписке. Удаление кэша идёт по отдельному таймеру keepUnusedDataFor.
+    - label: Опрос продолжится в middleware, пока не вызвать api.util.resetApiState()
+      why: RTK Query не держит фоновые запросы для данных, которые никто не показывает. resetApiState сбрасывает весь кэш, а не останавливает опрос.
+    - label: Запросы будут идти ещё keepUnusedDataFor секунд (60 по умолчанию), а потом прекратятся вместе с удалением кэша
+      why: Здесь смешаны две вещи. keepUnusedDataFor определяет, сколько хранятся неиспользуемые данные. Опрос прекращается сразу, как исчезла подписка.
+    - label: Нужно в useEffect вернуть cleanup, который остановит интервал, иначе опрос продолжится
+      why: Это типичная лишняя «ручная очистка». Хук сам отписывается при размонтировании, и интервала, который надо чистить, у компонента нет.
+  answer: 0
+- id: rtk-query-polling-setup-tokens
+  skill: rtk-query-refetch-options
+  question: rtk-query-polling
+  difficulty: 2
+  prompt: "Допишите код: refetchOnFocus должен реально срабатывать, цены опрашиваются каждые 5 с, а пока вкладка скрыта, запросов нет."
+  explanation: "refetchOnFocus и refetchOnReconnect работают только после `setupListeners(store.dispatch)`: эта функция подписывается на события focus, visibilitychange и online. Опрос включает `pollingInterval`. `skip: true` снимает подписку, поэтому опрос тоже останавливается. refetchInterval и enabled — это опции TanStack Query, в RTK Query их нет."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    export const store = configureStore({
+      reducer: { [api.reducerPath]: api.reducer },
+      middleware: (getDefault) =>
+        getDefault().concat(api.middleware),
+    });
+    ___(store.dispatch);
+
+    // Prices.tsx
+    const { data } = useGetPricesQuery(undefined, {
+      ___: 5000,
+      refetchOnFocus: true,
+      ___: !isTabVisible,
+    });
+  tokens:
+    - setupListeners
+    - pollingInterval
+    - skip
+  decoys:
+    - refetchInterval
+    - enabled
+    - keepUnusedDataFor
+    - setupPolling
+- id: rtk-query-polling-unread-counter
+  skill: rtk-query-polling-vs-realtime
+  question: rtk-query-polling
+  difficulty: 2
+  prompt: "В проекте уже есть RTK Query. Нужен счётчик непрочитанных уведомлений в шапке: задержка до 30–60 с допустима, WebSocket-инфраструктуры на бэкенде нет. Что выбрать?"
+  explanation: "Правило выбора: «почти-реалтайм» с допустимой задержкой — pollingInterval (плюс refetchOnFocus). Частые обновления и важна задержка — стрим через WebSocket в onCacheEntryAdded. Ручной таймер поверх RTK Query — антипаттерн."
+  type: choose-tool
+  options:
+    - label: "pollingInterval: 30000 + refetchOnFocus в хуке запроса"
+      why: Лучший выбор. Опрос из коробки, сам останавливается без подписчиков, а при возврате на вкладку данные сразу обновятся. Бэкенд менять не нужно.
+    - label: WebSocket и updateCachedData в onCacheEntryAdded
+      why: "Подходит для котировок или чата, где важна каждая секунда и есть сокет-сервер. Здесь это избыточно: нужна новая инфраструктура ради счётчика."
+    - label: useEffect с setInterval(refetch, 30000)
+      why: Дублирует то, что уже есть в RTK Query, требует ручной очистки и легко переживает компонент. Оправдан разве что без библиотеки данных.
+    - label: Только refetchOnFocus без опроса
+      why: Подходит для данных, которые редко меняются. Если вкладка долго открыта и в фокусе, счётчик не обновится вовсе.
+  answer: 0
+
+# rtk-query-transform-select: принято из черновика 2026-11-07
+- id: rtk-query-transform-vs-select
+  skill: rtk-query-transform-vs-select
+  question: rtk-query-transform-select
+  difficulty: 2
+  prompt: Чем `transformResponse` в эндпоинте отличается от `selectFromResult` в хуке RTK Query?
+  explanation: "`transformResponse` решает, какая форма данных лежит в кэше для всех потребителей. Срабатывает один раз на ответ. `selectFromResult` — это клиентская выборка для конкретного хука. Она определяет, от каких изменений перерисуется компонент. Правило: нормализуй форму в эндпоинте, а выбирай нужную часть в компоненте."
+  type: quiz
+  options:
+    - label: transformResponse меняет ответ один раз до записи в кэш, selectFromResult выбирает часть кэша для конкретного компонента
+      why: Верно. Первый формирует общий кэш для всех подписчиков. Второй работает на клиенте и сокращает подписку компонента до нужных полей, чтобы не было лишних перерисовок.
+    - label: Оба выполняются на каждом рендере компонента, разница только в том, где записан код
+      why: transformResponse вызывается только при получении ответа сервера, а не при рендере. Его результат один раз записывается в кэш.
+    - label: transformResponse вызывается отдельно для каждого хука, поэтому каждый компонент может получить свою форму данных
+      why: transformResponse описан в эндпоинте и срабатывает один раз на ответ. Все компоненты видят один и тот же преобразованный результат из кэша.
+    - label: selectFromResult перезаписывает данные в кэше, и другие компоненты тоже видят только выбранную часть
+      why: "selectFromResult ничего не пишет в кэш: он лишь возвращает производное значение одному хуку. Остальные подписчики видят полный результат."
+  answer: 0
+- id: rtk-query-transform-select-fill
+  skill: rtk-query-transform-vs-select
+  question: rtk-query-transform-select
+  difficulty: 2
+  prompt: "API отдаёт `{ data: Todo[] }`. Снимите обёртку перед кэшированием и выберите в компоненте только заголовок задачи с нужным id."
+  explanation: "Обёртку снимает `transformResponse`: он срабатывает один раз на ответ, и в кэше сразу лежит `Todo[]`. В хуке `selectFromResult` возвращает только `title`, поэтому компонент перерисуется лишь при изменении этой строки. У запроса без аргумента первым параметром передаётся `undefined`. Опция `select` относится к TanStack Query, а не к RTK Query."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    getTodos: builder.query<Todo[], void>({
+      query: () => 'todos',
+      ___: (res: { data: Todo[] }) => res.___,
+    }),
+
+    // в компоненте
+    const { title } = useGetTodosQuery(___, {
+      ___: ({ data }) => ({
+        title: data?.find((t) => t.id === id)?.title,
+      }),
+    });
+  tokens:
+    - transformResponse
+    - data
+    - undefined
+    - selectFromResult
+  decoys:
+    - select
+    - queryFn
+    - "null"
+    - items
+- id: rtk-query-select-new-array
+  skill: rtk-query-select-memoization
+  question: rtk-query-transform-select
+  difficulty: 3
+  prompt: "`TodoList` обёрнут в `memo`, но перерисовывается при каждом refetch, даже когда список выполненных задач не изменился. Найдите причину."
+  explanation: Хук сравнивает объект из `selectFromResult` поверхностно. `filter` и `?? []` при каждом пересчёте создают новый массив, поэтому сравнение не проходит. Пересчёт происходит, например, когда `isFetching` меняется при refetch. Решение — мемоизированный селектор `createSelector` от `data`. Благодаря structural sharing ссылка на `data` остаётся прежней, если содержимое не изменилось.
+  type: find-bug
+  language: tsx
+  code: |-
+    function DoneTodos() {
+      const { done, isLoading } = useGetTodosQuery(
+        undefined,
+        {
+          selectFromResult: ({ data, isLoading }) => ({
+            isLoading,
+            done: data?.filter((t) => t.done) ?? [],
+          }),
+        },
+      );
+      if (isLoading) return <Spinner />;
+      return <TodoList items={done} />;
+    }
+  bugLines:
+    - 7
+  causes:
+    - filter и ?? [] создают новый массив при каждом пересчёте, и поверхностное сравнение результата всегда видит изменение
+    - isLoading нельзя возвращать из selectFromResult — из-за этого хук теряет мемоизацию
+    - Функцию selectFromResult нужно обернуть в useCallback, иначе хук пересоздаёт подписку
+    - Фильтрацию нужно перенести в transformResponse, selectFromResult не умеет работать с массивами
+  answer: 0
+- id: rtk-query-row-subscription
+  skill: rtk-query-select-from-result
+  question: rtk-query-transform-select
+  difficulty: 2
+  prompt: "Таблица на 500 строк: каждая `<TodoRow id={id} />` показывает одну задачу из общего запроса `getTodos`. При переключении чекбокса в одной строке перерисовываются все 500. Что сделать?"
+  explanation: Когда много компонентов подписаны на один запрос, а каждому нужна своя часть, используй `selectFromResult`. Хук перерисует компонент, только если изменилась выбранная им часть. Structural sharing в RTK Query сохраняет ссылки на неизменённые элементы, поэтому `find` вернёт тот же объект.
+  type: choose-tool
+  options:
+    - label: "selectFromResult в TodoRow: вернуть { todo: data?.find((t) => t.id === id) }"
+      why: Лучший вариант. Строка подписана только на свой элемент. После обновления у остальных задач ссылки прежние, и их строки не перерисовываются.
+    - label: transformResponse, превращающий массив в объект по id
+      why: Ускорит поиск по id, но каждая строка всё равно подписана на весь результат и перерисуется. Полезно в дополнение к selectFromResult, а не вместо него.
+    - label: useMemo в TodoRow поверх data.find(...)
+      why: "useMemo экономит вычисление, но не перерисовку: хук вернёт новый data, и компонент уже отрендерится. Мемоизация внутри рендера не отменяет сам рендер."
+    - label: Отдельный запрос getTodo(id) в каждой строке
+      why: Даст 500 запросов и 500 записей в кэше вместо одной. Уместно, когда элемент грузят отдельно, например на странице деталей задачи.
+  answer: 0
+
+# when-not-redux: принято из черновика 2026-11-07
+- id: when-not-redux-server-cache-quiz
+  skill: server-vs-client-state
+  question: when-not-redux
+  difficulty: 2
+  prompt: Команда загружает список товаров в `useEffect` и кладёт его в Redux-слайс. В чём главная проблема такого подхода?
+  explanation: "Сначала спросите: где источник истины? Если на сервере, это кэш, и нужен инструмент для серверного состояния: TanStack Query или RTK Query. Redux-слайсы нужны для клиентского состояния без серверного оригинала: выбранный элемент, открытая панель, активный фильтр."
+  type: quiz
+  options:
+    - label: "Это кэш ответа сервера: устаревание, повторные запросы, фоновое обновление и инвалидацию придётся писать вручную"
+      why: Верно. У серверных данных источник истины на сервере. TanStack Query и RTK Query решают эти задачи из коробки, а в слайсе это самописный код.
+    - label: "Redux медленный: любое изменение стора перерисовывает всё приложение"
+      why: Заблуждение. `useSelector` подписывает компонент только на выбранный кусок стора, и перерисовываются лишь те, чей селектор вернул новое значение.
+    - label: "Асинхронные данные в Redux положить нельзя: редьюсер обязан быть синхронным"
+      why: Редьюсер действительно синхронный, но асинхронность решают thunk-и или RTK Query. Положить данные можно, вопрос в том, стоит ли.
+    - label: "Проблемы нет: всё состояние в одном сторе — это единообразие и предсказуемость"
+      why: Это типичная ловушка. Единообразие не окупает ручной кэш и бойлерплейт, если данные принадлежат серверу или нужны одному компоненту.
+  answer: 0
+- id: when-not-redux-local-form-ui
+  skill: state-colocation
+  question: when-not-redux
+  difficulty: 1
+  prompt: Форма оформления заказа. Флаг «открыта ли модалка подтверждения» и выбранный способ доставки нужны только самой форме и двум её дочерним компонентам. Где хранить это состояние?
+  explanation: Состояние держат как можно ближе к месту использования. Пока его читают компонент и пара детей, хватит `useState` и props. Глобальный стор «для единообразия» добавляет связность и бойлерплейт, но ничего не даёт взамен.
+  type: choose-tool
+  options:
+    - label: useState в форме + props детям
+      why: "Лучший выбор: состояние локальное, потребителей двое, передать props тривиально. Состояние живёт и умирает вместе с формой."
+    - label: Слайс Redux Toolkit
+      why: Оправдан, когда это состояние читают и меняют многие несвязанные части дерева. Здесь будут только лишние action-ы и ручной сброс при уходе со страницы.
+    - label: Context + useReducer
+      why: Пригодится, если props пришлось бы протаскивать через много уровней или переходов состояния много. Для двух прямых детей это избыточно.
+    - label: Глобальный стор Zustand
+      why: Подходит для клиентского состояния, которое разделяют далёкие компоненты. Локальный UI-флаг формы в глобальном сторе переживёт размонтирование и протечёт.
+  answer: 0
+- id: when-not-redux-editor-shared-state
+  skill: global-store-choice
+  question: when-not-redux
+  difficulty: 2
+  prompt: Редактор документов. Выделение, историю undo/redo и состояние панелей читают и меняют тулбар, канвас, сайдбар и горячие клавиши. Изменения частые. Каждое изменение нужно логировать и воспроизводить баги в DevTools. Что выбрать?
+  explanation: Redux оправдан, когда клиентское состояние разделяют многие несвязанные части дерева и важна трассируемость. Тогда нужен единый способ изменения через action-ы, которые можно залогировать, протестировать и прокрутить в DevTools. Серверные данные при этом всё равно лучше держать в query-кэше.
+  type: choose-tool
+  options:
+    - label: Redux Toolkit
+      why: "Лучший выбор: клиентское состояние с многими несвязанными читателями и писателями. Action-ы дают лог, тесты редьюсеров, time-travel в DevTools и удобный undo/redo."
+    - label: TanStack Query
+      why: "Нужен для серверного состояния: кэш, refetch, инвалидация. У выделения и undo нет источника истины на сервере, поэтому это не его задача."
+    - label: Context + useReducer
+      why: Годится для редко меняющихся данных у нескольких потребителей. При частых изменениях перерисует всех потребителей, а DevTools и middleware для логов нет.
+    - label: useState в корне + props
+      why: Хватает, когда потребителей мало и они рядом. Здесь props придётся тянуть через всё дерево, а изменения нельзя отследить централизованно.
+  answer: 0
+- id: when-not-redux-placement-recipe
+  skill: state-placement-algorithm
+  question: when-not-redux
+  difficulty: 2
+  prompt: Расставьте по порядку вопросы, которые стоит задать себе, решая, где хранить новое состояние.
+  explanation: "Сначала отсейте серверное состояние: это кэш, и для него нужен query-инструмент. Остальное держите локально и поднимайте выше только при реальной нужде: сначала в Context, затем в глобальный стор. Глобальный стор — последняя ступень, а не вариант по умолчанию."
+  type: order
+  kind: recipe
+  steps:
+    - Есть ли источник истины на сервере? Да — TanStack Query или RTK Query
+    - Нужно ли оно одному компоненту и его детям? Да — useState и props
+    - Читают ли его несколько далёких компонентов, но меняется оно редко? Да — Context
+    - Меняют ли его часто многие несвязанные части и нужна ли трассировка? Да — Zustand или Redux
+
+# rtk-query-code-splitting: принято из черновика 2026-11-07
+- id: rtk-query-inject-endpoints-quiz
+  skill: rtk-query-code-splitting
+  question: rtk-query-code-splitting
+  difficulty: 2
+  prompt: Фича вызывает `baseApi.injectEndpoints(...)` в своём модуле, который грузится лениво. Что происходит со store и кэшем?
+  explanation: "`injectEndpoints` расширяет тот же объект API: reducer, middleware и кэш остаются одни. Эндпоинты фичи появляются, когда загружается её модуль. Правило: один `createApi` с общим `baseQuery` на бэкенд, фичи только инжектят в него свои эндпоинты."
+  type: quiz
+  options:
+    - label: "Эндпоинты добавляются в тот же baseApi: reducer, middleware и кэш остаются одни, API растёт по мере загрузки модулей"
+      why: Верно. Возвращается тот же API с расширенными типами и хуками, поэтому store настраивают один раз через baseApi.
+    - label: Создаётся новый API-слайс, его reducer и middleware нужно дописать в store при загрузке фичи
+      why: "Так ведёт себя отдельный `createApi`. `injectEndpoints` ничего нового в store не добавляет: всё живёт под reducerPath базового API."
+    - label: Сборщик объединяет все вызовы injectEndpoints на этапе сборки, и эндпоинты попадают в основной бандл
+      why: Инъекция происходит в рантайме при выполнении модуля. Поэтому код фичи может оставаться в ленивом чанке.
+    - label: Копируется baseQuery, а у фичи появляется свой изолированный кэш, независимый от остальных
+      why: Изолированный кэш получится только при отдельном `createApi`. Это как раз и есть ошибка, от которой защищает injectEndpoints.
+  answer: 0
+- id: rtk-query-separate-create-api-bug
+  skill: rtk-query-code-splitting
+  question: rtk-query-code-splitting
+  difficulty: 2
+  prompt: В store подключены только `baseApi.reducer` и `baseApi.middleware`. Мутации других фич инжектятся в baseApi и инвалидируют тег 'Todo'. Найдите ошибку в модуле фичи.
+  explanation: "Отдельный `createApi` создаёт второй API со своим reducerPath, middleware и кэшем. В store его нет, а теги baseApi на него не действуют. Нужно `baseApi.injectEndpoints({ endpoints })`: baseQuery, кэш и теги тогда общие."
+  type: find-bug
+  language: tsx
+  code: |-
+    // features/todos/api.ts
+    export const todosApi = createApi({
+      reducerPath: 'todosApi',
+      baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
+      tagTypes: ['Todo'],
+      endpoints: (builder) => ({
+        getTodos: builder.query<Todo[], void>({
+          query: () => 'todos',
+          providesTags: ['Todo'],
+        }),
+      }),
+    });
+    export const { useGetTodosQuery } = todosApi;
+  bugLines:
+    - 2
+    - 3
+  causes:
+    - "Создан отдельный API со своим reducerPath и кэшем: его нет в store, а инвалидация тегов в baseApi на него не влияет"
+    - tagTypes нельзя объявлять в модуле фичи, только в корневом store
+    - Для списка нужен builder.mutation, иначе теги не инвалидируются
+    - baseUrl в fetchBaseQuery должен быть абсолютным URL
+  answer: 0
+- id: rtk-query-inject-todos-endpoints
+  skill: rtk-query-inject-endpoints-api
+  question: rtk-query-code-splitting
+  difficulty: 2
+  prompt: Допишите модуль фичи так, чтобы эндпоинты добавились в общий baseApi, а компоненты получили сгенерированные хуки.
+  explanation: "`injectEndpoints` вызывают на базовом API. Хуки генерируются по имени эндпоинта и его типу: `use<Name>Query` для query, `use<Name>Mutation` для mutation. Хуки берут из результата инъекции: только у него есть типы новых эндпоинтов."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    export const todosApi = baseApi.___({
+      endpoints: (builder) => ({
+        getTodos: builder.___<Todo[], void>({
+          query: () => 'todos',
+        }),
+        addTodo: builder.mutation<Todo, NewTodo>({
+          query: (body) => ({
+            url: 'todos', method: 'POST', body,
+          }),
+        }),
+      }),
+    });
+    export const { useGetTodosQuery, ___ } =
+      todosApi;
+  tokens:
+    - injectEndpoints
+    - query
+    - useAddTodoMutation
+  decoys:
+    - createApi
+    - enhanceEndpoints
+    - useAddTodoQuery
+    - mutation
+- id: rtk-query-split-api-choice
+  skill: rtk-query-api-structure-choice
+  question: rtk-query-code-splitting
+  difficulty: 3
+  prompt: "Большое приложение: 10 фич грузятся через React.lazy, у всех один бэкенд и общий baseQuery с токеном. Мутации одной фичи должны обновлять данные другой. Как организовать RTK Query?"
+  explanation: "Один бэкенд и общие теги — значит, один API. Разбивка по фичам — через `injectEndpoints`. Отдельный `createApi` оправдан только для независимого бэкенда. Следите за уникальностью имён: без `overrideExisting` повторное определение эндпоинта не применится, в dev будет предупреждение."
+  type: choose-tool
+  options:
+    - label: Один baseApi с общим baseQuery и injectEndpoints в модулях фич
+      why: Один кэш и общие теги, store настраивается один раз. Каждая фича знает только свои эндпоинты, и её код остаётся в ленивом чанке.
+    - label: Отдельный createApi в каждой фиче
+      why: "Кэши и теги изолированы: мутация одной фичи не инвалидирует другую. Каждый API нужно добавить в store. Уместно для действительно разных бэкендов."
+    - label: Все эндпоинты в одном createApi в api/base.ts
+      why: Работает и годится для небольшого приложения. Здесь файл станет узким местом для мёрджей, и все эндпоинты попадут в основной бандл.
+    - label: createSlice + createAsyncThunk в каждой фиче
+      why: Кэш, дедупликацию, refetch и инвалидацию пришлось бы писать вручную. Подходит для клиентской логики, а не для серверного кэша.
+  answer: 0
+
+# rtk-query-optimistic-updates: принято из черновика 2026-11-07
+- id: rtk-query-optimistic-quiz
+  skill: rtk-query-optimistic-update
+  question: rtk-query-optimistic-updates
+  difficulty: 2
+  prompt: "Как в RTK Query сделать оптимистичное обновление: чекбокс задачи должен переключаться мгновенно, а при ошибке сервера вернуться обратно?"
+  explanation: Оптимистичное обновление в RTK Query делается вручную. В `onQueryStarted` мутации правят кэш нужного запроса через `updateQueryData` и получают patch. Если `queryFulfilled` реджектится, вызывают `patch.undo()`. Теги дают только рефетч после ответа сервера, это пессимистичный путь.
+  type: quiz
+  options:
+    - label: В onQueryStarted сразу править кэш запроса через updateQueryData, а при реджекте queryFulfilled вызвать patch.undo()
+      why: Верно. Кэш меняется до ответа сервера, dispatch возвращает patch с undo(), и при ошибке он откатывает правку.
+    - label: Указать invalidatesTags — RTK Query сам применит изменение до ответа и откатит его при ошибке
+      why: invalidatesTags только помечает кэш устаревшим и запускает рефетч после мутации. Мгновенной правки и отката нет.
+    - label: "Включить в эндпоинте мутации опцию optimistic: true — RTK Query сделает обновление и откат автоматически"
+      why: Такой опции нет. RTK Query не знает, как мутация меняет данные, поэтому правку кэша описывают вручную.
+    - label: В onQueryStarted сначала дождаться await queryFulfilled, затем вызвать updateQueryData
+      why: "Это пессимистичное обновление: UI ждёт round-trip до сервера. Подход полезен, но мгновенной реакции не даёт."
+  answer: 0
+- id: rtk-query-optimistic-fill
+  skill: rtk-query-optimistic-update
+  question: rtk-query-optimistic-updates
+  difficulty: 2
+  prompt: Допишите эндпоинт мутации так, чтобы задача переключалась в кэше сразу, а при ошибке сервера правка откатывалась.
+  explanation: "`onQueryStarted` вызывается сразу при старте мутации. `updateQueryData` через Immer правит кэш `getTodos`, а dispatch возвращает patch. `queryFulfilled` реджектится при ошибке запроса, и `patch.undo()` возвращает кэш к прежнему состоянию. `upsertQueryData` целиком заменяет запись и undo не даёт."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    async ___(id, { dispatch, queryFulfilled }) {
+      const patch = dispatch(
+        api.util.___('getTodos', undefined, (draft) => {
+          const todo = draft.find((t) => t.id === id);
+          if (todo) todo.done = !todo.done;
+        }),
+      );
+      try {
+        await ___;
+      } catch {
+        patch.___();
+      }
+    },
+  tokens:
+    - onQueryStarted
+    - updateQueryData
+    - queryFulfilled
+    - undo
+  decoys:
+    - onCacheEntryAdded
+    - upsertQueryData
+    - invalidateTags
+    - rollback
+- id: rtk-query-optimistic-wrong-cache-key
+  skill: rtk-query-cache-keys
+  question: rtk-query-optimistic-updates
+  difficulty: 3
+  prompt: Аргумент мутации — `{ id, listId }`, список загружается через `useGetTodosQuery(listId)`. При клике чекбокс не переключается мгновенно. Где ошибка?
+  explanation: "Кэш RTK Query хранится по паре «эндпоинт + аргументы». Запись `getTodos(undefined)` не существует, поэтому патч ни на что не влияет. Передавайте те же аргументы, что и в хук: `updateQueryData('getTodos', arg.listId, ...)`."
+  type: find-bug
+  language: tsx
+  code: |-
+    async onQueryStarted(arg, { dispatch, queryFulfilled }) {
+      const patch = dispatch(
+        api.util.updateQueryData('getTodos', undefined, (draft) => {
+          const todo = draft.find((t) => t.id === arg.id);
+          if (todo) todo.done = !todo.done;
+        }),
+      );
+      try {
+        await queryFulfilled;
+      } catch {
+        patch.undo();
+      }
+    },
+  bugLines:
+    - 3
+  causes:
+    - Патч адресован записи кэша getTodos(undefined), а данные лежат под getTodos(listId) — правка уходит в пустоту
+    - Recipe должен вернуть изменённый draft, иначе Immer не применит изменение
+    - updateQueryData нужно вызывать только после await queryFulfilled
+    - patch.undo() надо вызывать в finally, а не в catch
+  answer: 0
+- id: rtk-query-payment-update-choice
+  skill: optimistic-vs-pessimistic-update
+  question: rtk-query-optimistic-updates
+  difficulty: 3
+  prompt: Кнопка «Оплатить заказ» в RTK Query. Сервер в ответе возвращает обновлённый заказ. Статус «Оплачено» нельзя показывать до подтверждения, лишний запрос списка заказов нежелателен. Что выбрать?
+  explanation: "Правило: оптимистично обновляют дешёвые и почти всегда успешные действия (лайк, чекбокс). Если ложный «успех» дорог, лучше пессимистичный подход. Когда сервер вернул актуальные данные, удобнее положить их в кэш через `updateQueryData` после `await queryFulfilled`. Если данных в ответе нет, подойдёт инвалидация тегов."
+  type: choose-tool
+  options:
+    - label: "Пессимистично: в onQueryStarted await queryFulfilled, затем updateQueryData данными из ответа"
+      why: "Лучший вариант: кэш меняется только после подтверждения и берёт данные из ответа, без повторного запроса списка."
+    - label: "Оптимистично: updateQueryData сразу, patch.undo() в catch"
+      why: Хорошо для лайков и чекбоксов. Для оплаты ложное «Оплачено» с поздним откатом вводит пользователя в заблуждение.
+    - label: invalidatesTags на мутации и providesTags на списке
+      why: Корректно и просто, но после мутации запустится рефетч списка. Подходит, когда сервер не возвращает обновлённые данные.
+    - label: useOptimistic в компоненте кнопки
+      why: Это тот же оптимистичный подход на уровне UI, и ложный «успех» остаётся. К тому же он не синхронизирует кэш RTK Query.
+  answer: 0
+
+# rtk-query-reauth: принято из черновика 2026-11-07
+- id: rtk-query-reauth-where
+  skill: rtk-query-reauth-basequery
+  question: rtk-query-reauth
+  difficulty: 2
+  prompt: Где в RTK Query правильно обработать истечение access-токена, чтобы запрос с ответом 401 прозрачно повторился с новым токеном?
+  explanation: "Ответ сервера и возможность заново выполнить запрос есть только на уровне baseQuery. Поэтому `fetchBaseQuery` оборачивают своей функцией: при 401 она делает refresh, сохраняет токен через dispatch и повторяет исходный запрос. Если refresh не удался — явный `loggedOut`. `prepareHeaders` нужен только для подстановки токена."
+  type: quiz
+  options:
+    - label: "Обернуть fetchBaseQuery своей baseQuery: поймать 401, сделать refresh, сохранить токен и повторить исходный запрос"
+      why: Верно. Обёртка видит результат запроса и может вызвать raw baseQuery ещё раз, причём для всех эндпоинтов сразу.
+    - label: В prepareHeaders проверять, истёк ли токен, и там же запускать refresh после ответа 401
+      why: prepareHeaders вызывается до запроса и работает только с заголовками. Ответа сервера он не видит и повторить запрос не может.
+    - label: В каждом эндпоинте через transformErrorResponse ловить 401 и обновлять токен
+      why: transformErrorResponse только преобразует ошибку для кэша. Повторить запрос он не умеет, а логика разошлась бы по всем эндпоинтам.
+    - label: Обернуть baseQuery в retry из RTK Query, чтобы 401 повторялся несколько раз
+      why: retry повторяет запрос с тем же просроченным токеном. Без refresh каждый повтор снова получит 401.
+  answer: 0
+- id: rtk-query-reauth-retry-before-dispatch
+  skill: rtk-query-reauth-basequery
+  question: rtk-query-reauth
+  difficulty: 2
+  prompt: Refresh проходит успешно, но повторный запрос снова получает 401. `raw` — это fetchBaseQuery, а prepareHeaders берёт токен из state. Найдите ошибку.
+  explanation: "prepareHeaders читает токен из store в момент каждого запроса. Здесь повтор отправляется до `tokenRefreshed`, поэтому уходит со старым токеном и снова получает 401. Правило: сначала сохранить новый токен через dispatch, потом повторять запрос."
+  type: find-bug
+  language: tsx
+  code: |-
+    const reauth: typeof raw = async (args, api, extra) => {
+      let result = await raw(args, api, extra);
+      if (result.error?.status === 401) {
+        const r = await raw('/auth/refresh', api, extra);
+        if (r.data) {
+          result = await raw(args, api, extra);
+          api.dispatch(tokenRefreshed(r.data));
+        } else {
+          api.dispatch(loggedOut());
+        }
+      }
+      return result;
+    };
+  bugLines:
+    - 6
+    - 7
+  causes:
+    - Повтор отправляется до dispatch нового токена — prepareHeaders подставит старый токен
+    - raw нельзя вызывать повторно с теми же args — RTK Query отменит дубликат
+    - Refresh нужно вызывать через api.dispatch(endpoint.initiate()), иначе токен не сохранится
+    - При неудачном refresh нужно вернуть r, а не result — из-за этого повтор и падает
+  answer: 0
+- id: rtk-query-reauth-mutex-branch
+  skill: rtk-query-refresh-mutex
+  question: rtk-query-reauth
+  difficulty: 3
+  prompt: Это ветка обработки 401 внутри baseQuery с `Mutex` из async-mutex. Допишите её так, чтобы при нескольких одновременных 401 ушёл только один refresh.
+  explanation: Первый запрос с 401 видит свободный mutex, захватывает его через `acquire()` и делает refresh. Остальные ждут в `waitForUnlock()` и повторяют запрос уже с новым токеном. `release()` стоит в finally, чтобы mutex освободился даже при ошибке. Ещё в начале baseQuery обычно вызывают `await mutex.waitForUnlock()`.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    if (!mutex.___()) {
+      const release = await mutex.___();
+      try {
+        const r = await raw('/auth/refresh', api, extra);
+        if (r.data) {
+          api.dispatch(tokenRefreshed(r.data));
+          result = await raw(args, api, extra);
+        } else api.dispatch(loggedOut());
+      } finally { ___(); }
+    } else {
+      await mutex.___();
+      result = await raw(args, api, extra);
+    }
+  tokens:
+    - isLocked
+    - acquire
+    - release
+    - waitForUnlock
+  decoys:
+    - lock
+    - unlock
+    - isBusy
+    - runExclusive
+- id: rtk-query-reauth-mutex-recipe
+  skill: rtk-query-refresh-mutex
+  question: rtk-query-reauth
+  difficulty: 3
+  prompt: Страница одновременно запускает три query, и токен уже истёк. Расставьте шаги baseQuery с Mutex по порядку.
+  explanation: Перед запросом нужно дождаться, пока завершится уже идущий refresh, иначе запрос уйдёт со старым токеном. Refresh выполняет только тот запрос, который захватил mutex. Если refresh упал — `loggedOut` вместо повтора, иначе получится цикл. Освобождение в finally гарантирует, что остальные запросы не зависнут.
+  type: order
+  kind: recipe
+  steps:
+    - Дождаться разблокировки mutex (waitForUnlock), если refresh уже идёт
+    - Выполнить исходный запрос через raw baseQuery
+    - При 401 и свободном mutex захватить его (acquire) и отправить refresh
+    - "Успех: dispatch нового токена и повтор запроса; неудача: dispatch(loggedOut)"
+    - Освободить mutex в finally, чтобы ждущие запросы повторились с новым токеном
+
+# rtk-query-internals: принято из черновика 2026-11-07
+- id: rtk-query-internals-quiz
+  skill: rtk-query-architecture
+  question: rtk-query-internals
+  difficulty: 3
+  prompt: Как RTK Query устроен относительно Redux store?
+  explanation: "RTK Query — это обычный Redux: createApi генерирует reducer и middleware, запросы — это dispatch thunk'ов с pending/fulfilled/rejected, а хуки читают кэш через селекторы и управляют подписками. Поэтому кэш, статусы и actions видны в Redux DevTools, и отлаживать его можно как любой срез."
+  type: quiz
+  options:
+    - label: createApi генерирует обычный reducer под reducerPath и middleware; запросы — dispatch thunk'ов, хуки читают стор и ведут подписки
+      why: Верно. Кэш — обычное Redux-состояние, actions pending/fulfilled/rejected видны в DevTools, а подписки и таймеры живут в middleware.
+    - label: Это отдельный кэш вне Redux, а store лишь синхронизирует с ним копию данных для DevTools
+      why: "Отдельного кэша нет: данные лежат прямо в state[reducerPath]. Именно поэтому без api.reducer в сторе ничего не работает."
+    - label: Данные хранятся в контексте ApiProvider, а Redux нужен только для мутаций и инвалидации
+      why: ApiProvider — лишь способ создать store, если своего нет. Он внутри вызывает configureStore с тем же reducer и middleware.
+    - label: Хуки делают fetch прямо в useEffect и кладут ответ в локальный useState компонента
+      why: Тогда два компонента с теми же аргументами сделали бы два запроса. Дедупликация работает потому, что кэш общий и лежит в store.
+  answer: 0
+- id: rtk-query-missing-middleware-2
+  skill: rtk-query-store-setup
+  question: rtk-query-internals
+  difficulty: 2
+  prompt: Найдите строку, из-за которой инвалидация по тегам, polling и удаление кэша по keepUnusedDataFor работать не будут.
+  explanation: "Reducer хранит только данные. Подписки, счётчик подписчиков, таймеры keepUnusedDataFor, polling и refetch после invalidatesTags живут в api.middleware. Правильно: middleware: (gDM) => gDM().concat(api.middleware)."
+  type: find-bug
+  language: ts
+  code: |-
+    export const api = createApi({
+      reducerPath: 'api',
+      baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
+      tagTypes: ['Todo'],
+      endpoints: (b) => ({
+        getTodos: b.query<Todo[], void>({
+          query: () => 'todos',
+        }),
+      }),
+    });
+
+    export const store = configureStore({
+      reducer: { [api.reducerPath]: api.reducer },
+    });
+  bugLines:
+    - 13
+  causes:
+    - Не подключён api.middleware — подписки, таймеры кэша, polling и инвалидация реализованы именно в нём
+    - reducerPath должен совпадать с именем эндпоинта getTodos
+    - С configureStore хуки не работают — нужно обернуть приложение в ApiProvider
+    - tagTypes нельзя объявлять без providesTags в каждом эндпоинте
+  answer: 0
+- id: rtk-query-subscription-timeline
+  skill: rtk-query-subscriptions
+  question: rtk-query-internals
+  difficulty: 3
+  prompt: "Два компонента вызывают useGetTodoQuery(1). Расставьте события по порядку: A монтируется, затем B, потом оба размонтируются."
+  explanation: Ключ кэша — эндпоинт плюс сериализованные аргументы. Первый подписчик запускает запрос, следующие только добавляют подписку и делят тот же кэш. Когда подписчиков ноль, запись живёт ещё keepUnusedDataFor (по умолчанию 60 с), затем удаляется — следующий монтаж снова пойдёт на сервер.
+  type: order
+  kind: timeline
+  steps:
+    - Хук в A диспатчит initiate и добавляет подписку на getTodo(1)
+    - Записи в кэше нет — уходит запрос, в store появляется action pending
+    - B с теми же аргументами добавляет вторую подписку, новый запрос не уходит
+    - "Приходит ответ: action fulfilled, данные под ключом getTodo(1) видят оба"
+    - Оба размонтировались, подписчиков ноль — стартует таймер keepUnusedDataFor
+    - Таймер истёк — запись удаляется из кэша
+- id: rtk-query-logout-reset
+  skill: rtk-query-cache-reset
+  question: rtk-query-internals
+  difficulty: 2
+  prompt: При выходе пользователя нужно, чтобы следующий пользователь не увидел чужие закэшированные данные RTK Query. Остальное состояние приложения трогать не нужно. Что выбрать?
+  explanation: Кэш RTK Query — часть Redux state, но кроме данных у middleware есть подписки и таймеры. api.util.resetApiState() сбрасывает и то и другое штатно. Инвалидация перезапрашивает, а не очищает; keepUnusedDataFor управляет временем жизни неиспользуемых данных, а не логаутом.
+  type: choose-tool
+  options:
+    - label: dispatch(api.util.resetApiState())
+      why: "Штатно очищает весь срез API: данные, статусы и внутреннее состояние подписок. Остальные срезы store не затрагиваются."
+    - label: dispatch(api.util.invalidateTags(['Todo']))
+      why: Подходит, когда данные устарели после мутации. Старые данные остаются до ответа, а активные запросы перезапросятся — лишняя сетевая нагрузка при логауте.
+    - label: "keepUnusedDataFor: 0 во всех эндпоинтах"
+      why: Удаляет только данные без подписчиков, смонтированные экраны их сохранят. Уместно для редко нужных тяжёлых данных, но убивает кэш при навигации.
+    - label: window.location.reload()
+      why: Гарантированно всё сбросит, но вместе со всем остальным состоянием и ценой полной перезагрузки. Крайняя мера, если стор сбросить нельзя.
+  answer: 0
+
+# rtk-query-with-slices: принято из черновика 2026-11-07
+- id: rtk-query-slices-coexist-quiz
+  skill: rtk-query-vs-slice-split
+  question: rtk-query-with-slices
+  difficulty: 3
+  prompt: "В проект с RTK Query добавляют фичу с модалкой и черновиком формы. Коллега говорит: «Раз есть RTK Query, createSlice — антипаттерн». Что верно?"
+  explanation: "RTK Query и createSlice решают разные задачи и спокойно живут в одном store. Серверные данные (кэш, загрузка, инвалидация) — RTK Query. Клиентское UI-состояние (модалка, фильтр, черновик) — slice или useState. Главное правило: у каждого куска состояния ровно один источник истины."
+  type: quiz
+  options:
+    - label: "Оба живут в одном store: RTK Query — для серверного кэша, slice — для клиентского UI-состояния вроде модалки и черновика"
+      why: Верно. configureStore подключает оба редьюсера рядом, а api.middleware добавляется к дефолтным. Это нормальная архитектура, а не компромисс.
+    - label: Клиентское состояние тоже стоит вести через RTK Query с queryFn, чтобы всё было в одном API
+      why: queryFn нужен для нестандартных источников данных, а не для UI-флагов. Кэш RTK Query удаляет неиспользуемые данные и рассчитан на загрузку, а не на локальные правки.
+    - label: "Нужны два store: один для api, другой для обычных slice, иначе редьюсеры конфликтуют"
+      why: "Конфликта нет: у api свой ключ reducerPath. Второй store только усложнит селекторы, DevTools и Provider."
+    - label: Допустимо, но ответы API нужно копировать в slice через extraReducers, чтобы компоненты читали из одного места
+      why: "Это дублирование серверных данных: появляются два источника истины, которые легко рассинхронизировать. Читайте данные из хука query или через select."
+  answer: 0
+- id: rtk-query-store-setup-fill
+  skill: rtk-query-store-setup
+  question: rtk-query-with-slices
+  difficulty: 2
+  prompt: Допишите store так, чтобы RTK Query и обычный ui-slice работали вместе, включая кэш и инвалидацию.
+  explanation: "Редьюсер api монтируется под ключом api.reducerPath: по нему хуки ищут кэш. api.middleware отвечает за запросы, подписки, keepUnusedDataFor и инвалидацию тегов. Его добавляют через concat к дефолтным middleware, а не вместо них. Без middleware запросы не будут работать корректно."
+  type: fill-tokens
+  language: ts
+  code: |-
+    const store = configureStore({
+      reducer: {
+        [api.___]: api.reducer,
+        ui: uiReducer,
+      },
+      middleware: (getDefault) =>
+        getDefault().___(api.___),
+    });
+  tokens:
+    - reducerPath
+    - concat
+    - middleware
+  decoys:
+    - push
+    - name
+    - reducer
+- id: rtk-query-duplicated-in-slice
+  skill: rtk-query-single-source-of-truth
+  question: rtk-query-with-slices
+  difficulty: 2
+  prompt: После оптимистичного обновления через updateQueryData список иногда показывает старые данные. Найдите строку с архитектурной ошибкой.
+  explanation: Данные из кэша RTK Query копируются в обычный slice, и у списка появляются два источника истины. Правки кэша (updateQueryData, инвалидация) доходят до slice только через лишний рендер, а прямые правки slice кэш вообще не видит. Читайте data прямо из хука, а производные значения считайте через selectFromResult или useMemo.
+  type: find-bug
+  language: tsx
+  code: |-
+    function TodoList() {
+      const { data } = useGetTodosQuery();
+      const dispatch = useAppDispatch();
+      const items = useAppSelector(
+        (s) => s.todos.items,
+      );
+
+      useEffect(() => {
+        if (data) dispatch(setTodos(data));
+      }, [data, dispatch]);
+
+      return <List items={items} />;
+    }
+  bugLines:
+    - 9
+  causes:
+    - "Серверные данные дублируются в slice: два источника истины расходятся, а список рендерится по копии, которая отстаёт от кэша"
+    - В массиве зависимостей эффекта не хватает items
+    - useGetTodosQuery нельзя вызывать в одном компоненте с useAppDispatch
+    - dispatch нельзя вызывать внутри useEffect, только в обработчиках событий
+  answer: 0
+- id: rtk-query-filter-source-of-truth
+  skill: rtk-query-client-filter-arg
+  question: rtk-query-with-slices
+  difficulty: 3
+  prompt: "Поиск по заказам: ссылку с фильтром отправляют коллегам в чат, кнопка «Назад» возвращает прошлый фильтр, а список грузится через useGetOrdersQuery(filter). Где хранить фильтр?"
+  explanation: "Фильтр — клиентское состояние, а RTK Query лишь реагирует на него через аргумент хука: новый аргумент даёт новую запись в кэше. Источник истины выбирают по требованиям. Если нужна ссылка или история, храните фильтр в URL. Если он нужен глобально без ссылок — в slice. Если нужен одному компоненту — в useState."
+  type: choose-tool
+  options:
+    - label: В URL (search params), значение передаётся аргументом в useGetOrdersQuery
+      why: "Лучший вариант: ссылкой можно поделиться, история браузера работает из коробки, а RTK Query сам запрашивает и кеширует данные под каждое значение фильтра."
+    - label: В обычном slice ui.filter, значение передаётся аргументом в хук
+      why: Хорошо, когда фильтр нужен разным частям приложения, но не должен жить в ссылке. Шаринг и «Назад» пришлось бы синхронизировать с URL вручную.
+    - label: В useState компонента со списком
+      why: Подходит для фильтра, который нужен только одному компоненту и может сбрасываться при уходе с экрана. Здесь он не переживёт перезагрузку и не попадёт в ссылку.
+    - label: "В кэше RTK Query: отдельный endpoint с queryFn, хранящий фильтр"
+      why: "Антипаттерн: фильтр никогда не ходит на сервер, а кэш RTK Query рассчитан на серверные данные и может их вычистить."
+  answer: 0

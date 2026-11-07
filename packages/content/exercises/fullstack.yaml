@@ -1011,3 +1011,1274 @@
     - none
     - readonly
     - private
+
+# abort-controller: принято из черновика 2026-11-07
+- id: abort-controller-what-abort-does
+  skill: abort-controller-semantics
+  question: abort-controller
+  difficulty: 1
+  prompt: Эффект грузит пользователя через fetch с `signal`, а в cleanup вызывает `controller.abort()`. Что на самом деле даёт отмена?
+  explanation: "`abort()` переводит signal в состояние aborted, и `fetch` реджектится с `AbortError`. Код после `.then` не выполнится, и устаревший ответ не попадёт в state. Браузер оборвёт соединение, если оно ещё открыто. Но сервер мог уже принять и обработать запрос: отмена работает только на клиенте."
+  type: quiz
+  options:
+    - label: "fetch реджектится с AbortError: ответ не обработается, браузер оборвёт соединение, но сервер мог уже обработать запрос"
+      why: Верно. Отмена работает на стороне клиента. Её цель — не записать в state чужие данные, а побочные эффекты на сервере она не откатывает.
+    - label: Сервер получает сигнал отмены и откатывает начатую операцию
+      why: Протокол не передаёт серверу команду «отменить». Если запрос уже дошёл, сервер обработает его до конца, а POST нужно делать идемпотентным.
+    - label: Промис fetch навсегда остаётся в pending, поэтому then и catch не вызываются
+      why: Промис не зависает, а отклоняется с AbortError. Поэтому этот случай нужно отфильтровать в catch, иначе пользователь увидит ложную ошибку.
+    - label: Ответ всё равно придёт в .then, но React не даст вызвать setState
+      why: React ничего не блокирует. Устаревший ответ не доходит до .then именно потому, что промис fetch отклонён.
+  answer: 0
+- id: abort-controller-shared-instance
+  skill: effect-race-conditions
+  question: abort-controller
+  difficulty: 2
+  prompt: Первый пользователь загружается. После смены `id` данные больше никогда не приходят, ошибок в консоли нет. Где баг?
+  explanation: "Signal, который однажды перешёл в aborted, обратно не возвращается. Если один контроллер общий для всех, после первого cleanup каждый новый fetch сразу реджектится с AbortError, а catch молча это глотает. Контроллер создают внутри эффекта: на каждый запуск свой, и cleanup отменяет именно его запрос."
+  type: find-bug
+  language: tsx
+  code: |-
+    const controller = new AbortController();
+    function User({ id }: { id: string }) {
+      const [user, setUser] = useState<U | null>(null);
+      useEffect(() => {
+        fetch(`/api/users/${id}`, {
+          signal: controller.signal,
+        })
+          .then((r) => r.json())
+          .then(setUser)
+          .catch((e) => {
+            if (e.name !== 'AbortError') console.error(e);
+          });
+        return () => controller.abort();
+      }, [id]);
+  bugLines:
+    - 1
+  causes:
+    - "Контроллер общий для всех запусков эффекта: после первого abort() его signal навсегда aborted, и каждый новый fetch сразу отменяется"
+    - AbortError нужно пробрасывать дальше, а не фильтровать в catch
+    - В cleanup нужно вызывать controller.signal.abort(), а не controller.abort()
+    - В зависимостях эффекта не хватает controller
+  answer: 0
+- id: abort-controller-multiple-fetches
+  skill: abort-controller-semantics
+  question: abort-controller
+  difficulty: 2
+  prompt: Один контроллер передан в два fetch, и abort() вызван сразу, до прихода ответов. Что выведется в консоль?
+  explanation: Один signal можно передать в любое число запросов, и `abort()` отменит их все одним вызовом. Это удобно, когда страница параллельно грузит несколько ресурсов. Оба промиса отклоняются с `AbortError`, а `allSettled` дожидается обоих.
+  type: predict-output
+  language: ts
+  code: |-
+    const c = new AbortController();
+    const a = fetch('/a', { signal: c.signal });
+    const b = fetch('/b', { signal: c.signal });
+    c.abort();
+
+    const res = await Promise.allSettled([a, b]);
+    console.log(
+      res.map((r) =>
+        r.status === 'rejected' ? r.reason.name : 'ok'
+      )
+    );
+  options:
+    - "['AbortError', 'AbortError']"
+    - "['ok', 'ok']"
+    - "['AbortError', 'ok']"
+    - "['ok', 'AbortError']"
+  answer: 0
+- id: abort-controller-timeout-and-unmount
+  skill: fetch-timeout-cancel
+  question: abort-controller
+  difficulty: 3
+  prompt: Запрос в эффекте нужно оборвать, если он идёт дольше 5 секунд, и отменить, если компонент размонтировался раньше. Как это сделать?
+  explanation: Для таймаута есть `AbortSignal.timeout(ms)`, а `AbortSignal.any()` объединяет несколько сигналов в один. По таймауту fetch реджектится с `TimeoutError`, а не с `AbortError`. Поэтому в catch таймаут стоит показать пользователю, а отмену при unmount — тихо проигнорировать.
+  type: choose-tool
+  options:
+    - label: "signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]), в cleanup — controller.abort()"
+      why: "Лучший вариант: один signal срабатывает и по таймауту, и при unmount, а соединение реально обрывается в обоих случаях."
+    - label: Promise.race(fetch, промис с setTimeout и reject через 5 с)
+      why: "Даёт только видимость таймаута: сам запрос продолжает висеть и тратить соединение. Годится лишь там, где API вообще не поддерживает signal."
+    - label: "Только signal: AbortSignal.timeout(5000)"
+      why: Таймаут сработает, но при unmount или смене id запрос не отменится, и устаревший ответ может записаться в state. Подходит для разовых запросов вне компонента.
+    - label: Флаг let ignore = true в cleanup и проверка перед setState
+      why: Защищает от гонок без отмены, например для промисов без поддержки signal. Но таймаута здесь нет, и соединение не обрывается.
+  answer: 0
+
+# fetch-error-handling: принято из черновика 2026-11-07
+- id: fetch-error-when-rejects
+  skill: fetch-rejection-semantics
+  question: fetch-error-handling
+  difficulty: 1
+  prompt: В каком случае промис, который вернул `fetch('/api/todos')`, будет отклонён (reject)?
+  explanation: "`fetch` реджектится, только если HTTP-ответ вообще не получен: нет сети, DNS, CORS или abort. Любой статус, включая 404 и 500, — это выполненный промис с `res.ok === false`. Правило: всегда проверяйте `res.ok` сами, а `catch` оставьте для сетевых сбоев."
+  type: quiz
+  options:
+    - label: "Только если ответ не получен: нет сети, DNS не резолвится, CORS заблокировал ответ или запрос отменён"
+      why: Верно. Ответ с любым HTTP-статусом считается успешно полученным, и промис выполняется.
+    - label: При любом статусе 400 и выше — 404, 401, 500 и т. д.
+      why: Так ведёт себя axios с настройками по умолчанию. У fetch промис выполнится, а `res.ok` будет false.
+    - label: "Только при 5xx: ошибка сервера реджектит, а 4xx считается ответом"
+      why: fetch не различает классы статусов. И 4xx, и 5xx дают выполненный промис с `ok === false`.
+    - label: Если тело ответа не JSON — fetch не сможет его разобрать
+      why: fetch тело не разбирает. Реджектится уже `res.json()`, и это отдельная ошибка парсинга.
+  answer: 0
+- id: fetch-error-500-json-body
+  skill: fetch-rejection-semantics
+  question: fetch-error-handling
+  difficulty: 2
+  prompt: 'Сервер отвечает на /api/todos статусом 500, `Content-Type: application/json` и телом `{"error":"db down"}`. Что выведет консоль?'
+  explanation: "Ответ с кодом 500 — выполненный промис, поэтому `catch` не срабатывает. `res.json()` успешно разбирает объект ошибки, а у объекта нет `length`. Получаем тихий баг: в UI окажется `undefined` вместо массива. Нужна явная проверка `if (!res.ok) throw ...`."
+  type: predict-output
+  language: ts
+  code: |-
+    async function loadTodos() {
+      try {
+        const res = await fetch('/api/todos');
+        const data = await res.json();
+        console.log('items:', data.length);
+      } catch (e) {
+        console.log('caught');
+      }
+    }
+
+    loadTodos();
+  options:
+    - "items: undefined"
+    - caught
+    - "items: 0"
+    - "items: 1"
+  answer: 0
+- id: fetch-error-json-before-ok
+  skill: fetch-response-validation
+  question: fetch-error-handling
+  difficulty: 2
+  prompt: Когда прокси возвращает 502 с HTML-страницей, пользователь видит «Unexpected token '<'» вместо «HTTP 502». Найдите строку с ошибкой.
+  explanation: "Тело разбирается как JSON ещё до проверки статуса. Ответ с ошибкой может быть HTML, тогда `json()` падает с ошибкой парсинга и прячет настоящую причину. Правильный порядок: сначала `res.ok` (и при необходимости Content-Type), потом `res.json()`."
+  type: find-bug
+  language: ts
+  code: |-
+    async function loadTodos(): Promise<Todo[]> {
+      const res = await fetch('/api/todos');
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      return data;
+    }
+  bugLines:
+    - 3
+  causes:
+    - "`res.json()` вызывается до проверки `res.ok`, а тело ошибочного ответа может оказаться не JSON"
+    - "`fetch` нужно обернуть в try/catch, иначе ошибка 502 не будет поймана"
+    - "`res.status` недоступен после чтения тела, поэтому сообщение теряется"
+    - Функция должна возвращать `res`, а не `data`, иначе тип Promise<Todo[]> неверен
+  answer: 0
+- id: fetch-error-safe-fetch-json
+  skill: fetch-response-validation
+  question: fetch-error-handling
+  difficulty: 2
+  prompt: "Допишите обёртку: HTTP-ошибка превращается в HttpError (класс уже объявлен), а не-JSON ответ — в отдельную ошибку."
+  explanation: Единая обёртка над fetch проверяет ответ в три шага. Сначала статус через `ok`, и в ошибку попадают `status` и текст тела. Затем `Content-Type`, чтобы HTML от прокси не дошёл до парсера. Только после этого `json()`. Компоненты получают либо данные, либо понятную ошибку.
+  type: fill-tokens
+  language: ts
+  code: |-
+    async function fetchJson<T>(url: string): Promise<T> {
+      const res = await fetch(url);
+      if (!res.___) {
+        throw new HttpError(res.___, await res.text());
+      }
+      const type = res.headers.get('___') ?? '';
+      if (!type.includes('application/json')) {
+        throw new Error(`Expected JSON, got ${type}`);
+      }
+      return res.___() as Promise<T>;
+    }
+  tokens:
+    - ok
+    - status
+    - Content-Type
+    - json
+  decoys:
+    - success
+    - statusCode
+    - Accept
+    - text
+
+# fetch-vs-axios: принято из черновика 2026-11-07
+- id: fetch-vs-axios-when-library
+  skill: http-client-choice
+  question: fetch-vs-axios
+  difficulty: 1
+  prompt: В небольшом приложении с тремя запросами предлагают подключить axios. Какой аргумент действительно оправдывает библиотеку?
+  explanation: "Парсинг JSON, отмена и работа в Node у `fetch` есть: `res.json()`, `AbortController`/`AbortSignal.timeout()`, глобальный `fetch` с Node 18. Библиотека нужна ради сквозной логики для всех запросов: интерсепторов, refresh токена, прогресса загрузки. Для пары запросов хватит тонкой обёртки."
+  type: quiz
+  options:
+    - label: "Нужны сквозные интерсепторы: токен в каждом запросе и единая обработка 401 с refresh и повтором"
+      why: Верно. Это логика для всех запросов сразу. У axios для неё есть готовые интерсепторы, на fetch её придётся писать в обёртке самому.
+    - label: fetch не умеет парсить JSON, а axios делает это сам
+      why: Парсинг — одна строка `await res.json()`. Тащить зависимость ради этого — типичный антипаттерн.
+    - label: fetch нельзя отменить или ограничить по времени
+      why: "Можно: `AbortController` и `signal`, а для таймаута — `AbortSignal.timeout(ms)`. Готового параметра timeout нет, но пишется он в пару строк."
+    - label: fetch не работает на сервере, поэтому для SSR нужен axios
+      why: В Node 18+ `fetch` глобальный, а Next.js даже расширяет его опциями кеширования. Это аргумент из прошлого.
+  answer: 0
+- id: fetch-vs-axios-missing-res-ok
+  skill: fetch-error-handling
+  question: fetch-vs-axios
+  difficulty: 1
+  prompt: 'API на неизвестный id отвечает 404 с телом `{ "error": "Not found" }`. Тост не показывается, а в UI приходит объект без полей пользователя. Где ошибка?'
+  explanation: "`fetch` реджектит промис только при сетевой ошибке. На 4xx/5xx он успешно резолвится с `res.ok === false`. Перед парсингом нужна проверка `if (!res.ok) throw ...`. Не переносите на `fetch` привычку axios, который реджектит на ошибочный статус сам."
+  type: find-bug
+  language: tsx
+  code: |-
+    async function getUser(id: string) {
+      try {
+        const res = await fetch(`/api/users/${id}`);
+        return (await res.json()) as User;
+      } catch (e) {
+        showToast('Пользователь не найден');
+        return null;
+      }
+    }
+  bugLines:
+    - 3
+    - 4
+  causes:
+    - fetch не реджектит промис на 4xx/5xx — без проверки res.ok тело ошибки парсится и возвращается как User
+    - res.json() нужно вызывать без await, иначе catch не сработает
+    - try/catch не перехватывает ошибки из await внутри async-функции
+    - "Для GET-запроса нужно явно передать method: 'GET', иначе статус не проверяется"
+  answer: 0
+- id: fetch-vs-axios-thin-wrapper
+  skill: fetch-wrapper
+  question: fetch-vs-axios
+  difficulty: 2
+  prompt: "Соберите тонкую обёртку над fetch: базовый URL, токен в заголовке, ошибка на неуспешном статусе, типизированный результат."
+  explanation: "`new Headers(init.headers)` сохраняет заголовки вызывающего кода, и к ним добавляется токен. Проверка `!res.ok` ловит все 4xx/5xx, а не только 500. Без базового URL и без `headers` в опциях обёртка теряет смысл. Обычно этих нескольких строк хватает вместо axios."
+  type: parsons
+  language: ts
+  lines:
+    - "export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {"
+    - "  const headers = new Headers(init.headers);"
+    - "  headers.set('Authorization', `Bearer ${getToken()}`);"
+    - "  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });"
+    - "  if (!res.ok) throw new HttpError(res.status);"
+    - "  return res.json() as Promise<T>;"
+    - "}"
+  distractors:
+    - "  const res = await fetch(path, init);"
+    - "  if (res.status >= 500) throw new HttpError(res.status);"
+- id: fetch-vs-axios-nextjs-small-app
+  skill: http-client-choice
+  question: fetch-vs-axios
+  difficulty: 2
+  prompt: "Приложение на Next.js, около пяти эндпоинтов. На клиенте данные грузятся через TanStack Query, в серверных компонентах нужен `next: { revalidate }`. Требуются базовый URL, токен и единый формат ошибки. Что выбрать для HTTP?"
+  explanation: Кеш и инвалидацию берёт на себя TanStack Query, поэтому выбор клиента почти не важен. Хватит минимального решения без зависимостей. В серверных компонентах Next.js расширяет именно `fetch` опциями кеширования. Библиотека оправдана при сложных интерсепторах или прогрессе загрузки.
+  type: choose-tool
+  options:
+    - label: Тонкая обёртка над fetch
+      why: "Лучший выбор: базовый URL, токен и проверка res.ok — это десяток строк. Кеширование Next.js работает, лишней зависимости нет."
+    - label: axios с интерсепторами
+      why: Подходит при сложной сквозной логике (refresh токена с очередью запросов, прогресс загрузки). Здесь избыточен, и опции кеширования Next.js у fetch он не использует.
+    - label: ky
+      why: Компактная обёртка над fetch с хуками и ретраями. Уместна, если своя обёртка начала разрастаться. Для пяти эндпоинтов можно обойтись без неё.
+    - label: Голый fetch в каждом queryFn
+      why: Токен, URL и проверку res.ok придётся дублировать в каждом запросе, и где-нибудь их обязательно забудут. Годится лишь для одного-двух вызовов.
+  answer: 0
+
+# fetch-formdata: принято из черновика 2026-11-07
+- id: fetch-formdata-content-type-quiz
+  skill: formdata-multipart-headers
+  question: fetch-formdata
+  difficulty: 1
+  prompt: Отправляем через fetch файл и текстовое поле в `FormData`. Почему заголовок `Content-Type` в этом запросе обычно не указывают вручную?
+  explanation: "Для multipart-тела нужна случайная граница между частями, и её знает только браузер, который сериализует FormData. Он сам ставит `multipart/form-data; boundary=...`. Правило: передали FormData в body — заголовок Content-Type не трогаем."
+  type: quiz
+  options:
+    - label: Браузер сам выставит multipart/form-data с boundary; ручной заголовок без boundary не даст серверу разобрать тело
+      why: Верно. Boundary генерирует браузер при сериализации FormData, и указать его вручную правильно нельзя.
+    - label: fetch по умолчанию шлёт application/json, а сервер сам определит, что пришёл файл
+      why: Неверно. Дефолта application/json у fetch нет, а сервер разбирает тело по Content-Type, а не угадывает формат.
+    - label: Заголовок нужен, но только со значением application/x-www-form-urlencoded
+      why: Неверно. urlencoded — формат пар ключ=значение без поддержки бинарных файлов. Для FormData нужен multipart.
+    - label: Указывать можно, но FormData сначала нужно превратить в JSON.stringify(formData)
+      why: 'Неверно. JSON.stringify(formData) даст "{}": файлы и поля потеряются. FormData передают в body как есть.'
+  answer: 0
+- id: fetch-formdata-manual-header-bug
+  skill: formdata-multipart-headers
+  question: fetch-formdata
+  difficulty: 1
+  prompt: "Сервер отвечает 400: не может разобрать тело запроса, файл не приходит. Найдите ошибку."
+  explanation: "Ручной `Content-Type: multipart/form-data` перетирает заголовок, который браузер собрал бы сам вместе с `boundary=...`. Без границы сервер не может разделить части тела. Решение — удалить headers, и браузер выставит заголовок корректно."
+  type: find-bug
+  language: tsx
+  code: |-
+    async function uploadAvatar(file: File) {
+      const formData = new FormData();
+      formData.append('avatar', file);
+      formData.append('name', 'Ira');
+
+      const res = await fetch('/api/profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        body: formData,
+      });
+      return res.json();
+    }
+  bugLines:
+    - 8
+    - 9
+  causes:
+    - "Ручной Content-Type без boundary: сервер не знает, где границы между полями"
+    - File нельзя добавлять в FormData, сначала нужно прочитать его через FileReader
+    - "Для POST с файлом нужно передать body: JSON.stringify(formData)"
+    - "Метод должен быть PUT: POST не поддерживает multipart-тело"
+  answer: 0
+- id: fetch-formdata-from-form-element
+  skill: formdata-from-form
+  question: fetch-formdata
+  difficulty: 2
+  prompt: "Допишите обработчик: собрать все поля формы (включая файл) и добавить JSON-поле meta в тот же multipart-запрос."
+  explanation: "`new FormData(form)` берёт все поля формы с атрибутом name, включая file-input. В TS используют `e.currentTarget`: он типизирован как HTMLFormElement. Вложенные объекты в multipart передают строкой через JSON.stringify, а FormData кладут в `body` без заголовков."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    async function handleSubmit(
+      e: React.FormEvent<HTMLFormElement>
+    ) {
+      e.preventDefault();
+      const data = new ___(e.___);
+      data.append('meta', ___({ tags: ['a'] }));
+      await fetch('/api/profile', {
+        method: 'POST',
+        ___: data,
+      });
+    }
+  tokens:
+    - FormData
+    - currentTarget
+    - JSON.stringify
+    - body
+  decoys:
+    - URLSearchParams
+    - JSON.parse
+    - headers
+    - String
+- id: fetch-formdata-upload-progress
+  skill: upload-progress-choice
+  question: fetch-formdata
+  difficulty: 2
+  prompt: "Экран загрузки видео до 2 ГБ: нужен прогресс-бар с процентом отправленных байт и кнопка отмены. Что выбрать для самого запроса?"
+  explanation: "У fetch нет событий прогресса отправки. Прогресс upload даёт `xhr.upload` с событием `progress` (loaded/total), а отмену — `xhr.abort()`. Axios с `onUploadProgress` в браузере построен поверх того же XHR. Правило: нужен прогресс отправки — XHR или библиотека на нём."
+  type: choose-tool
+  options:
+    - label: XMLHttpRequest и событие progress у xhr.upload
+      why: "Лучший выбор: progress отдаёт loaded и total для отправки, abort() отменяет запрос. Axios с onUploadProgress — то же самое поверх XHR."
+    - label: fetch с FormData и чтение response.body через getReader()
+      why: Так считают прогресс скачивания ответа, а не отправки. Подходит для download-бара, но не для upload.
+    - label: fetch с FormData и спиннер до ответа сервера
+      why: Годится для небольших файлов, где процент не нужен. Для 2 ГБ пользователь не увидит, сколько осталось.
+    - label: useMutation из TanStack Query поверх fetch
+      why: Даёт статусы, повторы и инвалидацию кэша, но не события прогресса. Внутри мутации всё равно понадобится XHR или axios.
+  answer: 0
+
+# fetch-timeout: принято из черновика 2026-11-07
+- id: fetch-timeout-how
+  skill: fetch-timeout-abort
+  question: fetch-timeout
+  difficulty: 2
+  prompt: Как правильно ограничить время ожидания ответа от `fetch`?
+  explanation: "У fetch нет опции timeout, но есть `signal`. Таймаут — это сигнал, который срабатывает по таймеру: `AbortSignal.timeout(ms)` или связка AbortController + setTimeout(abort) + clearTimeout в finally. Promise.race только перестаёт ждать, а сам запрос не отменяет."
+  type: quiz
+  options:
+    - label: "Передать в fetch `signal`, который отменится по таймеру: `AbortSignal.timeout(ms)` или AbortController + setTimeout(abort)"
+      why: Верно. Отмена через signal реально обрывает запрос, и fetch отклоняется с ошибкой (AbortError или TimeoutError у AbortSignal.timeout).
+    - label: "Указать опцию `fetch(url, { timeout: 5000 })`"
+      why: Такой опции у fetch нет — неизвестное поле просто проигнорируется, и запрос будет ждать сколько угодно. Опция timeout есть у axios, но не у fetch.
+    - label: Обернуть в `Promise.race` с промисом, который отклоняется через setTimeout
+      why: "Промис отклонится вовремя, но сам запрос продолжит висеть: соединение не закрыто, ответ потом скачается впустую. Без signal отмены нет."
+    - label: "Таймаут не нужен: браузер сам обрывает fetch через 30 секунд"
+      why: "Единого короткого таймаута нет: браузер может ждать долго, и время зависит от браузера и сети. Полагаться на это нельзя."
+  answer: 0
+- id: fetch-timeout-manual-controller
+  skill: fetch-timeout-abort
+  question: fetch-timeout
+  difficulty: 2
+  prompt: "Допишите хелпер: запрос отменяется через ms миллисекунд, а таймер сбрасывается в любом исходе — и при ответе, и при ошибке."
+  explanation: Таймер вызывает abort() у контроллера, чей signal передан в fetch. finally гарантирует clearTimeout и после успеха, и после ошибки — иначе останется лишний отложенный вызов. Короткая альтернатива — `AbortSignal.timeout(ms)`.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    async function fetchWithTimeout(url: string, ms: number) {
+      const controller = new ___();
+      const timer = setTimeout(() => controller.___(), ms);
+      try {
+        return await fetch(url, { signal: controller.___ });
+      } ___ {
+        clearTimeout(timer);
+      }
+    }
+  tokens:
+    - AbortController
+    - abort
+    - signal
+    - finally
+  decoys:
+    - AbortSignal
+    - cancel
+    - catch
+    - timeout
+- id: fetch-timeout-shared-signal
+  skill: fetch-timeout-abort
+  question: fetch-timeout
+  difficulty: 3
+  prompt: Первые секунды после загрузки приложения запросы работают, а потом каждый вызов getUser мгновенно падает с TimeoutError. Где ошибка?
+  explanation: "AbortSignal.timeout(ms) начинает отсчёт в момент создания. Сигнал создан один раз при импорте модуля: через 5 с он отменён навсегда, и fetch с уже отменённым сигналом сразу отклоняется. Сигнал таймаута создают на каждый запрос."
+  type: find-bug
+  language: tsx
+  code: |-
+    const signal = AbortSignal.timeout(5000);
+
+    export async function getUser(id: string) {
+      const res = await fetch(`/api/users/${id}`, {
+        signal,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+  bugLines:
+    - 1
+  causes:
+    - "Сигнал создаётся один раз при загрузке модуля: таймер идёт с импорта, и после срабатывания все запросы получают уже отменённый сигнал"
+    - После ответа нужно вызвать clearTimeout, иначе AbortSignal.timeout отменит следующие запросы
+    - signal нужно передавать в headers, а не в опциях fetch
+    - res.json() нужно await-ить до return, иначе промис отклонится с TimeoutError
+  answer: 0
+- id: fetch-timeout-payment-retry
+  skill: client-timeout-vs-server-work
+  question: fetch-timeout
+  difficulty: 3
+  prompt: "Кнопка «Оплатить»: клиент ждёт ответ не дольше 10 с, а при таймауте повторяет запрос. Нельзя, чтобы деньги списались дважды. Что главное?"
+  explanation: "Таймаут на клиенте лишь перестаёт ждать — сервер может уже выполнить операцию. Поэтому ретраи небезопасных запросов требуют поддержки на сервере: идемпотентный ключ превращает повтор в «верни результат первой попытки»."
+  type: choose-tool
+  options:
+    - label: "Idempotency-Key: один ключ на операцию во всех повторах, сервер не выполняет её дважды"
+      why: Верно. Сервер узнаёт повтор по ключу и возвращает результат первой попытки, даже если клиент не дождался ответа.
+    - label: AbortSignal.timeout(10000) и повтор запроса после TimeoutError
+      why: "Хорош для обычных GET, но abort не откатывает списание: первая попытка могла пройти на сервере, и повтор спишет деньги ещё раз."
+    - label: Увеличить таймаут до 60 секунд, чтобы ответ точно успел прийти
+      why: "Снижает частоту проблемы, но не устраняет: сеть может оборваться в любой момент, а пользователь ждёт минуту."
+    - label: Блокировать кнопку, пока запрос не завершится
+      why: Полезно против двойного клика, но после таймаута и ретрая дубль всё равно возможен — защита должна быть на сервере.
+  answer: 0
+
+# fetch-retry-backoff: принято из черновика 2026-11-07
+- id: fetch-retry-strategy-quiz
+  skill: retry-strategy
+  question: fetch-retry-backoff
+  difficulty: 2
+  prompt: Клиент получает ошибки от API. Какая стратегия автоматических повторов корректна?
+  explanation: "Повторять стоит только временные сбои: сетевой обрыв, 429, 503 и другие 5xx. Ответ на 400/404 при повторе не изменится. Паузу между попытками растят экспоненциально и добавляют jitter, чтобы клиенты не пришли к восстановившемуся серверу одновременно. Если сервер прислал Retry-After, берут паузу из него."
+  type: quiz
+  options:
+    - label: Повторять сетевые ошибки, 429 и 5xx вроде 503 с экспоненциально растущей паузой и случайным jitter
+      why: Верно. Это временные сбои, которые могут пройти сами. Backoff даёт серверу время восстановиться, а jitter разносит повторы разных клиентов во времени.
+    - label: "Повторять любой ответ с !res.ok через фиксированную паузу в 1 секунду: так нагрузка на сервер предсказуема"
+      why: 400/404 при повторе не изменятся. Фиксированная пауза синхронизирует клиентов, и их повторы приходят на сервер одной волной.
+    - label: "Повторять всё, включая 400 и 404, но с экспоненциальным backoff: пауза и так защищает сервер"
+      why: Backoff снижает нагрузку, но не делает повтор осмысленным. Ошибка в самом запросе вернётся снова, а пользователь будет зря ждать.
+    - label: "Повторять сетевые ошибки и 5xx сразу, без паузы: пользователь быстрее получит ответ"
+      why: Мгновенные повторы добивают перегруженный сервер и почти наверняка получат тот же 503. Серверу нужно время на восстановление.
+  answer: 0
+- id: fetch-retry-4xx-bug
+  skill: retry-error-classification
+  question: fetch-retry-backoff
+  difficulty: 2
+  prompt: GET /api/items/42 возвращает 404, но пользователь ждёт несколько секунд и видит «Retries exhausted». Найдите строку с ошибкой.
+  explanation: "Для 404 `res.ok` равно false, поэтому код уходит в паузу и повторяет заведомо бесполезный запрос. После всех попыток он выбрасывает общую ошибку, и настоящий статус теряется. Возвращать нужно и все ответы, которые повтор не исправит: `if (res.ok || (res.status < 500 && res.status !== 429)) return res;`"
+  type: find-bug
+  language: tsx
+  code: |-
+    async function fetchWithRetry(url: string, n = 3) {
+      for (let i = 0; i < n; i++) {
+        try {
+          const res = await fetch(url);
+          if (res.ok) return res;
+        } catch {
+          // сетевая ошибка — повторим
+        }
+        const delay = 2 ** i * 300 + Math.random() * 200;
+        await new Promise((r) => setTimeout(r, delay));
+      }
+      throw new Error('Retries exhausted');
+    }
+  bugLines:
+    - 5
+  causes:
+    - "Проверка `res.ok` отправляет на повтор и 4xx: 404 повторяется впустую, а реальный статус теряется"
+    - fetch отклоняет промис при 404, поэтому ошибка попадает в catch и уходит на повтор
+    - "`await` внутри for запускает все попытки параллельно, и они перегружают сервер"
+    - "`Math.random()` в паузе делает поведение недетерминированным, поэтому ретраи срабатывают не всегда"
+  answer: 0
+- id: fetch-retry-delay-calc
+  skill: retry-backoff-jitter
+  question: fetch-retry-backoff
+  difficulty: 2
+  prompt: Допишите расчёт паузы перед повтором номер i. При 429/503 нужно уважать подсказку сервера, в остальных случаях — экспоненциальный backoff с jitter.
+  explanation: "`Retry-After` обычно приходит в секундах, поэтому значение умножаем на 1000. Заголовок может быть и HTTP-датой: тогда Number даст NaN, проверка `sec > 0` не пройдёт, и сработает запасной путь. Пауза растёт с номером попытки (300, 600, 1200 мс), а `Math.random()` добавляет разброс между клиентами."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function retryDelay(i: number, res?: Response) {
+      if (res?.status === 429 || res?.status === 503) {
+        const sec = Number(res.headers.get('___'));
+        if (sec > 0) return sec * ___;
+      }
+      const backoff = 2 ** ___ * 300;
+      return backoff + Math.___() * 200;
+    }
+  tokens:
+    - Retry-After
+    - "1000"
+    - i
+    - random
+  decoys:
+    - Retry-Delay
+    - "60"
+    - attempts
+    - floor
+- id: fetch-retry-post-idempotency
+  skill: retry-idempotency
+  question: fetch-retry-backoff
+  difficulty: 2
+  prompt: "Мобильное приложение оформляет заказ через POST /orders. Сеть нестабильна: бывает, что запрос дошёл до сервера, а ответ потерялся. Нужно повторять автоматически и не создать два заказа. Что выбрать?"
+  explanation: "Повтор POST без защиты может создать дубль: клиент не знает, выполнил ли сервер первый запрос. Ключ идемпотентности генерируют один раз на операцию, а не на попытку. Сервер хранит результат по этому ключу и на повтор возвращает его, не создавая заказ заново. Без такой защиты безопасно повторять только идемпотентные GET, PUT и DELETE."
+  type: choose-tool
+  options:
+    - label: "Idempotency-Key: один UUID на операцию, одинаковый во всех повторах; сервер возвращает сохранённый результат"
+      why: "Лучший вариант. Повторы безопасны: если первый запрос уже создал заказ, сервер узнает ключ и вернёт тот же результат."
+    - label: Повторять POST с экспоненциальным backoff и jitter, как обычный GET
+      why: Подходит для идемпотентных запросов. Если первый POST дошёл, а ответ потерялся, повтор создаст второй заказ.
+    - label: Не повторять POST вообще, а показать пользователю ошибку
+      why: Запасной вариант, когда сервер не поддерживает идемпотентность. Но пользователь сам нажмёт ещё раз, и дубль всё равно возможен.
+    - label: Блокировать кнопку «Оформить» до получения ответа
+      why: Полезно против двойного клика, но это не ретрай. Проблему потерянного ответа и безопасного повтора блокировка не решает.
+  answer: 0
+
+# fetch-credentials: принято из черновика 2026-11-07
+- id: fetch-credentials-subdomain-quiz
+  skill: fetch-credentials-mode
+  question: fetch-credentials
+  difficulty: 2
+  prompt: Фронт на app.example.com вызывает `fetch('https://api.example.com/me')` без опций. Сессионная cookie (SameSite=Lax) до сервера не доходит. Почему?
+  explanation: "Не путайте origin и site. Origin — это схема, хост и порт, поэтому поддомены считаются разными origin. Site — это регистрируемый домен, и поддомены одного домена — один site. По умолчанию fetch работает с `credentials: 'same-origin'`, и для другого origin cookie не уходит. Нужен `credentials: 'include'` плюс CORS-заголовки на сервере."
+  type: quiz
+  options:
+    - label: "По умолчанию credentials: 'same-origin', а поддомен — другой origin, поэтому нужно явно указать credentials: 'include'"
+      why: Верно. Origin = схема + хост + порт. app. и api. — разные хосты, значит запрос кросс-доменный и cookie без include не отправляется.
+    - label: SameSite=Lax запрещает отправку cookie на другой поддомен, нужен SameSite=None
+      why: Поддомены одного домена — это один site, так что Lax здесь не мешает. Проблема в режиме credentials у fetch.
+    - label: Cookie ушла, но CORS не дал серверу её прочитать без Access-Control-Allow-Credentials
+      why: CORS ограничивает доступ скрипта к ответу, а не то, что сервер видит в запросе. Здесь cookie не была отправлена вовсе.
+    - label: fetch никогда не отправляет cookies по умолчанию, даже на тот же origin
+      why: "Это поведение старых реализаций. Сейчас по умолчанию действует 'same-origin': на свой origin cookie уходят."
+  answer: 0
+- id: fetch-credentials-wildcard-origin
+  skill: cors-credentials-headers
+  question: fetch-credentials
+  difficulty: 2
+  prompt: Клиент шлёт запрос с cookie, сервер отвечает 200, но в консоли CORS-ошибка, и данные скрипту не достаются. Найдите ошибку.
+  explanation: "Для запросов с credentials браузер не принимает `Access-Control-Allow-Origin: *`. Нужен конкретный origin из allowlist, а также `Vary: Origin`, чтобы кэш не перепутал ответы. Сервер при этом ответ отдал, его заблокировал браузер."
+  type: find-bug
+  language: ts
+  code: |-
+    // client: https://app.example.com
+    fetch('https://api.example.com/me', {
+      credentials: 'include',
+    });
+
+    // server: api.example.com
+    app.use((req, res, next) => {
+      res.set('Access-Control-Allow-Origin', '*');
+      res.set(
+        'Access-Control-Allow-Credentials',
+        'true',
+      );
+      next();
+    });
+  bugLines:
+    - 8
+  causes:
+    - Wildcard `*` в Allow-Origin несовместим с credentials — браузер требует конкретный origin
+    - Значение Allow-Credentials должно быть булевым true, а не строкой 'true'
+    - "В fetch не хватает `mode: 'cors'`, без него cookie не уходят"
+    - "Нужно `credentials: 'same-origin'`, ведь домен у фронта и API общий"
+  answer: 0
+- id: fetch-credentials-cors-allowlist
+  skill: cors-credentials-headers
+  question: fetch-credentials
+  difficulty: 2
+  prompt: Допишите CORS-мидлвару и клиентский запрос так, чтобы cookie-сессия работала с app.example.com.
+  explanation: "Сервер возвращает тот origin, что пришёл в запросе, если тот есть в allowlist, и добавляет `Allow-Credentials: true`. `Vary: Origin` нужен, чтобы кэш не отдал ответ другому origin. На клиенте без `credentials: 'include'` cookie в кросс-доменный запрос не уйдёт. Запросам с нестандартными заголовками нужна ещё обработка preflight (OPTIONS)."
+  type: fill-tokens
+  language: ts
+  code: |-
+    const allowed = ['https://app.example.com'];
+
+    app.use((req, res, next) => {
+      const origin = req.headers.origin;
+      if (origin && allowed.includes(origin)) {
+        res.set('Access-Control-Allow-Origin', ___);
+        res.set('Access-Control-Allow-___', 'true');
+        res.set('Vary', 'Origin');
+      }
+      next();
+    });
+
+    // client
+    fetch(url, { credentials: '___' });
+  tokens:
+    - origin
+    - Credentials
+    - include
+  decoys:
+    - "'*'"
+    - Cookies
+    - same-origin
+    - Headers
+- id: fetch-credentials-samesite-cross-site
+  skill: cookie-samesite-choice
+  question: fetch-credentials
+  difficulty: 3
+  prompt: "Фронт на https://shop.com, API на https://shop-api.io (домены поменять нельзя). Сессия в cookie, fetch идёт с credentials: 'include', CORS настроен. Какие атрибуты нужны cookie?"
+  explanation: Cookie не уйдёт с запросом, если SameSite её не пропускает, даже при include и правильном CORS. Кросс-сайтовым fetch нужен `SameSite=None; Secure`. Учтите, что браузеры с блокировкой сторонних cookie всё равно могут её отрезать. Поэтому надёжнее держать API на поддомене того же site, тогда хватит Lax.
+  type: choose-tool
+  options:
+    - label: SameSite=None; Secure
+      why: "Верно: shop.com и shop-api.io — разные site. Только None разрешает cookie в кросс-сайтовых fetch, а без Secure браузер такую cookie отклонит."
+    - label: SameSite=Lax
+      why: Lax пропускает cookie только при top-level навигации на чужой сайт, а в fetch — нет. Подошёл бы, будь API на api.shop.com.
+    - label: SameSite=Strict
+      why: Strict — самый жёсткий режим, кросс-сайтовые запросы он не пропускает вовсе. Хорош для чувствительных cookie в рамках одного сайта.
+    - label: Не указывать SameSite — пусть решит браузер
+      why: Chrome трактует отсутствие атрибута как Lax и не отправит cookie в кросс-сайтовый fetch. В других браузерах поведение своё, полагаться на него нельзя.
+  answer: 0
+
+# fetch-headers-content-type: принято из черновика 2026-11-07
+- id: fetch-headers-json-without-content-type
+  skill: fetch-content-type
+  question: fetch-headers-content-type
+  difficulty: 2
+  prompt: "Фронт шлёт `fetch` с `body: JSON.stringify(data)`, но без заголовка `Content-Type`. Бэкенд на Express с `express.json()` видит пустое тело. Почему?"
+  explanation: "Для строкового тела fetch сам ставит `text/plain;charset=UTF-8`, а не JSON. Серверные JSON-парсеры смотрят на `Content-Type` и пропускают такое тело. Правило: для JSON-строки всегда явно указывайте `application/json`. Тип, соответствующий данным, браузер выводит сам только для FormData, URLSearchParams и Blob (если у Blob задан type)."
+  type: quiz
+  options:
+    - label: Браузер пометил строку как text/plain;charset=UTF-8, и JSON-парсер сервера её проигнорировал
+      why: "Верно. Для строки fetch ставит text/plain, а express.json() разбирает только тела с JSON-типом. Нужен явный 'Content-Type': 'application/json'."
+    - label: fetch видит, что строка — валидный JSON, и ставит application/json, значит, ошибка на сервере
+      why: "fetch не анализирует содержимое строки. Тип зависит только от вида body: для строки всегда text/plain."
+    - label: Без Content-Type браузер вообще не отправляет тело POST-запроса
+      why: Тело отправляется. Проблема в том, как сервер его интерпретирует, а не в том, дошло ли оно.
+    - label: "Нужно было передать объект в body без JSON.stringify: fetch сериализует его сам"
+      why: 'fetch не сериализует объекты: обычный объект превратится в строку "[object Object]". Сериализация и заголовок — ваша задача.'
+  answer: 0
+- id: fetch-headers-formdata-manual-content-type
+  skill: fetch-formdata-boundary
+  question: fetch-headers-content-type
+  difficulty: 2
+  prompt: Загрузка аватара доходит до сервера, но multer не находит в запросе ни файла, ни полей. Найдите строку с ошибкой.
+  explanation: "Для FormData браузер сам ставит `multipart/form-data; boundary=...`. Boundary — разделитель частей тела. Если задать заголовок вручную, boundary пропадёт, и сервер не сможет разрезать тело на части. Правило: для FormData не указывайте Content-Type."
+  type: find-bug
+  language: tsx
+  code: |-
+    async function uploadAvatar(file: File, id: string) {
+      const body = new FormData();
+      body.append('avatar', file);
+      body.append('userId', id);
+      await fetch('/api/avatar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        body,
+      });
+    }
+  bugLines:
+    - 8
+  causes:
+    - Content-Type задан вручную без boundary — сервер не может разделить части multipart-тела
+    - FormData нужно сериализовать через JSON.stringify перед отправкой
+    - File нельзя класть в FormData напрямую, сначала его нужно перевести в base64
+    - Для FormData обязателен метод PUT, а не POST
+  answer: 0
+- id: fetch-headers-json-and-accept
+  skill: fetch-content-type
+  question: fetch-headers-content-type
+  difficulty: 1
+  prompt: "Допишите код: первый запрос создаёт задачу в JSON, второй просит у того же API выгрузку в CSV."
+  explanation: "`Content-Type` описывает, что вы **отправляете**, а `Accept` — что хотите **получить**. GET без тела не нуждается в Content-Type, но Accept подсказывает серверу формат, если тот умеет отдавать несколько. CSV — это текст, поэтому ответ читаем через `text()`, а не `json()`."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    await fetch('/api/todos', {
+      method: 'POST',
+      headers: { 'Content-Type': ___ },
+      body: ___(todo),
+    });
+
+    const csv = await fetch('/api/todos/export', {
+      headers: { ___: 'text/csv' },
+    }).then((r) => r.___());
+  tokens:
+    - "'application/json'"
+    - JSON.stringify
+    - Accept
+    - text
+  decoys:
+    - "'text/plain'"
+    - "'Content-Type'"
+    - json
+    - JSON.parse
+- id: fetch-headers-upload-file-with-fields
+  skill: fetch-body-type-choice
+  question: fetch-headers-content-type
+  difficulty: 2
+  prompt: "Форма профиля: имя, город и файл аватара до 5 МБ. Бэкенд принимает multipart и сохраняет файлы потоком. Как отправить запрос?"
+  explanation: "Правило выбора тела: JSON-объект — `JSON.stringify` с явным `application/json`; простые поля формы — `URLSearchParams`; файлы — `FormData` без ручного Content-Type. В последних двух случаях заголовок браузер ставит сам."
+  type: choose-tool
+  options:
+    - label: FormData с полями и файлом, без заголовка Content-Type
+      why: "Лучший вариант: браузер сам выставит multipart/form-data с корректным boundary, файл уйдёт бинарно и без лишней кодировки."
+    - label: "JSON.stringify с файлом в base64 и 'Content-Type': 'application/json'"
+      why: Подходит для мелких бинарных данных в JSON-API. Base64 раздувает размер примерно на треть и мешает потоковой обработке на сервере.
+    - label: "FormData и явный 'Content-Type': 'multipart/form-data'"
+      why: Ручной заголовок затирает boundary, и сервер не разберёт части. Указывать Content-Type для FormData нельзя.
+    - label: URLSearchParams со всеми полями формы
+      why: Хорош для простых текстовых полей (application/x-www-form-urlencoded), но передавать файлы так нельзя.
+  answer: 0
+
+# sse-vs-websocket: принято из черновика 2026-11-07
+- id: sse-vs-websocket-core
+  skill: realtime-transport-choice
+  question: sse-vs-websocket
+  difficulty: 2
+  prompt: Чем SSE отличается от WebSocket и когда SSE достаточно?
+  explanation: "Решает направление трафика. Если клиент в основном слушает, хватит SSE: обычный HTTP, автореконнект в браузере, редкие действия идут через fetch/POST. WebSocket нужен, когда клиент сам часто шлёт данные (чат, совместное редактирование, игры) или нужен бинарный формат."
+  type: quiz
+  options:
+    - label: SSE — поток сервер→клиент поверх HTTP с автореконнектом; хватает, когда клиент слушает, а редкие действия шлёт обычными запросами
+      why: Верно. Однонаправленность — не минус, если клиенту нужно только получать события. Встречные действия делаются отдельными POST.
+    - label: Оба канала двунаправленные, просто SSE легче и поэтому подходит для небольшого трафика
+      why: Через EventSource клиент ничего не может отправить по тому же соединению. Выбор зависит от направления данных, а не от объёма.
+    - label: "WebSocket всегда предпочтительнее: он быстрее и сам переподключается при обрыве"
+      why: У WebSocket нет встроенного автореконнекта, его пишут вручную. Автореконнект как раз есть у EventSource, а сервер для WebSocket сложнее.
+    - label: SSE использует отдельный протокол, поэтому корпоративные прокси его часто режут, а WebSocket проходит
+      why: "Наоборот: SSE — обычный HTTP-ответ text/event-stream. С апгрейдом соединения до WebSocket у прокси проблем бывает больше."
+  answer: 0
+- id: sse-vs-websocket-report-progress
+  skill: realtime-transport-choice
+  question: sse-vs-websocket
+  difficulty: 2
+  prompt: "Экран генерации отчёта: сервер 1–2 минуты шлёт прогресс в процентах, пользователь только смотрит. Есть кнопка «Отменить» — одно действие. Между клиентом и сервером обычные HTTP-прокси. Что выбрать?"
+  explanation: Почти весь трафик идёт от сервера к клиенту, а клиент шлёт одно редкое действие. Это классический случай для SSE плюс обычный POST. WebSocket оправдан, когда клиент шлёт данные так же активно, как сервер.
+  type: choose-tool
+  options:
+    - label: SSE (EventSource) для прогресса + POST для отмены
+      why: "Лучший выбор: однонаправленный поток по обычному HTTP, браузер сам переподключается, а отмена — отдельный запрос."
+    - label: WebSocket
+      why: Оправдан для чата, совместного редактирования или игр, где клиент шлёт часто. Здесь он лишь усложнит сервер и заставит писать реконнект вручную.
+    - label: Long polling
+      why: Годится, если стриминговые ответы недоступны в инфраструктуре. Но на каждое событие открывается новый запрос, а задержка и накладные расходы выше.
+    - label: Опрос через refetchInterval в TanStack Query
+      why: Нормально для редких обновлений, когда задержка в секунды не важна. Для плавного прогресса это частые пустые запросы и рывки.
+  answer: 0
+- id: sse-eventsource-missing-close
+  skill: eventsource-lifecycle
+  question: sse-vs-websocket
+  difficulty: 2
+  prompt: Пользователь несколько раз переключается между аккаунтами (меняется userId). Найдите ошибку.
+  explanation: "Эффект открывает соединение, но не закрывает его. После смены userId или размонтирования старый EventSource продолжает жить и переподключаться. Чужие события попадают в state, а в HTTP/1.1 быстро упираемся в лимит соединений к домену (около 6). Правило: return () => source.close()."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Notifications({ userId }: Props) {
+      const [items, setItems] = useState<Note[]>([]);
+      useEffect(() => {
+        const source = new EventSource(
+          `/api/notifications?user=${userId}`
+        );
+        source.onmessage = (e) => {
+          const note = JSON.parse(e.data);
+          setItems((prev) => [note, ...prev]);
+        };
+      }, [userId]);
+      return <List items={items} />;
+    }
+  bugLines:
+    - 11
+  causes:
+    - "Нет cleanup с source.close(): старые соединения остаются открытыми и продолжают слать события прошлого пользователя"
+    - EventSource нужно создавать вне useEffect, иначе он не переподключится при обрыве
+    - "JSON.parse лишний: EventSource уже отдаёт в e.data разобранный объект"
+    - Нужен обработчик onerror с ручным переподключением, иначе поток оборвётся навсегда
+  answer: 0
+- id: sse-named-events-progress
+  skill: eventsource-lifecycle
+  question: sse-vs-websocket
+  difficulty: 2
+  prompt: "Сервер шлёт события с полями `event: progress` и `event: done`. Допишите код так, чтобы после завершения задачи браузер не переподключался."
+  explanation: Именованные события ловятся через addEventListener('имя'), а onmessage получает только события без поля event. Когда сервер закрывает поток, EventSource сам переподключается. Поэтому по событию done клиент должен вызвать close() (или сервер должен ответить 204).
+  type: fill-tokens
+  language: tsx
+  code: |-
+    useEffect(() => {
+      const source = new ___('/api/jobs/42/events');
+      source.addEventListener('___', (e) => {
+        setProgress(JSON.parse(e.data).percent);
+      });
+      source.addEventListener('done', () => {
+        source.___();
+      });
+      return () => source.close();
+    }, []);
+  tokens:
+    - EventSource
+    - progress
+    - close
+  decoys:
+    - WebSocket
+    - message
+    - abort
+    - disconnect
+
+# websocket-auth: принято из черновика 2026-11-07
+- id: websocket-auth-browser-limits
+  skill: websocket-auth-transport
+  question: websocket-auth
+  difficulty: 2
+  prompt: Браузерный клиент должен аутентифицировать WebSocket-соединение токеном. Какое утверждение верно?
+  explanation: "Браузерный `new WebSocket(url, protocols)` не принимает заголовки. Поэтому токен передают иначе: query-параметром (риск попасть в логи), через subprotocol, через cookie того же домена или первым сообщением после `onopen`. Сервер должен обрабатывать истечение токена и в уже открытом соединении."
+  type: quiz
+  options:
+    - label: Браузерный WebSocket не даёт задать свои заголовки — токен передают через URL, subprotocol, cookie или первым сообщением
+      why: Верно. Хендшейк формирует браузер, и Authorization туда не добавить. Остаются обходные каналы, у каждого свои компромиссы.
+    - label: "Заголовок можно передать вторым аргументом: new WebSocket(url, { headers: { Authorization } })"
+      why: Так умеет Node-библиотека ws. В браузере второй аргумент — список subprotocol-ов, объект с headers там не поддерживается.
+    - label: "Аутентификация не нужна: wss шифрует соединение, и посторонний не сможет к нему подключиться"
+      why: Шифрование защищает трафик от перехвата, но не говорит серверу, кто подключился. Подключиться к открытому эндпоинту может кто угодно.
+    - label: "Достаточно проверить токен на хендшейке: пока соединение открыто, пользователь считается авторизованным"
+      why: Соединение может жить часами, и токен успеет истечь. Сервер должен перепроверять токен или закрывать соединение кодом, требующим переавторизации.
+  answer: 0
+- id: websocket-auth-cross-domain-choice
+  skill: websocket-auth-transport
+  question: websocket-auth
+  difficulty: 2
+  prompt: "SPA работает на app.example.com, WebSocket-сервер — на realtime.other.io. Access-токен хранится в памяти. Безопасники запрещают передавать секреты в URL: URL пишутся в логи прокси. Как аутентифицировать соединение?"
+  explanation: Выбирайте канал по условиям. Тот же домен и сессия в cookie — полагайтесь на cookie и проверяйте Origin. Секреты в URL запрещены — подключайтесь без токена и отправляйте его первым сообщением. Остальные данные шлите только после подтверждения от сервера.
+  type: choose-tool
+  options:
+    - label: Подключиться без токена, в onopen отправить его первым сообщением и ждать подтверждения
+      why: Токен не попадает в URL и логи, домен не важен. Главное — не слать другие данные, пока сервер не ответит, что авторизация прошла.
+    - label: "Передать токен в query: wss://realtime.other.io/ws?token=..."
+      why: Самый простой способ, но URL оседает в логах сервера и прокси. Терпимо разве что для короткоживущего одноразового токена, а здесь прямо запрещено.
+    - label: "Положиться на cookie: браузер сам приложит её к хендшейку"
+      why: Подходит, когда домен совпадает и сессия уже в cookie. Здесь другой сайт и токен в памяти, так что нужной cookie у хендшейка не будет.
+    - label: "Добавить заголовок Authorization: Bearer в new WebSocket"
+      why: Браузерный конструктор не позволяет задавать заголовки. Такое возможно только в Node-клиентах (например, в библиотеке ws).
+  answer: 0
+- id: websocket-auth-first-message-flow
+  skill: websocket-auth-handshake-flow
+  question: websocket-auth
+  difficulty: 2
+  prompt: "Расставьте шаги клиента: авторизация первым сообщением и переподключение после истечения токена."
+  explanation: Пока сервер не подтвердил авторизацию, исходящие сообщения копятся в буфере, иначе они уйдут неавторизованными. Истёкший токен сервер обозначает прикладным кодом закрытия (4000–4999). Клиент сначала получает свежий токен и только потом переподключается — иначе повторит ту же ошибку.
+  type: order
+  kind: recipe
+  steps:
+    - Открыть WebSocket без токена в URL
+    - "В onopen отправить сообщение { type: 'auth', token }"
+    - Буферизовать исходящие сообщения до ответа auth_ok
+    - Получив auth_ok, отправить накопленные сообщения
+    - При закрытии с кодом «токен истёк» получить новый токен
+    - Переподключиться и снова пройти авторизацию
+- id: websocket-auth-expired-reconnect
+  skill: websocket-token-expiry
+  question: websocket-auth
+  difficulty: 2
+  prompt: Сервер закрывает соединение кодом 4001, когда токен истёк. Клиент после этого бесконечно переподключается и снова получает 4001. Где ошибка?
+  explanation: Код 4001 означает, что нужна переавторизация, а не просто переподключение. Замыкание держит старый токен, поэтому каждая попытка снова получает отказ. Сначала обновите токен, например `refreshToken().then(connect)`, и только потом подключайтесь.
+  type: find-bug
+  language: tsx
+  code: |-
+    function connect(token: string) {
+      const ws = new WebSocket(WS_URL);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'auth', token }));
+      };
+      ws.onclose = (e) => {
+        if (e.code === 4001) {
+          setTimeout(() => connect(token), 1000);
+        }
+      };
+      return ws;
+    }
+  bugLines:
+    - 8
+  causes:
+    - Переподключение идёт со старым, уже истёкшим токеном — сначала нужно получить новый
+    - Токен нужно отправлять в onmessage, а не в onopen — до первого сообщения сервер не готов
+    - Коды 4000–4999 зарезервированы протоколом, поэтому клиент получает не тот код
+    - Старый сокет не закрыт, и новое соединение конфликтует с ним
+  answer: 0
+
+# fetch-streaming: принято из черновика 2026-11-07
+- id: fetch-streaming-body-quiz
+  skill: fetch-readable-stream
+  question: fetch-streaming
+  difficulty: 2
+  prompt: Сервер отдаёт большой CSV по частям. Как в браузере обрабатывать данные по мере прихода, а не после полной загрузки?
+  explanation: "`response.body` — это `ReadableStream<Uint8Array>`. Каждый `read()` отдаёт очередной чанк, а в конце возвращает `done: true`. Методы `json()`, `text()` и `blob()` сначала дочитывают поток до конца. Подходит любой HTTP-ответ, который сервер отправляет частями. SSE или WebSocket для этого не нужны."
+  type: quiz
+  options:
+    - label: "Взять `res.body.getReader()` и в цикле вызывать `read()`: каждый вызов вернёт чанк байтов, как только он придёт"
+      why: "Верно. body — ReadableStream байтов, reader отдаёт чанки по мере прихода, а done: true сигнализирует о конце потока."
+    - label: "Периодически вызывать `await res.text()`: каждый вызов вернёт новую порцию пришедшего текста"
+      why: "text() ждёт весь поток и возвращает его целиком. Повторный вызов упадёт с ошибкой: тело ответа уже прочитано."
+    - label: Читать `res.body` как строку, которая дополняется по мере загрузки, и смотреть её длину
+      why: body — это не строка, а ReadableStream с бинарными чанками Uint8Array. Текст получают через TextDecoder.
+    - label: "Через fetch так нельзя: частичная обработка возможна только через EventSource или WebSocket"
+      why: Заблуждение. fetch умеет читать любой ответ, который сервер отправляет частями. SSE — лишь один из форматов поверх такого потока.
+  answer: 0
+- id: fetch-streaming-utf8-split
+  skill: stream-text-decoding
+  question: fetch-streaming
+  difficulty: 3
+  prompt: На английском тексте функция работает, а в русском изредка появляются символы �. Найдите ошибку.
+  explanation: "Кириллица в UTF-8 занимает 2 байта, и граница чанка может разрезать символ. Без `{ stream: true }` каждый вызов `decode()` считается законченным, и неполные байты превращаются в �. В потоковом режиме декодер хранит хвост до следующего чанка. В конце нужен вызов `decode()` без аргументов, чтобы сбросить остаток."
+  type: find-bug
+  language: tsx
+  code: |-
+    async function readText(res: Response) {
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value);
+      }
+      return text + decoder.decode();
+    }
+  bugLines:
+    - 8
+  causes:
+    - "decode без { stream: true } считает чанк законченным, и многобайтовый символ на границе чанков ломается"
+    - TextDecoder по умолчанию использует latin1, нужно передать 'utf-8' в конструктор
+    - Нужно проверять value === undefined вместо done, иначе последний чанк теряется
+    - reader.read() возвращает строки, поэтому decode повторно портит уже готовый текст
+  answer: 0
+- id: fetch-streaming-ndjson-lines
+  skill: stream-line-parsing
+  question: fetch-streaming
+  difficulty: 3
+  prompt: "Соберите построчное чтение NDJSON-потока: каждую готовую строку нужно разобрать и передать в onItem."
+  explanation: "`TextDecoderStream` решает проблему разрезанных UTF-8 символов, но строки всё равно могут прийти разорванными по чанкам. Поэтому последний, возможно неполный, кусок после split остаётся в buffer до следующего чанка. После выхода из цикла разбирают остаток. `res.json()` здесь не подходит: он ждёт конца потока, и стриминг теряет смысл."
+  type: parsons
+  language: ts
+  lines:
+    - const stream = res.body!
+    - "  .pipeThrough(new TextDecoderStream());"
+    - const reader = stream.getReader(); let buffer = '';
+    - while (true) {
+    - "  const { done, value } = await reader.read();"
+    - "  if (done) break;"
+    - "  buffer += value;"
+    - "  const lines = buffer.split('\\n');"
+    - "  buffer = lines.pop()!;"
+    - "  for (const l of lines) if (l) onItem(JSON.parse(l));"
+    - "}"
+    - if (buffer) onItem(JSON.parse(buffer));
+  distractors:
+    - "  const lines = value.split('\\n');"
+    - const items = await res.json();
+    - "  buffer = '';"
+- id: fetch-streaming-llm-post
+  skill: streaming-transport-choice
+  question: fetch-streaming
+  difficulty: 3
+  prompt: "Чат с LLM: клиент отправляет POST с историей сообщений в теле и заголовком Authorization, а ответ нужно выводить по токенам по мере генерации. Что выбрать на клиенте?"
+  explanation: Ответ идёт в одну сторону и инициирован запросом с телом, поэтому `fetch` + чтение `res.body` подходит лучше всего. EventSource даёт авто-переподключение и разбор событий, но работает только с GET и без своих заголовков. WebSocket нужен для постоянного двустороннего обмена.
+  type: choose-tool
+  options:
+    - label: fetch POST + чтение res.body через getReader / pipeThrough
+      why: Можно отправить тело и любые заголовки, а токены читать из потока по мере прихода. Формат (SSE-строки или NDJSON) разбирается вручную.
+    - label: EventSource
+      why: Хорош для подписки на события по GET с авто-переподключением, но не умеет отправлять POST-тело и задавать заголовки вроде Authorization.
+    - label: WebSocket
+      why: Оправдан для постоянного двустороннего канала (совместное редактирование, игры). Для разового стрима ответа это лишний протокол и инфраструктура.
+    - label: fetch + await res.json()
+      why: "Ждёт окончания генерации и отдаёт ответ целиком: пользователь видит пустой экран, пока модель пишет. Подходит только без стриминга."
+  answer: 0
+
+# websocket-binary-data: принято из черновика 2026-11-07
+- id: websocket-binary-type-quiz
+  skill: websocket-binary-type
+  question: websocket-binary-data
+  difficulty: 2
+  prompt: Что именно меняет присваивание `ws.binaryType = 'arraybuffer'`?
+  explanation: "`binaryType` — настройка только приёма. Она задаёт тип `event.data` для входящих бинарных кадров: `Blob` по умолчанию или `ArrayBuffer`. Текстовые кадры всегда приходят строкой, а `send()` и так принимает строку, `Blob`, `ArrayBuffer` или типизированный массив."
+  type: quiz
+  options:
+    - label: Входящие бинарные сообщения придут в `event.data` как ArrayBuffer, а не Blob — байты можно читать синхронно
+      why: Верно. Это влияет только на представление входящих бинарных кадров. С Blob пришлось бы асинхронно читать данные через `arrayBuffer()` или FileReader.
+    - label: Все исходящие сообщения, включая строки, будут отправляться как бинарные кадры
+      why: "Неверно. Тип исходящего кадра определяется аргументом `send()`: строка уходит текстовым кадром, буфер — бинарным. `binaryType` на отправку не влияет."
+    - label: Текстовые сообщения от сервера тоже начнут приходить как ArrayBuffer
+      why: Неверно. Текстовые кадры всегда приходят строкой. Поэтому в `onmessage` обычно проверяют `instanceof ArrayBuffer`.
+    - label: "Это согласование формата с сервером: без него сервер не сможет слать бинарные данные"
+      why: Неверно. Свойство локальное и никуда не передаётся. Сервер может слать бинарные кадры при любом значении, меняется лишь их тип на клиенте.
+  answer: 0
+- id: websocket-binary-type-missing
+  skill: websocket-binary-type
+  question: websocket-binary-data
+  difficulty: 2
+  prompt: "Сервер шлёт бинарные кадры: 1 байт типа и две координаты float32. Найдите строку, на которой обработчик упадёт."
+  explanation: "`binaryType` по умолчанию равен `'blob'`, поэтому `event.data` — это Blob. Конструктор DataView принимает только ArrayBuffer и бросает TypeError. Если байты нужно разбирать синхронно, сразу после создания сокета выставьте `ws.binaryType = 'arraybuffer'`."
+  type: find-bug
+  language: tsx
+  code: |-
+    const ws = new WebSocket(url);
+    ws.onmessage = (event) => {
+      const view = new DataView(event.data);
+      const type = view.getUint8(0);
+      const x = view.getFloat32(1);
+      const y = view.getFloat32(5);
+      onCursor(type, x, y);
+    };
+  bugLines:
+    - 3
+  causes:
+    - event.data — Blob, потому что binaryType по умолчанию 'blob', а DataView принимает только ArrayBuffer
+    - getFloat32 по умолчанию читает little-endian, поэтому координаты некорректны и вызов падает
+    - "Смещение 5 выходит за границы: две float32 после байта типа не помещаются в кадр"
+    - onmessage нельзя назначать до события open — первые сообщения теряются с ошибкой
+  answer: 0
+- id: websocket-binary-send-receive
+  skill: websocket-binary-type
+  question: websocket-binary-data
+  difficulty: 2
+  prompt: "Допишите код: бинарные кадры нужно разбирать синхронно как байты, текстовые — как JSON, а строку отправить бинарным кадром."
+  explanation: "`binaryType = 'arraybuffer'` даёт ArrayBuffer вместо Blob. Проверка `instanceof ArrayBuffer` отделяет бинарные кадры от текстовых, которые всегда приходят строкой. TextEncoder кодирует строку в байты UTF-8 (Uint8Array), и `send()` отправляет их бинарным кадром. TextDecoder делает обратное."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    ws.binaryType = '___';
+    ws.onmessage = (event) => {
+      if (event.data instanceof ___) {
+        const bytes = new Uint8Array(event.data);
+        handleFrame(bytes);
+      } else {
+        handleJson(JSON.parse(event.data));
+      }
+    };
+
+    const bytes = new ___().encode(text);
+    ws.send(bytes);
+  tokens:
+    - arraybuffer
+    - ArrayBuffer
+    - TextEncoder
+  decoys:
+    - blob
+    - Blob
+    - TextDecoder
+    - FileReader
+- id: websocket-binary-protocol-choice
+  skill: websocket-binary-protocol-choice
+  question: websocket-binary-data
+  difficulty: 3
+  prompt: "Совместный редактор: каждый из 50 участников ~30 раз в секунду шлёт координаты курсора. Трафик и нагрузка на сервер стали узким местом. Что выбрать?"
+  explanation: "Бинарный протокол оправдан, когда сообщения мелкие, частые и трафик реально критичен. Платой будет отладка: кадры не прочитать во вкладке Network, поэтому нужно логирование декодированного вида. Для редких и разнородных сообщений обычно остаются на JSON."
+  type: choose-tool
+  options:
+    - label: "Компактный бинарный формат: Protobuf или свой layout в ArrayBuffer"
+      why: Лучший выбор. Координата укладывается в несколько байт вместо десятков символов JSON с ключами, а разбор через DataView дешёвый.
+    - label: Оставить JSON как есть
+      why: "Подходит, когда сообщения редкие и трафик не критичен: JSON читается глазами в Network и прост в отладке. Здесь же ключи и числа текстом многократно раздувают поток."
+    - label: Сжатие permessage-deflate поверх JSON
+      why: Хорошо работает на крупных повторяющихся текстовых сообщениях. На крошечных частых кадрах выигрыш скромный, а CPU тратится на каждый кадр.
+    - label: Бинарные данные в Base64 внутри JSON
+      why: Уместно лишь там, где канал понимает только текст. Base64 увеличивает размер примерно на треть, так что трафик только вырастет.
+  answer: 0
+
+# websocket-scaling: принято из черновика 2026-11-07
+- id: websocket-scaling-core-problem
+  skill: websocket-stateful-connections
+  question: websocket-scaling
+  difficulty: 2
+  prompt: Почему WebSocket-сервер нельзя масштабировать так же просто, как stateless REST API за round-robin балансировщиком?
+  explanation: "Открытый сокет — состояние, привязанное к одному процессу. Чтобы масштабироваться, нужно ответить на два вопроса: как клиент попадает на инстанс (sticky sessions или любой) и как событие доходит до инстанса с нужным сокетом. Ответ на второй — pub/sub-брокер: Redis Pub/Sub или NATS."
+  type: quiz
+  options:
+    - label: Соединение — долгоживущее состояние на конкретном инстансе, а событие для клиента может возникнуть там, где его сокета нет
+      why: "Верно. Сокет нельзя переселить на другой инстанс, поэтому нужен путь доставки: брокер, который доносит событие до инстанса с соединением."
+    - label: Балансировщики не умеют проксировать WebSocket, поэтому нужен отдельный шлюз
+      why: Nginx, HAProxy и ALB проксируют Upgrade-запросы. Проблема не в проксировании, а в том, где живёт соединение после установки.
+    - label: "Хватит sticky sessions: клиент всегда попадает на свой инстанс, и все события до него дойдут"
+      why: Sticky помогает при переподключении, но событие из REST-запроса другого пользователя родится на другом инстансе. А при рестарте соединения рвутся разом.
+    - label: Балансировщик может отправить каждое сообщение на любой свободный инстанс, как обычный HTTP-запрос
+      why: Сообщения идут внутри уже открытого TCP-соединения с одним инстансом. Перенаправить их без разрыва нельзя.
+  answer: 0
+- id: websocket-scaling-cross-instance-delivery
+  skill: websocket-scaling-choice
+  question: websocket-scaling
+  difficulty: 2
+  prompt: Чат на 4 инстансах Node за балансировщиком. Сообщение создаётся REST-запросом, который может попасть на любой инстанс, а получатель подключён по WebSocket к другому. Как доставить сообщение?
+  explanation: "Правило: сокеты храним локально, события распределяем через брокер. Sticky sessions — опциональное дополнение для привязки клиента, а не способ доставки «чужих» событий. Опрос БД — только временный fallback."
+  type: choose-tool
+  options:
+    - label: Redis Pub/Sub (или NATS) между инстансами
+      why: Инстанс-отправитель публикует событие в канал, а инстанс с сокетом получателя подписан на него и пересылает сообщение. Любой инстанс обслуживает любой запрос.
+    - label: Sticky sessions на балансировщике
+      why: Закрепляют клиента за инстансом при переподключении, но REST-запрос другого пользователя всё равно попадёт не туда. Полезны как дополнение, например для long-polling fallback.
+    - label: Общая Map сокетов в памяти процесса
+      why: Map видна только своему процессу, а сокет — живой объект, который в другой инстанс не передать. Подходит как локальный реестр или при одном инстансе.
+    - label: Клиенты опрашивают БД каждые 2 секунды
+      why: Работает при любом числе инстансов, но даёт задержку, нагружает БД и обесценивает WebSocket. Разумно лишь как временный fallback.
+  answer: 0
+- id: websocket-scaling-pubsub-flow
+  skill: websocket-pubsub-fanout
+  question: websocket-scaling
+  difficulty: 2
+  prompt: Пользователь B отправил сообщение через REST, запрос попал на инстанс 2, а сокет пользователя A открыт на инстансе 1. Расставьте шаги доставки по порядку.
+  explanation: "Инстанс 2 не знает, где подключён A, и не должен знать: он лишь публикует событие. Брокер раздаёт его подписчикам, а отправляет в сокет только тот инстанс, у которого соединение есть в локальном реестре. Остальные инстансы событие игнорируют."
+  type: order
+  kind: timeline
+  steps:
+    - Инстанс 1 при подключении A кладёт сокет в локальную Map и подписан на канал в Redis
+    - REST-запрос от B попадает на инстанс 2
+    - Инстанс 2 сохраняет сообщение и публикует событие в канал Redis
+    - Redis рассылает событие всем подписчикам канала
+    - Инстанс 1 получает событие и находит сокет A в своей Map
+    - Инстанс 1 вызывает ws.send, и A видит сообщение
+- id: websocket-scaling-local-only-send
+  skill: websocket-pubsub-fanout
+  question: websocket-scaling
+  difficulty: 2
+  prompt: Сервер запущен в 3 инстансах. Иногда получатели не видят новые сообщения, хотя POST /messages отвечает 202. Найдите строку с ошибкой.
+  explanation: "`sockets` содержит только соединения своего процесса. Если получатель подключён к другому инстансу, `sockets.get(to)` вернёт undefined, и сообщение молча потеряется. Нужно `pub.publish('chat', JSON.stringify({ to, text }))`: подписчик на нужном инстансе сам отправит его в сокет."
+  type: find-bug
+  language: ts
+  code: |-
+    const sockets = new Map<string, WebSocket>();
+    const sub = new Redis();
+    const pub = new Redis();
+    sub.subscribe('chat');
+    sub.on('message', (_ch, raw) => {
+      const { to, text } = JSON.parse(raw);
+      sockets.get(to)?.send(text);
+    });
+
+    app.post('/messages', (req, res) => {
+      const { to, text } = req.body;
+      sockets.get(to)?.send(text);
+      res.sendStatus(202);
+    });
+  bugLines:
+    - 12
+  causes:
+    - POST отправляет только в локальный сокет; если получатель подключён к другому инстансу, сообщение теряется — нужен pub.publish
+    - Для публикации и подписки нельзя использовать два разных подключения к Redis
+    - Обработчик message задваивает сообщения для клиентов этого инстанса
+    - Реестр сокетов нельзя держать в памяти процесса — его нужно хранить в Redis
+  answer: 0
+
+# websocket-backpressure: принято из черновика 2026-11-07
+- id: websocket-order-vs-delivery-quiz
+  skill: websocket-delivery-guarantees
+  question: websocket-backpressure
+  difficulty: 2
+  prompt: Что верно про порядок и доставку сообщений в WebSocket?
+  explanation: "Порядок в WebSocket обеспечивает TCP, но только в пределах одного соединения. Сообщения, отправленные во время разрыва, просто теряются. Досылку должен обеспечить протокол приложения, например через seq и lastSeq. Буфер отправки тоже растёт без ограничений: решать, что отбрасывать, должен ваш код по `bufferedAmount`."
+  type: quiz
+  options:
+    - label: В одном соединении порядок гарантирован TCP, но сообщения во время разрыва теряются, если протокол не умеет их досылать
+      why: Верно. Гарантия порядка и гарантия доставки через разрывы — разные вещи. Вторую должно обеспечить приложение.
+    - label: "WebSocket гарантирует порядок и доставку: после реконнекта браузер сам дошлёт пропущенные сообщения"
+      why: Новое соединение ничего не знает о старом. Ни браузер, ни стандарт WebSocket не хранят и не досылают пропущенное.
+    - label: Порядок не гарантирован даже внутри соединения, поэтому клиент обязан сортировать сообщения по seq
+      why: WebSocket работает поверх TCP, а TCP доставляет данные упорядоченно. seq нужен для досылки и дедупликации после реконнекта, а не для сортировки.
+    - label: При перегрузке канала браузер сам отбрасывает старые сообщения, чтобы буфер не рос
+      why: "Браузер ничего не отбрасывает: он буферизует, и `bufferedAmount` растёт. Решать, что пропустить, должно приложение."
+  answer: 0
+- id: websocket-reconnect-without-resume
+  skill: websocket-resume-protocol
+  question: websocket-backpressure
+  difficulty: 3
+  prompt: Сервер нумерует сообщения полем seq и умеет досылать пропущенные, начиная с переданного номера. Найдите строку, из-за которой после переподключения клиент теряет события.
+  explanation: "Клиент честно запоминает lastSeq, но при подписке его не отправляет. Сервер не знает, с какого места досылать, и всё, что пришло во время разрыва, теряется. Правило: при реконнекте передавай позицию последнего применённого сообщения, например `{ op: 'sub', since: lastSeq }`."
+  type: find-bug
+  language: ts
+  code: |-
+    let lastSeq = 0;
+
+    function connect() {
+      const ws = new WebSocket(WS_URL);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ op: 'sub' }));
+      };
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        apply(msg);
+        lastSeq = msg.seq;
+      };
+      ws.onclose = () => setTimeout(connect, 1000);
+    }
+  bugLines:
+    - 6
+  causes:
+    - При подписке не передаётся lastSeq — сервер не знает, с какого сообщения досылать пропущенное
+    - lastSeq нужно сбрасывать в 0 при каждом новом соединении
+    - Сообщения могут прийти не по порядку, поэтому их надо сортировать по seq перед apply
+    - Вызов connect из onclose через setTimeout создаёт утечку соединений
+  answer: 0
+- id: websocket-cursor-backpressure-guard
+  skill: websocket-backpressure
+  question: websocket-backpressure
+  difficulty: 2
+  prompt: "Допишите отправку позиции курсора так, чтобы при закрытом соединении или переполненном буфере обновление просто пропускалось: следующее всё равно скоро придёт."
+  explanation: В состоянии CONNECTING `send` бросает InvalidStateError, а в CLOSING/CLOSED данные молча теряются, поэтому сначала проверяем OPEN. `bufferedAmount` показывает, сколько байт ещё не ушло в сеть. Если значение большое, заменяемые данные вроде курсора лучше отбросить, иначе задержка накопится и UI получит устаревшие позиции. Важные сообщения так терять нельзя.
+  type: fill-tokens
+  language: ts
+  code: |-
+    function sendCursor(x: number, y: number) {
+      if (ws.readyState !== WebSocket.___) return;
+      if (ws.___ > 64_000) return;
+      ws.___(JSON.stringify({ t: 'cursor', x, y }));
+    }
+  tokens:
+    - OPEN
+    - bufferedAmount
+    - send
+  decoys:
+    - CONNECTING
+    - bufferSize
+    - postMessage
+    - highWaterMark
+- id: websocket-resume-protocol-recipe
+  skill: websocket-resume-protocol
+  question: websocket-backpressure
+  difficulty: 3
+  prompt: Расставьте шаги протокола, который не теряет сообщения при переподключении WebSocket.
+  explanation: Устойчивость к разрывам строится на уровне приложения. Сообщения нумеруются, клиент помнит позицию и сообщает её при реконнекте. Сервер досылает хвост или, если буфер его уже не хранит, отдаёт снапшот. Дедупликация по seq делает повторную доставку безопасной.
+  type: order
+  kind: recipe
+  steps:
+    - Сервер присваивает каждому сообщению возрастающий seq и хранит последние N в буфере
+    - Клиент после применения сообщения запоминает его seq как lastSeq
+    - При реконнекте клиент передаёт lastSeq в запросе подписки
+    - Сервер досылает сообщения с seq > lastSeq, а если их уже нет в буфере — отправляет полный снапшот
+    - Клиент игнорирует сообщения с seq ≤ lastSeq как дубликаты

@@ -8,6 +8,7 @@ import { checkAnswer, formatDuration, plural, shuffle, TIMER_MODE_OPTIONS, type 
 import { QUESTIONS } from '../data/questions';
 import { quizByQuestion } from '../data/quizzes';
 import { burst, celebrate } from '../lib/confetti';
+import { isPromoted, recordQuizAnswer } from '../lib/promotion';
 import { useElapsedSeconds } from '../lib/timer';
 
 type Grade = 'know' | 'partial' | 'dont';
@@ -116,8 +117,8 @@ export function PracticePage() {
           questions={state.questions}
           grades={state.grades}
           answerMode={state.answerMode}
-          onRetry={(questions) =>
-            dispatch({ type: 'start', questions: shuffle(questions), timer: state.timer, answerMode: state.answerMode })
+          onRetry={(questions, answerMode) =>
+            dispatch({ type: 'start', questions: shuffle(questions), timer: state.timer, answerMode: answerMode ?? state.answerMode })
           }
           onReset={() => dispatch({ type: 'reset' })}
         />
@@ -297,7 +298,8 @@ function PracticeRun({
   dispatch: React.Dispatch<Action>;
 }) {
   const question = state.questions[state.index];
-  const quiz = state.answerMode === 'quiz' ? quizByQuestion.get(question.slug) : undefined;
+  const promoted = state.answerMode === 'quiz' && isPromoted(question);
+  const quiz = state.answerMode === 'quiz' && !promoted ? quizByQuestion.get(question.slug) : undefined;
   const limit = TIMER_MODE_OPTIONS.find((t) => t.id === state.timer)!.seconds;
   const elapsed = useElapsedSeconds(state.questionStartedAt, !state.revealed);
   const remaining = limit - elapsed;
@@ -350,10 +352,13 @@ function PracticeRun({
           quiz={quiz}
           revealed={state.revealed}
           onReveal={() => dispatch({ type: 'reveal' })}
-          onNext={(correct) => dispatch({ type: 'grade', grade: correct ? 'know' : 'dont' })}
+          onNext={(correct) => {
+            recordQuizAnswer(question, correct);
+            dispatch({ type: 'grade', grade: correct ? 'know' : 'dont' });
+          }}
         />
       ) : (
-        <FreeCard key={question.slug} question={question} revealed={state.revealed} dispatch={dispatch} />
+        <FreeCard key={question.slug} question={question} revealed={state.revealed} promoted={promoted} dispatch={dispatch} />
       )}
     </div>
   );
@@ -362,13 +367,18 @@ function PracticeRun({
 function FreeCard({
   question,
   revealed,
+  promoted,
   dispatch,
 }: {
   question: Question;
   revealed: boolean;
+  promoted?: boolean;
   dispatch: React.Dispatch<Action>;
 }) {
   const [showDetails, setShowDetails] = useState(false);
+  const [hint, setHint] = useState(false);
+  const quiz = quizByQuestion.get(question.slug);
+  const [hintOrder] = useState(() => (quiz ? shuffle(quiz.options.map((_, i) => i)) : []));
 
   return (
     <section className="flashcard">
@@ -377,14 +387,34 @@ function FreeCard({
         <TopicTag topic={question.topic} />
         <span className="flashcard__num">№{question.number}</span>
       </div>
+      {promoted && !revealed && (
+        <p className="promoted-note">Этот вопрос уже легко узнаётся среди вариантов — попробуйте сформулировать сами</p>
+      )}
       <h1 className="flashcard__title">{question.title}</h1>
 
       {!revealed ? (
         <div className="flashcard__prompt">
           <p>Сформулируйте ответ: определение, зачем это нужно, пример и подводные камни.</p>
-          <button type="button" className="btn btn--primary" onClick={() => dispatch({ type: 'reveal' })}>
-            Показать ответ <kbd>Пробел</kbd>
-          </button>
+          <div className="flashcard__prompt-actions">
+            <button type="button" className="btn btn--primary" onClick={() => dispatch({ type: 'reveal' })}>
+              Показать ответ <kbd>Пробел</kbd>
+            </button>
+            {quiz && !hint && (
+              <button type="button" className="btn btn--secondary" onClick={() => setHint(true)}>
+                Подсказать варианты ответа
+              </button>
+            )}
+          </div>
+          {hint && quiz && (
+            <div className="hint-options">
+              <p className="hint-options__label">Один из вариантов — то, что нужно вспомнить:</p>
+              <ul>
+                {hintOrder.map((i) => (
+                  <li key={i}><Inline text={quiz.options[i].label} /></li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       ) : (
         <div className="flashcard__answer">
@@ -505,7 +535,7 @@ function PracticeResults({
   questions: Question[];
   grades: Record<string, Grade>;
   answerMode: AnswerMode;
-  onRetry: (questions: Question[]) => void;
+  onRetry: (questions: Question[], answerMode?: AnswerMode) => void;
   onReset: () => void;
 }) {
   const count = (g: Grade) => questions.filter((q) => grades[q.slug] === g).length;
@@ -568,6 +598,11 @@ function PracticeResults({
         {weak.length > 0 && (
           <button type="button" className="btn btn--primary" onClick={() => onRetry(weak)}>
             Повторить {weak.length} {plural(weak.length, ['слабый вопрос', 'слабых вопроса', 'слабых вопросов'])}
+          </button>
+        )}
+        {weak.length > 0 && answerMode === 'quiz' && (
+          <button type="button" className="btn btn--secondary" onClick={() => onRetry(weak, 'free')}>
+            Повторить своими словами
           </button>
         )}
         <button type="button" className="btn btn--secondary" onClick={onReset}>Новая тренировка</button>

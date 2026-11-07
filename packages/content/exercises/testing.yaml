@@ -635,3 +635,101 @@
     - label: "Замокать useQuery через vi.mock и вернуть { isError: true }"
       why: "Тогда тест проверяет мок, а не хук: ключ запроса, queryFn и обработка ответа не участвуют. Подходит, только если тестируется компонент поверх хука."
   answer: 0
+
+# testing-redux: принято из черновика 2026-11-07
+- id: testing-redux-thunk-approach
+  skill: redux-thunk-integration-test
+  question: testing-redux
+  difficulty: 2
+  prompt: Как надёжнее всего протестировать `createAsyncThunk` `fetchTodos`, который ходит в API и кладёт список в слайс?
+  explanation: "Thunk рассчитан на `dispatch` через store с middleware. Интеграционный тест проверяет поведение: запрос ушёл, `pending`/`fulfilled` отработали, состояние обновилось. Мокать нужно границу с внешним миром, то есть сеть, а не сам Redux. Тесты отдельных веток редьюсера полезны, но это дополнение."
+  type: quiz
+  options:
+    - label: Создать store через `configureStore`, замокать сеть через MSW, сделать `await store.dispatch(fetchTodos())` и проверить state
+      why: Верно. Работают реальные thunk, middleware и редьюсеры, подменена только сеть. Тест проверяет поведение приложения, а не детали реализации.
+    - label: Вызвать `await fetchTodos()` как обычную async-функцию и проверить результат
+      why: "`fetchTodos()` возвращает thunk-функцию, а не промис с данными. Ей нужны `dispatch` и `getState` из store, без них проверять нечего."
+    - label: Замокать `@reduxjs/toolkit` через `vi.mock` и проверить, что thunk вызван с нужными аргументами
+      why: Так тест проверяет собственные моки. Реальная логика thunk и редьюсеров не выполняется, и регрессию такой тест не поймает.
+    - label: Хватит прогнать редьюсер с вручную созданным `fetchTodos.fulfilled(payload, 'id')`
+      why: Так проверяется только ветка `extraReducers`. Запрос и формирование payload остаются непроверенными. Это дополнение к интеграционному тесту, а не замена.
+  answer: 0
+- id: testing-redux-thunk-store-fill
+  skill: redux-thunk-integration-test
+  question: testing-redux
+  difficulty: 2
+  prompt: "Допишите интеграционный тест thunk: тестовый store, диспатч и проверка итогового состояния. Сеть замокана через MSW."
+  explanation: "`configureStore` подключает thunk middleware по умолчанию. `dispatch` thunk возвращает промис, который резолвится после `fulfilled`/`rejected`: после `await` state уже финальный. `getState()` отдаёт текущий снимок. Legacy `createStore` без middleware thunk не задиспатчит."
+  type: fill-tokens
+  language: ts
+  code: |-
+    test('fetchTodos кладёт список в store', async () => {
+      server.use(
+        http.get('https://api.test/todos', () =>
+          HttpResponse.json([{ id: '1' }]),
+        ),
+      );
+      const store = ___({
+        reducer: { todos: todosReducer },
+      });
+      await store.___(fetchTodos());
+      const { items } = store.___().todos;
+      expect(items).toHaveLength(1);
+    });
+  tokens:
+    - configureStore
+    - dispatch
+    - getState
+  decoys:
+    - createStore
+    - createSlice
+    - subscribe
+    - unwrap
+- id: testing-redux-thunk-missing-await
+  skill: redux-thunk-integration-test
+  question: testing-redux
+  difficulty: 2
+  prompt: "Тест падает: ожидали `'succeeded'`, а получили `'loading'`. Найдите ошибку."
+  explanation: "`dispatch(thunk)` синхронно отправляет `pending` и возвращает промис, а ответ сети приходит позже. Без `await` проверка видит состояние после `pending`. Правило: тест thunk делаем `async` и ждём `await store.dispatch(...)`, а для UI используем `findBy`/`waitFor`."
+  type: find-bug
+  language: ts
+  code: |-
+    test('fetchTodos загружает список', () => {
+      server.use(
+        http.get('https://api.test/todos', () =>
+          HttpResponse.json([{ id: '1' }]),
+        ),
+      );
+      const store = configureStore({
+        reducer: { todos: todosReducer },
+      });
+      store.dispatch(fetchTodos());
+      const { status } = store.getState().todos;
+      expect(status).toBe('succeeded');
+    });
+  bugLines:
+    - 1
+    - 10
+  causes:
+    - "Тест синхронный, и `dispatch` не ожидается: состояние читается сразу после `pending`, до ответа сети"
+    - В `configureStore` нужно явно добавить thunk middleware, иначе thunk не выполнится
+    - MSW-обработчик нужно регистрировать после создания store, а не до
+    - "`getState()` возвращает начальное состояние, актуальное нужно брать через `subscribe`"
+  answer: 0
+- id: testing-redux-reducer-choice
+  skill: redux-reducer-unit-test
+  question: testing-redux
+  difficulty: 1
+  prompt: Нужно проверить, что редьюсер `toggled` из `createSlice` переключает `done` у задачи с нужным id и не трогает остальные. Как тестировать?
+  explanation: Редьюсер — чистая функция `(state, action) => state`. Самый быстрый и точный тест — вызвать её с подготовленным состоянием и action-creator'ом и сравнить через `toEqual`. Моки и окружение не нужны. Store и UI-тесты оставьте для сценариев с thunk и компонентами.
+  type: choose-tool
+  options:
+    - label: Вызвать `todosReducer(state, toggled('1'))` и сравнить результат через `toEqual`
+      why: "Лучший выбор: unit-тест чистой функции без моков и окружения. Он быстрый, детерминированный, и граничные случаи в нём легко перебрать."
+    - label: Тестовый store через `configureStore` + `dispatch` + `getState`
+      why: Сработает, но для синхронного редьюсера это лишний слой. Store нужен, когда в деле thunk, middleware или взаимодействие нескольких слайсов.
+    - label: Отрендерить компонент в `Provider` и кликнуть по чекбоксу через Testing Library
+      why: Это тест UI-сценария. Он нужен, чтобы проверить связку компонента со store, но для логики редьюсера он медленнее и хуже локализует ошибку.
+    - label: "`vi.mock('@reduxjs/toolkit')` и проверка, что action вызван"
+      why: "Мок RTK подменяет то, что тестируем: реальная логика редьюсера не выполнится. Мокают внешние границы вроде сети, а не сам Redux."
+  answer: 0

@@ -123,6 +123,31 @@
     - "`expect(await locator.isVisible()).toBe(true)` ждёт появления элемента так же, как `toBeVisible()`"
     - Лучшие селекторы — CSS-классы или XPath по структуре DOM
     - E2E-тестами нужно покрывать все сценарии и граничные случаи, а не только критичные пути
+- question: testing-redux
+  points:
+    - id: reducer-pure-function
+      text: Редьюсер из `createSlice` — чистая функция, поэтому его тестируют прямым вызовом `reducer(state, action)` и сравнением результата через `toEqual`, без моков и окружения
+      weight: 3
+    - id: reducer-initial-state-undefined
+      text: Начальное состояние можно получить, передав `undefined` первым аргументом (`reducer(undefined, added(todo))`), а action создаётся сгенерированным action creator-ом слайса
+      weight: 1
+    - id: thunk-via-real-store
+      text: "`createAsyncThunk` тестируют интеграционно: создают тестовый store через `configureStore`, диспатчат thunk и проверяют итоговое состояние после `pending`/`fulfilled`"
+      weight: 3
+    - id: mock-network-msw
+      text: Мокается сеть (`fetch`), например через MSW, а не сам Redux или внутренности thunk
+      weight: 2
+    - id: test-behavior-not-implementation
+      text: Такой тест проверяет реальное поведение (запрос ушёл, состояние обновилось), а не детали реализации thunk, поэтому устойчив к рефакторингу
+      weight: 2
+    - id: await-dispatch
+      text: "`dispatch` thunk возвращает промис, его нужно дождаться (`await store.dispatch(...)`) перед проверкой состояния"
+      weight: 1
+  misconceptions:
+    - Для теста редьюсера нужно поднимать store, рендерить компонент или мокать зависимости
+    - "`createAsyncThunk` можно протестировать, вызвав его как обычную функцию без `dispatch` через store"
+    - Правильно мокать сам Redux (`jest.mock('@reduxjs/toolkit')`) вместо мока сети
+    - Состояние после `dispatch` async thunk обновляется синхронно, и ждать завершения промиса не нужно
 - question: testing-strategy
   points:
     - id: integration-core

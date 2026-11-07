@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { QUESTIONS, searchQuestions } from './questions';
 
 test('вопросы загружаются через import.meta.glob', () => {
-  expect(QUESTIONS).toHaveLength(140);
+  expect(QUESTIONS).toHaveLength(180);
 });
 
 test('поиск ставит совпадения в заголовке первыми', () => {

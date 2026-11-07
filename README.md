@@ -1,6 +1,6 @@
 # React Refresher
 
-140 актуальных вопросов для собеседования на React-разработчика: 26 Junior, 60 Middle, 54 Senior.
+180 актуальных вопросов для собеседования на React-разработчика: 32 Junior, 82 Middle, 66 Senior.
 Обновлённая и расширенная версия списка «React JS: 50 вопросов на собеседование» (`docs/react-50-questions-old.pdf`)
 под React 19.2, Server Components и React Compiler.
 

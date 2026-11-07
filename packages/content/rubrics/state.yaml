@@ -23,6 +23,56 @@
     - Соседние компоненты могут передавать данные друг другу напрямую, минуя общего предка
     - Для синхронизации соседей нормально держать копию состояния в каждом и связывать их через `useEffect`
     - Context — единственный правильный способ избежать prop drilling и всегда лучше поднятия состояния
+- question: websocket-basics
+  points:
+    - id: persistent-bidirectional
+      text: После установки WebSocket-соединение остаётся открытым, и обе стороны — клиент и сервер — могут отправлять сообщения в любой момент без нового запроса на каждое
+      weight: 3
+    - id: http-request-response
+      text: Обычный HTTP-запрос — это пара «запрос → ответ», инициируемая клиентом; сервер не может сам отправить данные без запроса
+      weight: 3
+    - id: upgrade-handshake
+      text: "WebSocket начинается как HTTP-запрос с заголовком `Upgrade: websocket`, после рукопожатия протокол переключается"
+      weight: 2
+    - id: use-cases
+      text: "WebSocket нужен, когда сервер сам инициирует сообщения: чат, котировки, совместное редактирование, уведомления"
+      weight: 2
+    - id: polling-enough
+      text: Для редких обновлений проще и достаточно `fetch` по таймеру (polling); постоянное соединение оправдано только при высокой частоте событий и требованиях к задержке
+      weight: 1
+    - id: close-on-unmount
+      text: Соединение нужно закрывать (`ws.close()`) при размонтировании компонента, иначе утекают открытые сокеты
+      weight: 1
+  misconceptions:
+    - WebSocket — это отдельный протокол, никак не связанный с HTTP и не использующий HTTP-рукопожатие
+    - По WebSocket сообщения может отправлять только сервер (путаница с Server-Sent Events)
+    - WebSocket всегда лучше polling и его стоит использовать для любого обмена данными с сервером
+    - Браузер автоматически закрывает WebSocket при размонтировании React-компонента
+- question: why-redux
+  points:
+    - id: scope-of-builtins
+      text: "`useState` хранит локальное состояние одного компонента, а `Context` — лишь механизм передачи значения вниз по дереву, сам по себе он не управляет хранением и изменением состояния"
+      weight: 3
+    - id: redux-value
+      text: Redux даёт единое место для логики изменений (reducers/actions), предсказуемые переходы состояния и трассировку того, кто и почему его поменял, включая DevTools с time-travel
+      weight: 3
+    - id: context-rerenders
+      text: При смене значения `Context` перерисовываются все подписанные компоненты, а селекторы, подписывающие компонент только на нужную часть состояния, без дополнительных мер не работают так, как в Redux
+      weight: 2
+    - id: context-plus-reducer
+      text: Связка `Context` + `useReducer` — это маленькая ручная версия Redux, но без middleware и DevTools
+      weight: 2
+    - id: when-to-use
+      text: Redux оправдан, когда клиентское состояние действительно общее для многих несвязанных частей приложения; для пары соседних компонентов достаточно поднять state к общему предку
+      weight: 2
+    - id: server-state
+      text: Серверные данные (кэш API, списки с сервера) лучше держать в TanStack Query или RTK Query, а не в обычных слайсах Redux
+      weight: 1
+  misconceptions:
+    - "`Context` — это полноценный менеджер состояния и сам по себе заменяет Redux"
+    - При изменении значения `Context` перерисовываются только компоненты, использующие изменившуюся часть значения, как с селекторами в Redux
+    - Redux нужно подключать в любом приложении сразу, «на будущее», даже маленьком
+    - Redux — лучшее место для хранения и кэширования серверных данных вместо специализированных инструментов
 - question: context
   points:
     - id: provider-nearest-value
@@ -198,6 +248,375 @@
     - TanStack Query автоматически нормализует сущности, и обновление в одном запросе само отражается во всех списках
     - Нормализованное хранение означает хранение массивов объектов с вложенными связанными сущностями
     - Селектор, собирающий денормализованный объект из нескольких срезов, не вызывает лишних рендеров без мемоизации
+- question: use-websocket-hook
+  points:
+    - id: effect-with-cleanup
+      text: Соединение создаётся внутри `useEffect` с `url` в зависимостях, а cleanup вызывает `ws.close()` — иначе при смене `url` или размонтировании копятся незакрытые сокеты
+      weight: 3
+    - id: messages-in-state
+      text: Входящие сообщения добавляются в state в обработчике `onmessage`, через функциональное обновление `setMessages(prev => [...prev, msg])`, чтобы не зависеть от устаревшего замыкания
+      weight: 2
+    - id: socket-in-ref
+      text: "Сам объект `WebSocket` хранится в `useRef`, а не в state: это объект соединения, его смена не должна вызывать ре-рендер, и `send` берёт его из ref"
+      weight: 2
+    - id: stable-send-callback
+      text: Хук возвращает наружу функцию `send`, обёрнутую в `useCallback`, со стабильной ссылкой; она отправляет данные через `wsRef.current?.send(...)`
+      weight: 2
+    - id: strict-mode-double-mount
+      text: В Strict Mode в разработке эффект монтируется дважды, поэтому на мгновение открываются два соединения, первое сразу закрывается cleanup'ом; это ожидаемо и не баг, в production такого нет
+      weight: 1
+  misconceptions:
+    - Двойное открытие соединения в Strict Mode — это баг, который нужно чинить флагами или отключением Strict Mode
+    - Сокет нужно хранить в `useState`, чтобы компонент «знал» о соединении
+    - WebSocket можно создавать прямо в теле компонента или без cleanup, React сам закроет соединение при размонтировании
+    - Strict Mode дважды монтирует эффекты и в production-сборке
+- question: websocket-reconnect
+  points:
+    - id: backoff-on-close
+      text: При разрыве (`onclose`) клиент сам запускает переподключение с экспоненциальной задержкой (backoff). Число попыток обычно не ограничивают, потому что соединение нужно держать постоянно.
+      weight: 3
+    - id: missed-messages-need-protocol
+      text: Само переподключение не возвращает сообщения, пропущенные во время разрыва. Для этого сервер должен хранить историю или поддерживать параметр `since`/`cursor`, по которому клиент после реконнекта запрашивает пропущенное.
+      weight: 3
+    - id: heartbeat-detect-stale
+      text: Параллельно шлют heartbeat (`ping`/`pong`), чтобы быстро обнаружить «подвисшее» соединение, которое формально не закрылось, но перестало отвечать.
+      weight: 2
+    - id: delay-cap
+      text: Задержку ограничивают сверху (например, `Math.min(..., 30000)`). Иначе при долгом падении сервера клиенты уходят в слишком долгое ожидание, а после восстановления синхронно бьют по нему.
+      weight: 2
+    - id: transport-vs-protocol
+      text: "Кандидат различает транспорт (WebSocket) и протокол поверх него: гарантии доставки обеспечивает протокол, а не сам WebSocket."
+      weight: 1
+  misconceptions:
+    - Переподключение к WebSocket само восстанавливает сообщения, отправленные во время разрыва.
+    - Нативный браузерный `WebSocket` автоматически переподключается после разрыва.
+    - Если соединение перестало работать, `onclose` всегда срабатывает сразу, поэтому heartbeat не нужен.
+    - WebSocket сам по себе гарантирует доставку всех сообщений приложения, даже при обрыве связи.
+- question: redux-middleware
+  points:
+    - id: middleware-wraps-dispatch
+      text: "Middleware — обёртка вокруг `dispatch`: он встаёт в цепочку между вызовом `dispatch(action)` и моментом, когда action попадает в reducer."
+      weight: 3
+    - id: next-passes-action
+      text: Middleware может залогировать, изменить, отменить или отложить action, а дальше по цепочке его передаёт вызов `next(action)`. Без вызова `next` action не дойдёт до reducer.
+      weight: 3
+    - id: curried-signature
+      text: Сигнатура middleware — каррированная функция `store => next => action => ...`. Через `store` доступны `getState` и `dispatch`.
+      weight: 2
+    - id: thunk-async
+      text: "Асинхронность добавляют через middleware: `thunk` позволяет передавать в `dispatch` функцию. Она получает `dispatch` и `getState`, выполняет асинхронную работу (например, `fetch`) и затем диспатчит обычные actions с результатом."
+      weight: 2
+    - id: reducer-pure-sync
+      text: "Асинхронщина живёт в middleware потому, что reducer обязан быть чистой синхронной функцией: в нём нельзя делать `fetch` и другие побочные эффекты."
+      weight: 2
+    - id: rtk-default-thunk
+      text: "`configureStore` из Redux Toolkit подключает `thunk` middleware по умолчанию."
+      weight: 1
+  misconceptions:
+    - Middleware вызывается после reducer и видит только уже обновлённый state, а не исходный action.
+    - Асинхронный запрос (`fetch`, `async/await`) можно выполнять прямо внутри reducer.
+    - "Чтобы action дошёл до reducer, вызывать `next(action)` в middleware не обязательно: Redux передаст его дальше сам."
+    - В `configureStore` из Redux Toolkit `thunk` не включён, его всегда нужно подключать вручную.
+- question: redux-selectors-reselect
+  points:
+    - id: new-reference-rerender
+      text: Вычисляемый селектор без мемоизации (например, с `filter`/`sort`) на каждом вызове возвращает новый массив или объект. `useSelector` сравнивает результат по ссылке, поэтому компонент перерисовывается, даже если исходные данные не менялись.
+      weight: 3
+    - id: create-selector-input-caching
+      text: "`createSelector` принимает входные селекторы и результирующую функцию. Результирующая функция пересчитывается только тогда, когда меняются (по ссылке) значения входных селекторов. Иначе возвращается закэшированный результат с той же ссылкой."
+      weight: 3
+    - id: selector-definition
+      text: Селектор — функция вида `(state) => значение`, которая извлекает или вычисляет нужный кусок данных из общего стора и инкапсулирует знание о структуре state.
+      weight: 2
+    - id: no-create-in-render
+      text: "`createSelector` нельзя создавать внутри компонента на каждом рендере: каждый раз появляется новый экземпляр с пустым кэшем, и мемоизация не работает. Селектор объявляют вне компонента (или стабилизируют, например через `useMemo`)."
+      weight: 2
+    - id: expensive-computation
+      text: "Мемоизация дополнительно экономит дорогие вычисления: фильтрацию, сортировку и группировку больших списков. Без неё они выполнялись бы на каждый рендер, например при фильтрации прямо в JSX."
+      weight: 1
+    - id: rtk-reexport
+      text: "`createSelector` в Redux Toolkit — это реэкспорт из `reselect`, отдельно ставить библиотеку не нужно."
+      weight: 1
+  misconceptions:
+    - "`createSelector` или `useSelector` сравнивают входные данные и результат глубоко (deep equal). На самом деле сравнение идёт по ссылке."
+    - Простой селектор вроде `(state) => state.todos.items` обязательно оборачивать в `createSelector`. Он и так возвращает существующую ссылку, мемоизация ему не нужна.
+    - Создание `createSelector` внутри тела компонента на каждом рендере работает так же, как объявление снаружи.
+    - Мемоизированный селектор предотвращает любые перерисовки компонента, в том числе вызванные изменением его пропсов или собственного state.
+- question: redux-devtools
+  points:
+    - id: action-history-diff
+      text: DevTools показывает историю всех `dispatch`-нутых actions и для каждого — diff/состояние стора после него
+      weight: 3
+    - id: time-travel
+      text: Можно «отмотать» стор к любому предыдущему action (time-travel debugging) и посмотреть промежуточное состояние
+      weight: 3
+    - id: configure-store-auto
+      text: "`configureStore` из Redux Toolkit подключает DevTools автоматически в режиме разработки, ручная настройка не нужна"
+      weight: 2
+    - id: pure-reducers-enable
+      text: "Time-travel возможен потому, что состояние меняется только чистыми reducer-ами: из начального состояния и списка actions можно заново вычислить любое состояние"
+      weight: 2
+    - id: export-import-repro
+      text: Состояние/последовательность actions можно экспортировать и импортировать, чтобы воспроизвести баг или сценарий
+      weight: 1
+    - id: prod-and-secrets
+      text: DevTools не стоит включать в production, а в actions нельзя класть чувствительные данные (пароли, токены) — они видны в истории
+      weight: 1
+  misconceptions:
+    - Для работы Redux DevTools с `configureStore` обязательно вручную подключать `window.__REDUX_DEVTOOLS_EXTENSION__` или `composeWithDevTools`
+    - Time-travel корректно работает и при мутирующих изменениях состояния вне reducer-ов
+    - Включать DevTools в production безопасно, так как история actions и state пользователю не видна
+    - Time-travel отменяет побочные эффекты (сетевые запросы и т.п.), а не просто пересчитывает состояние стора
+- question: rtk-create-slice
+  points:
+    - id: generates-actions-and-reducer
+      text: "`createSlice` по `name`, `initialState` и объекту `reducers` сам генерирует action creators и итоговый reducer, без ручного `switch` по `action.type` и строковых констант"
+      weight: 3
+    - id: immer-draft-mutation
+      text: "Внутри редьюсеров `createSlice` можно писать «мутирующий» код (`state.push(x)`), потому что RTK оборачивает их в Immer: изменения пишутся в черновик (draft), а Immer производит новое иммутабельное состояние"
+      weight: 3
+    - id: mutate-or-return-not-both
+      text: Можно либо мутировать draft, либо вернуть новое значение (`return newState`), но смешивать оба подхода в одном редьюсере нельзя
+      weight: 2
+    - id: immer-only-inside-slice
+      text: Immer работает только внутри редьюсеров `createSlice` (RTK); в обычном Redux-редьюсере мутация `state` испортит состояние
+      weight: 2
+    - id: action-type-from-name
+      text: Тип action формируется из имени slice и ключа редьюсера, например `'todos/added'`, а action creators берутся из `slice.actions`
+      weight: 1
+    - id: reducer-sync-pure
+      text: Редьюсер в `createSlice` остаётся синхронным и чистым; асинхронную логику выносят в `createAsyncThunk`
+      weight: 1
+  misconceptions:
+    - Код внутри редьюсера `createSlice` действительно мутирует текущее состояние store
+    - Мутировать `state` можно в любом Redux-редьюсере, не только в `createSlice`
+    - Внутри одного редьюсера можно одновременно мутировать draft и возвращать новый объект
+    - В редьюсере `createSlice` можно делать асинхронные запросы, раз там «обычный» мутирующий код
+- question: rtk-create-async-thunk
+  points:
+    - id: accepts-type-and-payload-creator
+      text: "`createAsyncThunk` принимает строковый тип (префикс) action и асинхронную функцию (payload creator) и возвращает thunk, который диспатчат как обычный action"
+      weight: 3
+    - id: three-lifecycle-actions
+      text: При диспатче thunk автоматически рассылает `pending` сразу, затем `fulfilled` с результатом функции в `action.payload` при успехе либо `rejected` при ошибке
+      weight: 3
+    - id: handled-via-extra-reducers
+      text: Сгенерированные action creators доступны как `fetchUser.pending/fulfilled/rejected` (типы вида `users/fetch/pending`) и обрабатываются в `extraReducers` через `builder.addCase`, например для смены `status` loading/done/error
+      weight: 2
+    - id: error-vs-reject-with-value
+      text: При исключении ошибка попадает в `action.error` (сериализованно, например `message`), а для управляемых бизнес-ошибок используют `rejectWithValue`, чтобы передать структурированные данные в `action.payload`
+      weight: 2
+    - id: removes-boilerplate
+      text: Утилита избавляет от ручного написания трёх action creators и трёх веток редьюсера для каждого запроса
+      weight: 1
+    - id: must-handle-rejected
+      text: Если не обработать `rejected`, ошибка теряется, а UI навсегда остаётся в состоянии загрузки
+      weight: 1
+  misconceptions:
+    - "`rejectWithValue` кладёт данные в `action.error`, а не в `action.payload`"
+    - "`dispatch(thunk)` выбрасывает исключение при ошибке запроса — на деле промис разрешается `rejected`-action, а исключение будет только при вызове `.unwrap()`"
+    - "`createAsyncThunk` сам делает HTTP-запросы и кэширует данные (путаница с RTK Query)"
+    - "`pending` диспатчится только после завершения запроса или вместе с `fulfilled`, а не сразу при запуске thunk"
+- question: rtk-configure-store
+  points:
+    - id: thunk-by-default
+      text: "`configureStore` — обёртка над `createStore`, которая по умолчанию подключает `thunk` middleware для асинхронной логики, поэтому вручную добавлять его не нужно."
+      weight: 3
+    - id: dev-checks
+      text: "В режиме разработки по умолчанию включены две проверки: на сериализуемость state и actions (`serializableCheck`) и на случайные мутации состояния вне Immer (`immutableCheck`)."
+      weight: 3
+    - id: devtools-auto
+      text: Redux DevTools Extension подключается автоматически, без ручного `composeWithDevTools`.
+      weight: 2
+    - id: serializable-why
+      text: "`serializableCheck` срабатывает на несериализуемые значения вроде `Date`, `Map` или функций, потому что сериализуемое состояние нужно для DevTools, time-travel и персистентности."
+      weight: 2
+    - id: targeted-disable
+      text: Для легитимного случая (например, `File` при загрузке) проверку отключают точечно через опции `serializableCheck` для конкретного action или пути, а не все проверки целиком.
+      weight: 1
+    - id: extend-middleware
+      text: "Собственный middleware добавляют через колбэк `middleware: (getDefaultMiddleware) => getDefaultMiddleware().concat(...)`, чтобы сохранить стандартные; объект в `reducer` автоматически объединяется через `combineReducers`."
+      weight: 1
+  misconceptions:
+    - "`thunk` middleware нужно подключать вручную — на самом деле он уже включён по умолчанию."
+    - Проверки сериализуемости и мутаций работают и в production, замедляя приложение — они активны только в режиме разработки.
+    - Для Redux DevTools с `configureStore` обязательно вручную вызывать `composeWithDevTools`.
+    - Если в опции `middleware` вернуть свой список без `getDefaultMiddleware()`, он добавится к стандартным — на самом деле стандартные middleware (включая `thunk`) будут заменены.
+- question: rtk-entity-adapter
+  points:
+    - id: normalized-shape
+      text: "`createEntityAdapter` хранит коллекцию в нормализованной форме `{ ids, entities }`, где `entities` — словарь сущностей по id, а `ids` задаёт порядок"
+      weight: 3
+    - id: generated-crud-reducers
+      text: Адаптер генерирует готовые CRUD-редьюсеры (`addOne`, `updateOne`, `removeOne` и т.п.), которые можно напрямую подставить в `reducers` у `createSlice`, избавляя от ручного boilerplate
+      weight: 3
+    - id: memoized-selectors
+      text: "`getSelectors` возвращает готовые селекторы (`selectAll`, `selectById`, `selectIds`), мемоизированные через `createSelector`: `selectAll` не создаёт новый массив, если сущности не менялись"
+      weight: 2
+    - id: o1-lookup
+      text: Словарь по id даёт поиск и обновление одного элемента за O(1) вместо O(n) при хранении плоским массивом
+      weight: 2
+    - id: initial-state-helper
+      text: "`getInitialState()` создаёт начальное состояние нужной формы для слайса (можно добавить свои поля)"
+      weight: 1
+    - id: sort-comparer
+      text: Адаптеру можно передать компаратор сортировки, и он поддерживает порядок `ids` при каждом обновлении без ручной пересортировки
+      weight: 1
+  misconceptions:
+    - "`createEntityAdapter` хранит сущности в виде простого массива объектов"
+    - Селекторы адаптера не мемоизированы, и `selectAll` возвращает новый массив при каждом вызове
+    - "`createEntityAdapter` делает сетевые запросы или кэширует данные с сервера, как RTK Query"
+    - Сортировка через компаратор адаптера применяется только при чтении в селекторе, а не поддерживается в состоянии при обновлениях
+- question: rtk-query-basics
+  points:
+    - id: createapi-endpoints
+      text: "`createApi` декларативно описывает эндпоинты через `builder`: `builder.query` — для чтения данных, `builder.mutation` — для их изменения."
+      weight: 3
+    - id: generated-hooks
+      text: Для каждого эндпоинта RTK Query автоматически генерирует React-хуки по имени эндпоинта (`getTodos` → `useGetTodosQuery`, `addTodo` → `useAddTodoMutation`).
+      weight: 2
+    - id: store-setup
+      text: "`api.reducer` подключают в `configureStore` под ключом `reducerPath`, а `api.middleware` добавляют в middleware store; без этого хуки, кэширование и инвалидация по тегам не работают."
+      weight: 3
+    - id: replaces-manual-fetch
+      text: Библиотека сама управляет кэшированием, состояниями загрузки/ошибки и повторными запросами, поэтому вручную писать `useEffect` с `fetch` и `useState` для статуса не нужно.
+      weight: 2
+    - id: base-query
+      text: "`baseQuery` (обычно `fetchBaseQuery` с `baseUrl`) задаёт общий способ выполнения запросов, а в эндпоинте `query` возвращает URL или объект с `url`, `method`, `body`."
+      weight: 1
+    - id: redux-devtools
+      text: RTK Query построен поверх Redux и хранит данные в том же store, поэтому его состояние видно в Redux DevTools.
+      weight: 1
+  misconceptions:
+    - RTK Query — отдельная от Redux библиотека со своим хранилищем и не требует `configureStore`.
+    - Достаточно подключить только `api.reducer`, а `api.middleware` необязателен.
+    - "`mutation` можно использовать для получения данных так же, как `query`, и он кэширует результат и подписывается на него аналогично."
+    - Рядом с хуками RTK Query всё равно нужно писать `useEffect` с `fetch` для загрузки или повторного запроса данных.
+- question: rtk-query-tags
+  points:
+    - id: provides-invalidates
+      text: "`query` объявляет через `providesTags`, какие теги он предоставляет, а `mutation` через `invalidatesTags` объявляет, какие теги она инвалидирует."
+      weight: 3
+    - id: auto-refetch-active
+      text: После завершения мутации RTK Query автоматически перезапрашивает активные (имеющие подписки) запросы, предоставлявшие совпавшие теги, без ручного `refetch` в компонентах.
+      weight: 3
+    - id: list-tag
+      text: "Тег `{ type: 'Todo', id: 'LIST' }` нужен, чтобы создание или удаление элемента инвалидировало именно список. Без него новый элемент не появится в уже отрендеренном списке."
+      weight: 2
+    - id: per-id-tags
+      text: Теги с конкретным `id` сущности позволяют точечно обновлять только изменённый элемент, а не перезапрашивать весь список из-за правки одного элемента.
+      weight: 2
+    - id: provides-fn-result
+      text: "`providesTags` можно задать функцией от `result`, генерирующей теги по `id` элементов. При этом нужно обработать случай, когда `result` отсутствует (ошибка), и вернуть хотя бы тег `'LIST'`."
+      weight: 1
+    - id: avoid-generic-tag
+      text: "Один общий тег на всё подряд теряет точность: любая мутация перезапрашивает все запросы сразу."
+      weight: 1
+  misconceptions:
+    - Инвалидация тега сама обновляет данные в кэше локально, без сетевого запроса. На деле она вызывает refetch; локальное обновление — это отдельный механизм оптимистичных обновлений через `updateQueryData`.
+    - "Инвалидация `{ type: 'Todo', id: 'LIST' }` перезапрашивает все запросы с типом `Todo`, включая запросы отдельных элементов с конкретным `id`."
+    - После мутации всё равно нужно вручную вызвать `refetch()` в компонентах, отображающих эти данные.
+    - Теги связывают запросы только внутри одного компонента или хука, а не по всему кэшу API.
+- question: rtk-query-mutations
+  points:
+    - id: hook-returns-tuple
+      text: "Хук мутации (`useXxxMutation`) возвращает кортеж: триггер-функцию для запуска запроса и объект состояния с полями вроде `isLoading`, `isError`, `data`, `error`"
+      weight: 3
+    - id: unwrap-rejects-on-error
+      text: Триггер-промис по умолчанию всегда резолвится (с `{ data }` или `{ error }`), поэтому для `try/catch` нужно вызывать `.unwrap()`, который реджектит промис при ошибке
+      weight: 3
+    - id: await-trigger-for-side-effects
+      text: Результат триггера можно дождаться через `await` отдельно от состояния хука, например, чтобы закрыть модалку только после успешного ответа
+      weight: 2
+    - id: no-duplicate-loading-state
+      text: "Не нужно заводить собственный `useState` для флага загрузки или ошибки: `isLoading` и `error` уже есть в объекте состояния хука"
+      weight: 2
+    - id: why-resolve-by-default
+      text: "Объясняет, почему промис по умолчанию не реджектится: так забытый `catch` не приводит к необработанному отклонению промиса"
+      weight: 1
+    - id: fixed-cache-key-sharing
+      text: Упоминает `fixedCacheKey` как способ разделить состояние одной мутации между несколькими компонентами
+      weight: 1
+  misconceptions:
+    - Промис, возвращаемый триггером мутации, по умолчанию реджектится при ошибке запроса, и `catch` сработает без `.unwrap()`
+    - Мутация запускается автоматически при рендере компонента, как query-хук
+    - Состояние мутации по умолчанию общее для всех компонентов, вызывающих один и тот же хук, без `fixedCacheKey`
+    - Для отслеживания загрузки мутации нужно вручную вести флаг в `useState`, потому что хук его не предоставляет
+- question: rtk-query-polling
+  points:
+    - id: polling-interval
+      text: "`pollingInterval` в опциях хука запроса заставляет RTK Query автоматически перезапрашивать данные каждые N миллисекунд, пока у запроса есть хотя бы один активный подписчик"
+      weight: 3
+    - id: refetch-focus-reconnect
+      text: "`refetchOnFocus` перезапрашивает данные, когда пользователь возвращается на вкладку, а `refetchOnReconnect` — когда восстанавливается сетевое соединение"
+      weight: 3
+    - id: auto-stop-polling
+      text: Polling останавливается сам, когда все подписанные компоненты размонтированы. Поэтому ручная очистка не нужна, в отличие от `setInterval`, который работает, пока его явно не очистят
+      weight: 2
+    - id: config-levels
+      text: "`refetchOnFocus` и `refetchOnReconnect` можно задать глобально при создании API (`createApi`) или на конкретном хуке запроса"
+      weight: 2
+    - id: use-case-tradeoff
+      text: "Polling подходит для почти-реалтайм данных (котировки, счётчик непрочитанных), когда WebSocket избыточен. Интервал нужно подбирать под частоту изменения данных: слишком короткий даёт лишнюю нагрузку на сервер без пользы"
+      weight: 2
+    - id: setup-listeners
+      text: "Чтобы `refetchOnFocus` и `refetchOnReconnect` работали, нужно вызвать `setupListeners(store.dispatch)`: он подписывается на события фокуса и сети"
+      weight: 1
+  misconceptions:
+    - Polling в RTK Query продолжает работать после размонтирования всех компонентов-подписчиков, поэтому интервал нужно очищать вручную
+    - "`pollingInterval` открывает постоянное соединение (WebSocket/SSE) с сервером, а не делает периодические HTTP-запросы"
+    - "`refetchOnFocus`/`refetchOnReconnect` настраиваются только глобально в `createApi` и не могут быть заданы на отдельном хуке"
+    - "`refetchOnFocus` перезапрашивает данные при любом ререндере или изменении пропсов компонента, а не при возврате фокуса на вкладку"
+- question: rtk-query-transform-select
+  points:
+    - id: transform-response-before-cache
+      text: "`transformResponse` задаётся в описании эндпоинта. Он выполняется один раз на каждый ответ сервера, до записи в кэш, поэтому в кэше хранится уже преобразованная форма данных."
+      weight: 3
+    - id: select-from-result-subset
+      text: "`selectFromResult` — опция хука запроса. Она на клиенте выбирает из закэшированного результата только ту часть, которая нужна компоненту, и компонент перерисовывается только при изменении этой части."
+      weight: 3
+    - id: unwrap-example
+      text: "Приводит пример для `transformResponse`: API отдаёт данные не в той форме, которая нужна UI, например нужно снять обёртку `{ data: [...] }` и вернуть `response.data`."
+      weight: 2
+    - id: rerender-without-select
+      text: Без `selectFromResult` компонент перерисовывается при любом изменении результата запроса, даже если изменился не его элемент списка. Проблема та же, что решают мемоизированные селекторы в обычном Redux.
+      weight: 2
+    - id: shallow-compare-memo
+      text: Результат `selectFromResult` сравнивается поверхностно, поэтому новый массив или объект на каждый вызов (например, через `filter`) ломает оптимизацию. В таких случаях производные данные мемоизируют, например через `createSelector`.
+      weight: 1
+    - id: vs-component-transform
+      text: "Отличает `transformResponse` от преобразования `data` прямо в компоненте: преобразование в компоненте повторяется на каждом рендере в каждом подписчике (если не мемоизировано), а `transformResponse` срабатывает один раз и общий для всех подписчиков."
+      weight: 1
+  misconceptions:
+    - "`transformResponse` выполняется при каждом рендере или при каждом вызове хука в компоненте."
+    - "`selectFromResult` отправляет отдельный запрос или изменяет данные в кэше; на самом деле он только читает общий закэшированный результат."
+    - "`transformResponse` можно настроить отдельно для каждого компонента; на самом деле он задаётся на уровне эндпоинта и влияет на всех подписчиков."
+    - "`selectFromResult` сравнивает результат глубоко, поэтому возврат нового массива через `filter` или `map` не вызывает лишних перерисовок."
+- question: when-not-redux
+  points:
+    - id: server-state-not-redux
+      text: "Серверное состояние (копия данных с сервера: список товаров, профиль) не стоит держать в Redux-срезе — для него лучше подходят специализированные инструменты вроде TanStack Query или RTK Query"
+      weight: 3
+    - id: query-libs-features
+      text: Библиотеки серверного кэша из коробки решают устаревание данных, инвалидацию, повторные запросы и фоновое обновление — то, что в ручном Redux-срезе пришлось бы писать самому
+      weight: 2
+    - id: local-state-enough
+      text: Если состояние нужно одному компоненту и паре его детей, достаточно `useState` с передачей props или `Context` с `useReducer`, глобальный стор не нужен
+      weight: 3
+    - id: redux-for-client-state
+      text: Redux предназначен для клиентского состояния без источника истины на сервере (что выбрано, что открыто, активный фильтр)
+      weight: 2
+    - id: when-redux-justified
+      text: "Redux оправдан, когда одно состояние читают и меняют многие несвязанные части дерева и важна предсказуемость: единый способ изменений, который можно логировать, тестировать и отслеживать в DevTools"
+      weight: 2
+    - id: no-uniformity-store
+      text: Заводить глобальный стор «для единообразия» под любую задачу с состоянием — антипаттерн, выбор хранилища должен идти от реальных требований
+      weight: 1
+  misconceptions:
+    - Все данные приложения, включая ответы API, должны храниться в Redux как единый источник истины
+    - Redux нужен в любом React-приложении, а `useState` подходит только для учебных примеров
+    - "`Context` — полноценная замена Redux для часто меняющегося состояния, которое читают многие компоненты, без каких-либо компромиссов по ререндерам"
+    - RTK Query — это отдельная от Redux библиотека, не связанная с Redux Toolkit
 - question: use-sync-external-store
   points:
     - id: tearing-definition
@@ -298,3 +717,177 @@
     - Каждое входящее сообщение стоит класть в React state через `setState` — React сам справится с любой частотой
     - "После переподключения ничего догружать не нужно: сервер или браузер гарантирует доставку пропущенных событий"
     - SSE поддерживает двустороннюю связь так же, как WebSocket
+- question: rtk-entity-adapter-relations
+  points:
+    - id: adapter-per-entity
+      text: "`createEntityAdapter` нормализует только одну коллекцию (`{ ids, entities }`), поэтому для каждой связанной сущности заводится отдельный адаптер и слайс, например `usersAdapter` и `postsAdapter`."
+      weight: 3
+    - id: relation-by-id
+      text: Связь между сущностями хранится через идентификатор (`post.authorId`), а не через вложенный объект (`post.author`).
+      weight: 3
+    - id: denormalize-in-selector
+      text: "Денормализованный вид (пост вместе с объектом автора) собирается в мемоизированном `createSelector`, а не хранится в state. Входные селекторы берутся из `adapter.getSelectors`: `selectById` для поста и `selectEntities` для словаря авторов."
+      weight: 2
+    - id: single-source-of-truth
+      text: Благодаря нормализации обновление автора в одном месте (`usersSlice`) автоматически отражается во всех его постах. Данные не дублируются и не рассинхронизируются.
+      weight: 2
+    - id: parametrized-memo
+      text: "Кандидат учитывает специфику мемоизации параметризованных селекторов (с аргументом `id`): кэш для одного `id` может вытеснять кэш для другого. При необходимости применяется фабрика селекторов, по одному экземпляру на компонент."
+      weight: 1
+    - id: split-on-ingest
+      text: Вложенный ответ API при записи в store разбирается на сущности, и каждая часть кладётся в свой адаптер, например через `upsertMany` для пользователей и для постов.
+      weight: 1
+  misconceptions:
+    - "`createEntityAdapter` сам рекурсивно нормализует вложенные объекты (например, автора внутри поста) в отдельные коллекции."
+    - Хранить вложенный объект автора прямо внутри поста в state — нормальная практика, и обновление автора от этого не усложняется.
+    - "Собирать объект `{ ...post, author }` можно в обычной функции-селекторе без мемоизации: на ререндеры при `useSelector` это не влияет (на деле каждый вызов возвращает новую ссылку, и компонент ререндерится лишний раз)."
+- question: rtk-query-vs-tanstack-query
+  points:
+    - id: redux-vs-standalone
+      text: RTK Query построен поверх Redux и хранит кэш в Redux store, а TanStack Query не зависит от стейт-менеджера и самодостаточна
+      weight: 3
+    - id: choice-by-redux-presence
+      text: "Выбор зависит от наличия Redux: если он уже есть для клиентского состояния, RTK Query логично ложится рядом (тот же store, DevTools, паттерны); если нет — тянуть Redux только ради RTK Query избыточно, лучше TanStack Query"
+      weight: 3
+    - id: invalidation-tags-vs-keys
+      text: В RTK Query инвалидация строится на явных тегах `providesTags`/`invalidatesTags`, в TanStack Query — по `queryKey` через `invalidateQueries`, в том числе по префиксу ключа
+      weight: 2
+    - id: same-problem-similar-features
+      text: "Обе решают одну задачу (кэш серверного состояния, инвалидация, повторные запросы) и покрывают схожий набор сценариев: бесконечная прокрутка, параллельные и зависимые запросы, отмена; различия в деталях API и экосистеме"
+      weight: 2
+    - id: discipline-required
+      text: "Оба подхода к инвалидации требуют дисциплины: теги нужно расставлять согласованно, а ключи запросов — продуманно проектировать"
+      weight: 1
+    - id: no-two-caches
+      text: Одновременное использование обеих библиотек без чёткого разделения ответственности ведёт к двум независимым кэшам и рассинхронизации одних и тех же данных
+      weight: 1
+  misconceptions:
+    - TanStack Query требует Redux или другого стейт-менеджера для хранения кэша
+    - RTK Query может работать без Redux store
+    - Только одна из библиотек поддерживает бесконечную прокрутку, зависимые запросы или отмену — на деле обе покрывают эти сценарии
+    - Инвалидация в TanStack Query работает автоматически и не требует продуманного проектирования ключей
+- question: rtk-query-code-splitting
+  points:
+    - id: base-api-empty-endpoints
+      text: "Заводится один базовый `createApi` с общим `baseQuery` и `reducerPath`, где `endpoints: () => ({})` пустой или содержит только общие эндпоинты."
+      weight: 3
+    - id: inject-endpoints-per-feature
+      text: Каждая фича в своём файле или модуле вызывает `baseApi.injectEndpoints({ endpoints })` и экспортирует сгенерированные хуки, например `useGetTodosQuery`, из возвращённого объекта.
+      weight: 3
+    - id: same-api-single-cache
+      text: "`injectEndpoints` возвращает тот же экземпляр API с расширенными типами: reducer и middleware регистрируются в store один раз, а кэш и теги остаются общими."
+      weight: 2
+    - id: lazy-loading-growth
+      text: Эндпоинты добавляются в рантайме по мере подгрузки кода фич, например через `React.lazy` или динамический `import()`, поэтому их код попадает в чанк фичи, а не в основной бандл.
+      weight: 2
+    - id: must-use-same-base
+      text: Внедрять эндпоинты нужно именно в общий `baseApi`. Отдельный `createApi` в фиче создаёт независимый кэш со своим `reducerPath`, и инвалидация тегов между такими API не работает.
+      weight: 2
+    - id: duplicate-names-override
+      text: При совпадении имён эндпоинтов в разных модулях поведение задаёт опция `overrideExisting`. Без неё существующий эндпоинт не перезаписывается, а в dev-режиме выводится предупреждение.
+      weight: 1
+  misconceptions:
+    - "`injectEndpoints` создаёт новый отдельный API или slice, и его reducer с middleware нужно дополнительно подключать в store."
+    - Для code splitting каждая фича должна вызывать собственный `createApi`, и это ничем не отличается от `injectEndpoints`.
+    - Если два модуля внедрят эндпоинт с одинаковым именем, по умолчанию последний молча перезапишет первый.
+    - При ленивой загрузке фичи создаётся второй Redux store или второй кэш RTK Query.
+- question: rtk-query-optimistic-updates
+  points:
+    - id: optimistic-definition
+      text: Оптимистичное обновление меняет кэш сразу при запуске мутации, не дожидаясь ответа сервера, а при ошибке изменение откатывается
+      weight: 3
+    - id: on-query-started-update-query-data
+      text: "Реализуется в `onQueryStarted` эндпоинта мутации: через `dispatch(api.util.updateQueryData('getTodos', args, draft => ...))` правится кэш другого (query) эндпоинта"
+      weight: 3
+    - id: undo-on-rejected
+      text: Результат `dispatch(updateQueryData(...))` — patch-объект; после `await queryFulfilled` в `catch` вызывают `patch.undo()` для отката к состоянию до правки
+      weight: 2
+    - id: immer-draft
+      text: Рецепт в `updateQueryData` работает через Immer, поэтому `draft` можно «мутировать» напрямую
+      weight: 1
+    - id: cache-key-args
+      text: Второй аргумент `updateQueryData` — аргументы query, которые должны совпадать с аргументами нужной записи кэша, иначе правится не та запись
+      weight: 1
+    - id: when-to-use
+      text: Подходит для действий с высокой вероятностью успеха и дешёвым откатом (лайк, чекбокс); для операций с серьёзными последствиями (оплата) ложный «успех» вводит в заблуждение
+      weight: 2
+  misconceptions:
+    - RTK Query делает оптимистичные обновления автоматически через `invalidatesTags`/`providesTags` — на деле инвалидация тегов лишь вызывает перезапрос после ответа сервера
+    - При ошибке мутации RTK Query сам откатывает изменения, сделанные через `updateQueryData`, без вызова `patch.undo()`
+    - Оптимистичное обновление делается в компоненте через `useState`, а не в кэше RTK Query
+    - "`updateQueryData` отправляет запрос на сервер или создаёт новую запись в кэше, если её нет"
+- question: rtk-query-reauth
+  points:
+    - id: wrapper-intercepts-401
+      text: Реавторизация делается обёрткой над `fetchBaseQuery` — кастомным `baseQuery`, который перехватывает ответ с `error.status === 401`; сам `prepareHeaders` только подставляет токен и истечение не обрабатывает
+      weight: 3
+    - id: refresh-then-retry
+      text: При 401 выполняется refresh-запрос, новый токен сохраняется в store через `api.dispatch`, после чего исходный запрос повторяется с теми же `args` уже с новым токеном
+      weight: 3
+    - id: logout-on-refresh-fail
+      text: Если refresh не удался (в том числе сам вернул 401), нужен явный выход — `dispatch(loggedOut())` — вместо повторной попытки, иначе возможен бесконечный цикл
+      weight: 2
+    - id: parallel-refresh-race
+      text: При нескольких одновременных 401 наивная реализация запустит несколько параллельных refresh-запросов — это гонка обновления токена
+      weight: 2
+    - id: mutex-solution
+      text: "Гонку решают через `Mutex` (например, `async-mutex`): первый запрос захватывает блокировку и делает refresh, остальные ждут её освобождения и повторяют запрос с уже обновлённым токеном"
+      weight: 1
+    - id: prepare-headers-getstate
+      text: "`prepareHeaders` читает токен из store через `getState` и ставит заголовок `authorization: Bearer ...`, поэтому повтор после `dispatch` автоматически берёт новый токен"
+      weight: 1
+  misconceptions:
+    - "`fetchBaseQuery` или `prepareHeaders` сами умеют обрабатывать 401 и обновлять токен без обёртки"
+    - Повторять исходный запрос можно без проверки успеха refresh — при неудачном refresh это ведёт к бесконечному циклу
+    - Параллельные 401 не проблема, так как RTK Query сам дедуплицирует refresh-запросы, сделанные внутри `baseQuery`
+    - Обновлённый токен нужно вручную передавать в повторный запрос через `args`, а не через store и `prepareHeaders`
+- question: rtk-query-internals
+  points:
+    - id: slice-plus-middleware
+      text: "`createApi` генерирует обычный Redux-срез (reducer под `reducerPath`) и middleware, которые нужно подключить к store; отдельной от Redux системы нет"
+      weight: 3
+    - id: cache-in-redux-state
+      text: Кэш, статусы загрузки и ошибки по каждому запросу хранятся как обычное Redux-состояние, поэтому они видны в Redux DevTools вместе с автоматически сгенерированными actions `pending`/`fulfilled`/`rejected`
+      weight: 2
+    - id: hooks-selector-effect
+      text: Хук вроде `useGetTodosQuery` — это выборка из состояния store (как `useSelector`) плюс эффект, который при монтировании оформляет подписку на запрос (`dispatch` thunk-подобного action), а при размонтировании отписывается
+      weight: 3
+    - id: subscription-counting-dedup
+      text: "Для каждого уникального запроса (ключ — сериализованные аргументы) ведётся подсчёт подписчиков: первый подписчик запускает запрос, второй компонент с теми же аргументами переиспользует уже идущий запрос и тот же кэш"
+      weight: 2
+    - id: keep-unused-data-for
+      text: Когда отписывается последний подписчик, данные удаляются из кэша не сразу, а через `keepUnusedDataFor` (по умолчанию 60 секунд); после удаления следующий запрос снова уйдёт на сервер
+      weight: 2
+    - id: debug-implication
+      text: Понимание, что это обычный Redux, объясняет, как дебажить RTK Query через DevTools и почему сброс всего store затрагивает и кэш API
+      weight: 1
+  misconceptions:
+    - RTK Query — отдельная от Redux система со своим скрытым хранилищем, не связанная со store
+    - Каждый компонент, вызвавший один и тот же query-хук с одинаковыми аргументами, отправляет свой собственный сетевой запрос
+    - Данные удаляются из кэша сразу после размонтирования последнего компонента, использующего запрос
+    - Подключать middleware из `createApi` к store не обязательно — достаточно добавить reducer
+- question: rtk-query-with-slices
+  points:
+    - id: server-vs-client-split
+      text: RTK Query отвечает за серверные данные (кэш, загрузка, инвалидация), а `createSlice` — за клиентское UI-состояние (модалки, выбранный фильтр, черновик формы); это разные инструменты для разных типов состояния
+      weight: 3
+    - id: single-store-config
+      text: "Оба подключаются в один `configureStore`: `api.reducer` под ключом `api.reducerPath` рядом с обычными редьюсерами, а `api.middleware` добавляется через `getDefault().concat(...)`"
+      weight: 3
+    - id: no-duplication
+      text: "Серверные данные нельзя дублировать в обычном slice: появляются два источника истины, которые легко рассинхронизировать"
+      weight: 2
+    - id: filter-as-query-arg
+      text: Клиентский фильтр, влияющий на запрос, хранится в slice или URL как единственный источник истины и передаётся аргументом в хук (например, `useGetTodosQuery(filter)`); RTK Query перезапрашивает данные при смене аргумента
+      weight: 2
+    - id: no-client-state-in-rtkq
+      text: Чисто клиентское состояние, которое не ходит на сервер, не стоит держать в RTK Query — для него есть `createSlice` или даже `useState`
+      weight: 1
+    - id: url-for-shareable-state
+      text: Упоминает, что фильтры, которыми делятся ссылкой или которые должны переживать перезагрузку, разумно хранить в URL, а не в Redux
+      weight: 1
+  misconceptions:
+    - Смешивать RTK Query и обычные slice в одном store — антипаттерн, нужно выбрать что-то одно
+    - RTK Query требует отдельного store или отдельного Provider
+    - Подключить `api.reducer` достаточно, `api.middleware` добавлять не обязательно — без него не работают кэширование, инвалидация и автоматическое удаление неиспользуемых данных
+    - Результаты запросов нужно копировать в свой slice, чтобы получить к ним доступ из других компонентов
