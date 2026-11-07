@@ -1060,3 +1060,194 @@
     - setTransitionType
     - name
     - leave
+
+# form-status-action-state: принято из черновика 2026-11-07
+- id: form-status-where-to-call
+  skill: form-status-placement
+  question: form-status-action-state
+  difficulty: 2
+  prompt: "Почему `useFormStatus()`, вызванный в компоненте, который сам рендерит `<form action={formAction}>`, всегда возвращает `pending: false`?"
+  explanation: "`useFormStatus` — это чтение контекста ближайшей родительской `<form>`. Форму, которую рендерит сам компонент, он не видит. Правило: кнопку и индикатор выносите в компонент-потомок формы. Если pending нужен на уровне формы, берите третий элемент `useActionState`."
+  type: quiz
+  options:
+    - label: Хук читает статус ближайшей родительской `<form>` через контекст, а форма этого компонента находится ниже него в дереве
+      why: Верно. Провайдер статуса — сама `<form>`, поэтому статус видят только её потомки, но не компонент, который её рендерит.
+    - label: "`useFormStatus` работает только с формами, у которых `action` — серверная функция"
+      why: Неверно. Хук отслеживает и клиентские Actions, переданные в `action`. Важно не место выполнения функции, а положение в дереве.
+    - label: "Нужно передать в хук ссылку на форму: `useFormStatus(formRef)`"
+      why: "Такого API нет: хук вызывается без аргументов и всегда берёт ближайшую родительскую форму."
+    - label: "`pending` из `useFormStatus` становится true только после ответа сервера"
+      why: Неверно. `pending` становится true сразу при старте отправки и сбрасывается после завершения Action. Проблема здесь в месте вызова, а не во времени.
+  answer: 0
+- id: form-status-same-component-bug
+  skill: form-status-placement
+  question: form-status-action-state
+  difficulty: 2
+  prompt: Во время отправки кнопка не блокируется, хотя Action работает несколько секунд. Найдите ошибку.
+  explanation: "`useFormStatus` вызван в компоненте, который сам рендерит `<form>`. Над ним формы нет, поэтому `pending` всегда false. Есть два исправления: вынести кнопку в `SubmitButton` с `useFormStatus` внутри или взять `isPending` — третий элемент результата `useActionState`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function ProfileForm() {
+      const [state, formAction] = useActionState(
+        updateProfile,
+        { error: null }
+      );
+      const { pending } = useFormStatus();
+      return (
+        <form action={formAction}>
+          <input name="name" />
+          {state.error && <p role="alert">{state.error}</p>}
+          <button disabled={pending}>Сохранить</button>
+        </form>
+      );
+    }
+  bugLines:
+    - 6
+  causes:
+    - "`useFormStatus` вызван в компоненте с самой формой, а не в её потомке, поэтому `pending` всегда false"
+    - "`useActionState` нужно вызывать внутри `startTransition`, иначе pending не обновится"
+    - У кнопки нет `type="submit"`, поэтому форма не отправляется через Action
+    - "`formAction` нельзя передавать в `action`, его надо вызывать в `onSubmit`"
+  answer: 0
+- id: form-status-action-state-wiring
+  skill: form-status-with-action-state
+  question: form-status-action-state
+  difficulty: 2
+  prompt: "Свяжите форму: ошибка валидации хранится на уровне формы, а кнопка сама знает, что идёт отправка."
+  explanation: "`useActionState(action, initial)` возвращает `[state, formAction, isPending]`. Action получает `(prevState, formData)`, а его результат становится новым `state`. `formAction` передаётся в `action` формы. Кнопка-потомок читает `pending` через `useFormStatus()`, и пробрасывать пропсы не нужно."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    async function save(prev: State, data: FormData) {
+      if (!data.get('name')) return { error: 'Пусто' };
+      return { error: null };
+    }
+    function Submit() {
+      const { ___ } = ___();
+      return <button disabled={pending}>OK</button>;
+    }
+    function Form() {
+      const [state, act] = ___(save, { error: null });
+      return (
+        <form action={___}><Submit />{state.error}</form>
+      );
+    }
+  tokens:
+    - pending
+    - useFormStatus
+    - useActionState
+    - act
+  decoys:
+    - isPending
+    - useTransition
+    - save
+    - useOptimistic
+- id: form-status-design-system-button
+  skill: form-pending-tool-choice
+  question: form-status-action-state
+  difficulty: 2
+  prompt: В дизайн-системе нужна кнопка `<SubmitButton>`, которая в любой форме с Action сама показывает спиннер и блокируется на время отправки, без дополнительных пропсов. Что использовать внутри кнопки?
+  explanation: "Статус отправки, нужный глубоко внутри формы, читают через `useFormStatus` в потомке: он подхватывает ближайшую `<form>` без проводки пропсов. `useActionState` живёт на уровне формы и хранит результат Action (ошибки, данные), а его `isPending` удобен там же, где рендерится форма."
+  type: choose-tool
+  options:
+    - label: "`useFormStatus()` внутри SubmitButton"
+      why: "Лучший выбор: хук читает статус ближайшей родительской формы, поэтому кнопка работает в любой форме без настройки."
+    - label: "`useActionState` внутри SubmitButton"
+      why: Хук создаёт свой Action и состояние, а не наблюдает чужую форму. Он нужен на уровне формы, чтобы хранить результат и ошибки.
+    - label: Проп `isPending` из родителя
+      why: Рабочий вариант, если кнопка вне формы или нужен явный контроль. Но каждую форму придётся вручную связывать с кнопкой.
+    - label: Свой React Context со статусом
+      why: Повторяет то, что `<form>` уже даёт через `useFormStatus`, и требует ручного провайдера и обновления статуса в каждой форме.
+  answer: 0
+
+# compiler-bailout-rules: принято из черновика 2026-11-07
+- id: compiler-bailout-silent-skip
+  skill: compiler-bailout-rules
+  question: compiler-bailout-rules
+  difficulty: 3
+  prompt: Компонент мутирует `items` из props прямо в рендере, а проект собирается с React Compiler (настройки по умолчанию). Что произойдёт?
+  explanation: "Бейлаут — тихий отказ от оптимизации, а не ошибка. Компилятор оптимизирует только код, который соблюдает Rules of React: рендер чистый, props и результаты хуков не мутируются, ref не трогается в рендере. Нарушения ловите ESLint-правилами компилятора. В DevTools у такого компонента не будет бейджа «Memo ✨»."
+  type: quiz
+  options:
+    - label: "Компилятор пропустит этот компонент без автомемоизации: код работает как раньше, но выгоды от компилятора нет"
+      why: Верно. Компилятор не может доказать, что мемоизация безопасна, и оставляет функцию как есть. Заметно это только по отсутствию мемоизации в DevTools или Profiler.
+    - label: "Сборка упадёт с ошибкой: компилятор не пропускает код, нарушающий Rules of React"
+      why: По умолчанию компилятор не валит сборку из-за таких нарушений. Он просто пропускает функцию. Ранний сигнал даёт линтер, а не падение билда.
+    - label: Компилятор всё равно мемоизирует компонент, и UI может показывать устаревшие данные
+      why: "Наоборот: бейлаут нужен как раз для того, чтобы не мемоизировать небезопасный код и не сломать поведение."
+    - label: Компилятор сам перепишет мутацию в копию `[...items]` и оптимизирует компонент
+      why: Компилятор не исправляет семантику кода. Заменить мутацию на копию или `toSorted` должен разработчик.
+  answer: 0
+- id: compiler-bailout-mutate-memo-result
+  skill: compiler-bailout-rules
+  question: compiler-bailout-rules
+  difficulty: 3
+  prompt: Компонент работает, но React Compiler его не оптимизирует. Найдите строку, из-за которой происходит бейлаут.
+  explanation: "Результаты хуков, включая `useMemo`, компилятор считает неизменяемыми. Мутацию такого значения он не может признать безопасной и отказывается мемоизировать весь компонент. Исправление — собрать итоговый массив внутри useMemo: `[...filtered, PLACEHOLDER_ORDER]`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Orders({ orders }: { orders: Order[] }) {
+      const [query, setQuery] = useState('');
+      const visible = useMemo(
+        () => orders.filter((o) => o.title.includes(query)),
+        [orders, query],
+      );
+      visible.push(PLACEHOLDER_ORDER);
+      return (
+        <>
+          <Search value={query} onChange={setQuery} />
+          <OrderList orders={visible} />
+        </>
+      );
+    }
+  bugLines:
+    - 7
+  causes:
+    - "Мутация значения, которое вернул useMemo: компилятор не может доказать, что это безопасно, и пропускает компонент"
+    - Ручной useMemo несовместим с React Compiler и всегда вызывает бейлаут
+    - Передача setQuery напрямую в дочерний компонент мешает статическому анализу
+    - filter внутри useMemo мутирует исходный массив orders из props
+  answer: 0
+- id: compiler-bailout-immutable-sort
+  skill: compiler-pure-render-fixes
+  question: compiler-bailout-rules
+  difficulty: 2
+  prompt: Допишите компонент так, чтобы он не мутировал props и компилятор смог его мемоизировать.
+  explanation: "`sort` мутирует массив из props, и из-за этого компилятор бейлится. `toSorted` (ES2023) возвращает новый отсортированный массив, а `slice(0, 3)` — новый массив из первых трёх элементов. Рендер остаётся чистым. Альтернатива — `[...items].sort(...)`. `reverse` и `toReversed` не сортируют и не берут срез."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function TopList({ items }: { items: Item[] }) {
+      const sorted = items.___(
+        (a, b) => b.score - a.score,
+      );
+      const top = sorted.___(0, 3);
+      return (
+        <ul>
+          {top.map((i) => <li key={i.id}>{i.label}</li>)}
+        </ul>
+      );
+    }
+  tokens:
+    - toSorted
+    - slice
+  decoys:
+    - sort
+    - reverse
+    - toReversed
+- id: compiler-bailout-debug-recipe
+  skill: compiler-bailout-diagnostics
+  question: compiler-bailout-rules
+  difficulty: 3
+  prompt: Проект на React Compiler, но Profiler показывает, что тяжёлый компонент ререндерится при каждом изменении родителя. Расставьте шаги диагностики по порядку.
+  explanation: Бейлаут не виден в рантайме. Отсутствие бейджа «Memo ✨» в React DevTools подтверждает, что компилятор пропустил компонент. Причину покажут ESLint-правила компилятора (сейчас они входят в eslint-plugin-react-hooks) или отчёт сборки. Исправление — привести код в соответствие с Rules of React.
+  type: order
+  kind: recipe
+  steps:
+    - Проверить в React DevTools, есть ли у компонента бейдж «Memo ✨»
+    - Прогнать ESLint-правила компилятора по файлу компонента
+    - "Найти нарушение: мутацию props или результата хука, ref в рендере, условный хук"
+    - "Переписать код: копия вместо мутации, запись в ref — в эффект или обработчик"
+    - "Пересобрать: убедиться, что бейдж появился, а Profiler не показывает лишних ререндеров"

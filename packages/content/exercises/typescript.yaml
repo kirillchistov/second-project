@@ -747,3 +747,376 @@
     - label: new Map<Status, BadgeConfig>()
       why: Уместен при динамическом наполнении и частых добавлениях и удалениях. Полноту ключей компилятор не проверит, а `get` вернёт `undefined`.
   answer: 0
+
+# ts-unknown-vs-any: принято из черновика 2026-11-07
+- id: ts-unknown-vs-any-quiz
+  skill: ts-unknown-narrowing
+  question: ts-unknown-vs-any
+  difficulty: 1
+  prompt: Почему для результата `JSON.parse` или пойманной ошибки `unknown` безопаснее, чем `any`?
+  explanation: "`any` выключает проверку типов и «заражает» всё, к чему прикасается. `unknown` честно говорит: «форма неизвестна». Компилятор не даст читать свойства, пока вы не докажете тип через typeof, instanceof, in, type guard или схему валидации. Сами типы в рантайме не существуют — проверку всегда пишете вы."
+  type: quiz
+  options:
+    - label: "`unknown` принимает любое значение, но не даёт им пользоваться без сужения типа; `any` разрешает всё и молча отключает проверки"
+      why: Верно. Ошибка «нельзя читать свойство unknown» ловит на этапе компиляции то, что с `any` упало бы в рантайме.
+    - label: "`unknown` при присваивании автоматически проверяет данные в рантайме, а `any` — нет"
+      why: "Типы стираются при компиляции, и никаких рантайм-проверок `unknown` не добавляет. Проверку должны написать вы: guard, instanceof или Zod."
+    - label: "`any` нельзя присвоить переменной конкретного типа, а `unknown` можно — поэтому он гибче"
+      why: "Наоборот: `any` присваивается чему угодно, поэтому и опасен. `unknown` присваивается только `unknown` и `any`, пока тип не сужен."
+    - label: После `value as ApiError` компилятор проверит, что у `unknown` действительно есть поля `code` и `message`
+      why: "`as` ничего не проверяет: это обещание компилятору, а не доказательство. Если данные другой формы, код упадёт в рантайме."
+  answer: 0
+- id: ts-unknown-as-assertion-bug
+  skill: ts-type-assertion-vs-guard
+  question: ts-unknown-vs-any
+  difficulty: 1
+  prompt: "Иногда сервер отвечает `{ error: 'not found' }`. Код компилируется без ошибок, но падает в рантайме. Какая строка виновата?"
+  explanation: "`as User` снимает с `unknown` всю защиту и при этом ничего не проверяет. Когда приходит `{ error }`, `user.name` равен undefined, и `toUpperCase` падает. Нужен type guard (`isUser(data)`) или схема Zod, а для неподходящей формы — явная ошибка. Правило: `as` уместен только там, где вы уже знаете тип точнее компилятора."
+  type: find-bug
+  language: ts
+  code: |-
+    type User = { id: number; name: string };
+
+    async function getUserName(id: number) {
+      const res = await fetch(`/api/users/${id}`);
+      const data: unknown = await res.json();
+      const user = data as User;
+      return user.name.toUpperCase();
+    }
+  bugLines:
+    - 6
+  causes:
+    - "`as User` не проверяет данные в рантайме: он заглушает компилятор, и неверная форма ответа доходит до `user.name`"
+    - Аннотация `unknown` запрещает приведение через `as`, поэтому строка 6 на самом деле не компилируется
+    - "`res.json()` возвращает строку, и её сначала нужно передать в `JSON.parse`"
+    - "`toUpperCase` нельзя вызывать у свойства объекта, полученного через `fetch`"
+  answer: 0
+- id: ts-unknown-type-guard-fill
+  skill: ts-type-guards
+  question: ts-unknown-vs-any
+  difficulty: 2
+  prompt: Допишите type guard так, чтобы после `if (isApiError(x))` значение `x` типа `unknown` сузилось до `ApiError`.
+  explanation: "Параметр guard'а — `unknown`: функция обязана принимать что угодно, а `{}` не примет `unknown`-аргумент. Предикат `value is ApiError` сообщает компилятору о сужении. `typeof null === 'object'`, поэтому null отсекаем отдельно. Оператор `in` (TS 4.9+) открывает доступ к `value.code` для дальнейшей проверки типа поля."
+  type: fill-tokens
+  language: ts
+  code: |-
+    interface ApiError { code: string; message: string }
+
+    function isApiError(
+      value: ___,
+    ): value ___ ApiError {
+      return (
+        typeof value === ___ &&
+        value !== ___ &&
+        'code' in value &&
+        typeof value.code === 'string' &&
+        'message' in value
+      );
+    }
+  tokens:
+    - unknown
+    - is
+    - "'object'"
+    - "null"
+  decoys:
+    - "{}"
+    - as
+    - "'Object'"
+    - undefined
+- id: ts-unknown-runtime-validation-choice
+  skill: runtime-validation-choice
+  question: ts-unknown-vs-any
+  difficulty: 2
+  prompt: Внешний API партнёра возвращает заказ с вложенным массивом позиций и датами-строками. Формат иногда меняется без предупреждения. Нужно проверить ответ и получить точный тип. Что выбрать?
+  explanation: "Данные извне — это `unknown`, пока не доказано обратное. Для сложных и нестабильных форм выбирайте схему (Zod, Valibot): она одновременно валидирует данные в рантайме и выводит тип через `z.infer`, поэтому тип и проверка не разъедутся. Ручной guard подходит для 2–3 полей, а `as` и `any` ничего не проверяют."
+  type: choose-tool
+  options:
+    - label: Схема Zod + `safeParse` над `unknown`-ответом, тип через `z.infer`
+      why: "Лучший вариант: вложенные структуры и преобразование дат описываются декларативно, ошибки содержат путь к полю, а тип выводится из той же схемы."
+    - label: "Ручной type guard `isOrder(value: unknown): value is Order`"
+      why: Хорош для маленьких и стабильных форм, например `ApiError`. Для вложенных массивов получится громоздко, и guard легко разойдётся с интерфейсом.
+    - label: "`const order = (await res.json()) as Order`"
+      why: Годится, только если вы контролируете бэкенд и уже доверяете контракту, например при генерации типов из OpenAPI. Изменение формата не поймает.
+    - label: Оставить ответ `any` и проверять поля по месту использования
+      why: Проверки рассыплются по коду и будут забыты, а `any` отключит типизацию у всего, что получит эти данные. Допустимо разве что в одноразовом прототипе.
+  answer: 0
+
+# ts-deep-utility-types: принято из черновика 2026-11-07
+- id: ts-deep-utility-check-order-quiz
+  skill: ts-deep-type-special-cases
+  question: ts-deep-utility-types
+  difficulty: 2
+  prompt: Почему в `DeepReadonly<T>` проверки на функцию, `Date` и массив стоят **до** ветки `T extends object`?
+  explanation: "Условный тип проверяется сверху вниз, и первая подходящая ветка побеждает. Функции, `Date` и массивы — подтипы `object`. Правило: сначала специальные случаи (функции, `Date`, массивы), затем общий объект, в конце примитивы как есть."
+  type: quiz
+  options:
+    - label: Функции и Date тоже проходят `extends object`, и mapped type по ним даст объект без сигнатуры вызова и с испорченными методами
+      why: Верно. Для функции `keyof` пуст, и mapped type превращает её в `{}`. Методы Date станут такими же «объектами» и перестанут вызываться.
+    - label: Иначе на Date TypeScript уйдёт в бесконечную рекурсию и выдаст ошибку компиляции
+      why: "Рекурсия конечна. Ошибки на определении типа нет, проблема в бессмысленном результате: методы Date перестают вызываться."
+    - label: "Порядок веток не важен: TypeScript сам выбирает наиболее специфичную ветку условного типа"
+      why: Специфичность не учитывается. Ветки вложены друг в друга и проверяются по порядку, срабатывает первая подходящая.
+    - label: "Порядок важен только для Date: функции `typeof` считает 'function', а не 'object', поэтому их ветку можно ставить где угодно"
+      why: Это рантайм-оператор `typeof`. В системе типов функция — подтип `object`, и `T extends object` её поймает.
+  answer: 0
+- id: ts-deep-readonly-object-first-bug
+  skill: ts-deep-type-special-cases
+  question: ts-deep-utility-types
+  difficulty: 2
+  prompt: "`cfg.onSave('42')` не компилируется: «This expression is not callable». Найдите причину."
+  explanation: "Единственная ветка `T extends object` ловит и функцию. Homomorphic mapped type по типу функции даёт `{}`, потому что `keyof` функции пуст, и сигнатура вызова теряется. Фикс: перед веткой объекта добавить `T extends (...args: never[]) => unknown ? T` и аналогичную проверку для `Date`."
+  type: find-bug
+  language: ts
+  code: |-
+    type DeepReadonly<T> = T extends object
+      ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+      : T;
+
+    type Config = {
+      createdAt: Date;
+      onSave: (id: string) => void;
+    };
+
+    declare const cfg: DeepReadonly<Config>;
+    cfg.onSave('42');
+  bugLines:
+    - 1
+    - 2
+  causes:
+    - Функция проходит `extends object`, и mapped type превращает её в `{}` без сигнатуры вызова
+    - "`readonly` на свойстве запрещает вызывать методы объекта"
+    - "`declare const` создаёт значение без реализации, поэтому вызов невозможен"
+    - "`DeepReadonly<T[K]>` в mapped type не завершается на примитиве `string`"
+  answer: 0
+- id: ts-deep-partial-fill
+  skill: ts-recursive-conditional-types
+  question: ts-deep-utility-types
+  difficulty: 2
+  prompt: "Допишите `DeepPartial<T>`: массив остаётся массивом с рекурсией на элемент, у объекта все поля на любой глубине становятся необязательными."
+  explanation: "`infer U` достаёт тип элемента массива, и рекурсия идёт по `U`, поэтому `Item[]` становится `DeepPartial<Item>[]`, а не объектом с `length`. Встроенный `Partial` работает только на один уровень. Модификатор `?` в mapped type делает ключи необязательными, а `-?`, наоборот, снимает необязательность."
+  type: fill-tokens
+  language: ts
+  code: |-
+    type DeepPartial<T> =
+      T extends (...args: never[]) => unknown
+        ? T
+        : T extends Date
+          ? T
+          : T extends (___ U)[]
+            ? ___<U>[]
+            : T extends ___
+              ? { [K in keyof T]___: DeepPartial<T[K]> }
+              : T;
+  tokens:
+    - infer
+    - DeepPartial
+    - object
+    - "?"
+  decoys:
+    - Partial
+    - readonly
+    - -?
+    - keyof
+- id: ts-deep-readonly-build
+  skill: ts-recursive-conditional-types
+  question: ts-deep-utility-types
+  difficulty: 2
+  prompt: Соберите `DeepReadonly<T>`, который не ломает функции и `Date`, а массивы делает readonly с рекурсией на элементы.
+  explanation: "Порядок веток: функции → `Date` → массив → объект → примитив. `readonly (infer U)[]` ловит и обычные, и readonly-массивы. Рекурсия на `U` делает readonly и вложенные объекты в элементах. Если вернуть `readonly U[]`, сам массив станет неизменяемым, а элементы останутся мутабельными."
+  type: parsons
+  language: ts
+  lines:
+    - type DeepReadonly<T> =
+    - "  T extends (...args: never[]) => unknown"
+    - "    ? T"
+    - "    : T extends Date"
+    - "      ? T"
+    - "      : T extends readonly (infer U)[]"
+    - "        ? readonly DeepReadonly<U>[]"
+    - "        : T extends object"
+    - "          ? { readonly [K in keyof T]: DeepReadonly<T[K]> }"
+    - "          : T;"
+  distractors:
+    - "        ? readonly U[]"
+    - type DeepReadonly<T> = T extends object
+
+# ts-discriminated-loading-state: принято из черновика 2026-11-07
+- id: ts-loading-union-quiz
+  skill: ts-discriminated-union-state
+  question: ts-discriminated-loading-state
+  difficulty: 2
+  prompt: Почему состояние запроса лучше описать как discriminated union с полем `status`, а не как `isLoading`, `isError` и `data`?
+  explanation: Главное — форма типа повторяет реальные состояния экрана. Невозможные комбинации нельзя даже собрать, а неверное чтение данных ловит компилятор. Переходы union не описывает, за них отвечает reducer или конечный автомат.
+  type: quiz
+  options:
+    - label: Тег `status` задаёт, какие поля есть в ветке. После его проверки TS сужает тип, и чтение `data` вне `success` — ошибка компиляции
+      why: Верно. Каждая ветка содержит только свои поля, поэтому комбинацию `isLoading` + `isError` нельзя даже создать.
+    - label: "Union работает быстрее в рантайме: проверяется одно поле вместо трёх флагов"
+      why: Типы стираются при компиляции, и на скорость они не влияют. Выигрыш только в корректности на этапе проверки типов.
+    - label: "Union задаёт допустимые переходы: например, из `idle` нельзя попасть сразу в `success`"
+      why: Union описывает формы данных, а не переходы. Переходы ограничивают reducer или конечный автомат.
+    - label: "Можно добавить `data?` и `error?` во все варианты: TS сам поймёт, в какой ветке они заполнены"
+      why: Наоборот, так union вырождается во «флаги плюс опциональные поля», и `data` можно прочитать в любой ветке.
+  answer: 0
+- id: ts-loading-union-optional-fields
+  skill: ts-discriminated-union-state
+  question: ts-discriminated-loading-state
+  difficulty: 2
+  prompt: Тип должен гарантировать, что `data` есть только в успешном состоянии и там всегда задано. Какие строки нарушают эту гарантию?
+  explanation: "`data?` в ветке `loading` позволяет хранить и читать устаревшие данные во время загрузки. `data?` в `success` заставляет писать `?.` там, где данные гарантированы. Правило: поле объявляется только в той ветке, где оно существует, и там оно обязательное."
+  type: find-bug
+  language: tsx
+  code: |-
+    type State<T> =
+      | { status: 'loading'; data?: T }
+      | { status: 'success'; data?: T }
+      | { status: 'error'; error: string };
+
+    function Title({ s }: { s: State<User> }) {
+      if (s.status === 'success') {
+        return <h1>{s.data?.name}</h1>;
+      }
+      if (s.status === 'error') return <p>{s.error}</p>;
+      return <Spinner />;
+    }
+  bugLines:
+    - 2
+    - 3
+  causes:
+    - "Поле `data?` опционально в нескольких ветках: union выродился во флаги, `data` есть при загрузке и не гарантировано при успехе"
+    - Дженерик `T` нельзя использовать внутри union-типа
+    - Сужение по `s.status` не работает в `if`, нужен `switch`
+    - Поле `error` должно быть опциональным, иначе ветку нельзя создать
+  answer: 0
+- id: ts-loading-union-exhaustive-switch
+  skill: ts-exhaustiveness-check
+  question: ts-discriminated-loading-state
+  difficulty: 2
+  prompt: "`RequestState` с тегом `status` имеет варианты idle, loading, success, error. Допишите `switch` так, чтобы TS сузил тип, а новый необработанный статус вызвал ошибку компиляции."
+  explanation: "`switch` по тегу сужает тип, поэтому `s.data` доступно только в `case 'success'`. В `default` остаётся тип `never`. Если добавить новый статус и не обработать его, присваивание в `never` перестанет компилироваться, и TS укажет на пропущенную ветку."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function label(s: RequestState<User>): string {
+      switch (s.___) {
+        case 'idle': return 'Нет данных';
+        case 'loading': return 'Загрузка…';
+        case 'success': return s.___.name;
+        case 'error': return s.error;
+        default: {
+          const unreachable: ___ = s;
+          return unreachable;
+        }
+      }
+    }
+  tokens:
+    - status
+    - data
+    - never
+  decoys:
+    - unknown
+    - any
+    - kind
+    - value
+- id: ts-loading-union-refactor-recipe
+  skill: ts-discriminated-union-state
+  question: ts-discriminated-loading-state
+  difficulty: 2
+  prompt: Компонент хранит `isLoading`, `isError` и `data` в трёх `useState`. Расставьте шаги рефакторинга в discriminated union по порядку.
+  explanation: Начинайте с реальных состояний экрана, а не с флагов. Затем поля привязываются к своим веткам, и всё сводится в один источник правды. Проверка на `never` в конце защищает от забытых вариантов при будущих изменениях.
+  type: order
+  kind: recipe
+  steps:
+    - "Выписать реальные состояния экрана: idle, loading, success, error"
+    - Для каждого состояния определить поля, которые существуют только в нём
+    - Объявить union с литеральным тегом `status` и обязательными полями в каждой ветке
+    - Заменить три флага одним `useState<RequestState<T>>`
+    - В рендере сужать тип через `switch` по `status`
+    - Добавить `default` с присваиванием в `never` для exhaustiveness check
+
+# ts-route-params-type: принято из черновика 2026-11-07
+- id: ts-route-params-types-vs-runtime
+  skill: ts-types-vs-runtime-drift
+  question: ts-route-params-type
+  difficulty: 3
+  prompt: "`useParams(path)` возвращает `ExtractParams<Path>`, а внутри парсит путь регуляркой. Почему тип может «врать», хотя всё компилируется?"
+  explanation: "Тип и рантайм — две независимые реализации одной идеи. TS разбирает литерал сопоставлением с шаблоном и ничего не знает о регулярке. Компилятор проверяет только самосогласованность типов. Правило: держите обе реализации рядом и покрывайте рантайм-парсер тестами на тех же путях."
+  type: quiz
+  options:
+    - label: TS сопоставляет литерал с шаблоном только в системе типов и не видит рантайм-парсер — если они разойдутся, компилятор этого не заметит
+      why: Верно. Регулярку никто не сверяет с типом. Каст `as ExtractParams<Path>` заставляет компилятор поверить на слово.
+    - label: TS при компиляции выполняет регулярку из реализации и выводит тип из её групп, поэтому тип может врать только при ошибке в регулярке
+      why: TS не запускает код и не читает регулярки. Template literal types — это чистое сопоставление с шаблоном на уровне типов.
+    - label: Без `as const` литерал расширится до `string`, и тип параметров станет пустым объектом
+      why: В generic с ограничением `Path extends string` аргумент-литерал выводится как литеральный тип, `as const` для этого не нужен.
+    - label: Template literal types проверяют строку в рантайме, но только в dev-сборке, поэтому в продакшене тип может не совпасть
+      why: Типы полностью стираются при компиляции и в рантайме не существуют ни в dev, ни в prod.
+  answer: 0
+- id: ts-route-params-fill-recursive
+  skill: ts-recursive-conditional-types
+  question: ts-route-params-type
+  difficulty: 3
+  prompt: "Допишите тип: для `'/users/:userId/posts/:postId'` должно получиться `{ userId: string; postId: string }`, для `'/about'` — `{}`."
+  explanation: "`infer Name` захватывает сегмент до ближайшего `/`, а остаток пути разбирается рекурсивно. `keyof` достаёт имена ключей из результата рекурсии. Базовый случай `{}` обязателен. С `never` выйдет ошибка: `keyof never` — это `string | number | symbol`, и тип расползётся до индексной сигнатуры."
+  type: fill-tokens
+  language: ts
+  code: |-
+    type Params<P extends string> =
+      P extends `${string}:${___ Name}/${infer Rest}`
+        ? { [K in Name | ___ Params<`/${___}`>]: string }
+        : P extends `${string}:${infer Name}`
+          ? { [K in Name]: string }
+          : ___;
+  tokens:
+    - infer
+    - keyof
+    - Rest
+    - "{}"
+  decoys:
+    - typeof
+    - never
+    - Name
+    - extends
+- id: ts-route-params-branch-order-bug
+  skill: ts-template-literal-matching
+  question: ts-route-params-type
+  difficulty: 3
+  prompt: Для `'/users/:id/posts/:postId'` тип даёт ключ `'id/posts/:postId'` вместо `id` и `postId`. Где ошибка?
+  explanation: "Каждый плейсхолдер захватывает текст до первого вхождения следующего литерала. Если за `${infer Param}` нет литерала, он забирает весь остаток строки. Поэтому первая ветка ловит любой путь с `:` целиком, а ветка с рекурсией недостижима. Правило: сначала проверяйте более специфичный шаблон (с `/` после параметра), потом — последний параметр."
+  type: find-bug
+  language: ts
+  code: |-
+    type ExtractParams<P extends string> =
+      P extends `${string}:${infer Param}`
+        ? { [K in Param]: string }
+        : P extends `${string}:${infer Param}/${infer Rest}`
+          ? { [K in Param | keyof ExtractParams<Rest>]: string }
+          : {};
+
+    type Params = ExtractParams<'/users/:id/posts/:postId'>;
+  bugLines:
+    - 2
+    - 3
+  causes:
+    - "Общий шаблон стоит первым: `infer Param` в конце забирает весь остаток после первого `:`, и ветка с рекурсией никогда не срабатывает"
+    - "`${string}` жадный и захватывает всё до последнего `:`, поэтому Param получает только `postId`"
+    - Нет базового случая, и рекурсия по Rest зацикливается
+    - Переменную из `infer` нельзя использовать в mapped type, поэтому ключ берётся как строка целиком
+  answer: 0
+- id: ts-route-params-build-path-choice
+  skill: ts-typed-routes-choice
+  question: ts-route-params-type
+  difficulty: 2
+  prompt: В приложении десятки маршрутов вида `'/orders/:orderId/items/:itemId'`. Хелпер `buildPath(path, params)` должен ловить пропущенный параметр или опечатку в его имени при компиляции и не требовать ручного дублирования. Что выбрать?
+  explanation: Когда структура данных закодирована в строковом литерале, template literal types + `infer` выводят тип прямо из него — единый источник правды без дублирования. Рантайм-валидация нужна для внешнего ввода, а ручные типы — когда параметрам нужны отличные от string типы или маршрутов мало.
+  type: choose-tool
+  options:
+    - label: Выводить тип params из литерала пути через template literal types и `infer`
+      why: "Лучший вариант: имена параметров берутся из самой строки. Опечатка или пропуск — ошибка компиляции, новый маршрут типизируется автоматически."
+    - label: Типизировать params как `Record<string, string>`
+      why: Подходит, только если пути динамические и неизвестны на этапе компиляции. Здесь любой ключ пройдёт, опечатку никто не поймает.
+    - label: Вручную описать interface параметров для каждого маршрута
+      why: Уместно при паре маршрутов или если параметрам нужны числа и union-типы. На десятках маршрутов интерфейсы разойдутся со строками путей.
+    - label: Zod-схема для params и проверка при вызове
+      why: Нужна для внешних данных (URL из адресной строки), но ловит ошибку только в рантайме, а не при компиляции.
+  answer: 0

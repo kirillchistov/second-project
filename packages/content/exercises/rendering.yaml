@@ -1051,3 +1051,87 @@
     - label: Хранить scrollTop в React Context
       why: "Не уменьшает рендеры, а добавляет зависимость: все потребители контекста будут рендериться на каждый скролл."
   answer: 0
+
+# raf-microtask-macrotask-order: принято из черновика 2026-11-07
+- id: event-loop-order-quiz
+  skill: event-loop-task-order
+  question: raf-microtask-macrotask-order
+  difficulty: 3
+  prompt: "Скрипт: `log('1')`, `setTimeout(log 2)`, `requestAnimationFrame(log 3)`, `Promise.then(log 4)`, `queueMicrotask(log 5)`, `log('6')`. Что о порядке вывода можно утверждать наверняка?"
+  explanation: "Синхронный код идёт первым, затем очередь микрозадач опустошается целиком, до любого следующего шага цикла. rAF привязан к кадру, setTimeout — это макрозадача. Оба идут после микрозадач, но их взаимный порядок не гарантирован: он зависит от того, когда наступит следующий кадр. Закладываться на «rAF раньше таймера» нельзя."
+  type: quiz
+  options:
+    - label: Гарантированы 1, 6, 4, 5; rAF и setTimeout идут позже, но их взаимный порядок зависит от момента следующего кадра
+      why: Верно. Микрозадачи выполняются до любого следующего шага цикла. rAF ждёт кадра, а таймер может сработать до него — в Chrome так бывает часто.
+    - label: 1, 6, 5, 4, 3, 2 — queueMicrotask приоритетнее Promise.then, а rAF всегда раньше таймера
+      why: Оба API ставят задачи в одну очередь микрозадач, и она обрабатывается строго по порядку постановки (FIFO). Порядок rAF и таймера тоже не гарантирован.
+    - label: 1, 2, 6, 4, 5, 3 — setTimeout с задержкой 0 выполняется сразу
+      why: setTimeout — всегда макрозадача. Она не прерывает текущий скрипт и ждёт, пока выполнится весь синхронный код и все микрозадачи.
+    - label: 1, 6, 4, 2, 5, 3 — готовый таймер может вклиниться между микрозадачами
+      why: Очередь микрозадач опустошается целиком, и только потом event loop берёт следующую макрозадачу. Таймер не вклинится между 4 и 5.
+  answer: 0
+- id: event-loop-nested-microtask
+  skill: event-loop-task-order
+  question: raf-microtask-macrotask-order
+  difficulty: 2
+  prompt: Что будет в консоли после выполнения скрипта?
+  explanation: Синхронно выводятся A и F. В очереди микрозадач лежат C и E. Пока выполняется C, в конец очереди добавляется D — после E, но до любой макрозадачи. Таймер B ждёт, пока очередь микрозадач опустеет полностью. Новые микрозадачи, поставленные во время обработки очереди, выполнятся в этом же проходе.
+  type: predict-output
+  language: ts
+  code: |-
+    console.log('A');
+    setTimeout(() => console.log('B'), 0);
+    Promise.resolve().then(() => {
+      console.log('C');
+      queueMicrotask(() => console.log('D'));
+    });
+    queueMicrotask(() => console.log('E'));
+    console.log('F');
+  options:
+    - A → F → C → E → D → B
+    - A → F → C → D → E → B
+    - A → F → C → E → B → D
+    - A → B → F → C → E → D
+  answer: 0
+- id: event-loop-microtask-no-yield
+  skill: yielding-to-render
+  question: raf-microtask-macrotask-order
+  difficulty: 3
+  prompt: Прогресс-бар стоит на месте и прыгает на 100% только в самом конце обработки. Найдите строку с ошибкой.
+  explanation: "После `await Promise.resolve()` продолжение ставится в очередь микрозадач, а между микрозадачами браузер не рисует кадр. Чтобы уступить отрисовке, нужна макрозадача: `await new Promise(r => setTimeout(r, 0))` или `scheduler.yield()`. Если важно дождаться именно кадра, подойдёт ожидание через `requestAnimationFrame`."
+  type: find-bug
+  language: ts
+  code: |-
+    async function processAll(items: Item[]) {
+      const n = items.length;
+      for (let i = 0; i < n; i++) {
+        heavyWork(items[i]);
+        bar.style.width = `${((i + 1) / n) * 100}%`;
+        await Promise.resolve(); // дать отрисовать
+      }
+    }
+  bugLines:
+    - 6
+  causes:
+    - await Promise.resolve() продолжает цикл в микрозадаче — браузер не получает шанса нарисовать кадр до конца цикла
+    - "style.width нельзя менять внутри async-функции: изменения применятся только после её завершения"
+    - await внутри for не работает — нужно использовать items.forEach с async-коллбэком
+    - Процент считается неверно из-за приоритета операторов, поэтому ширина всегда 100%
+  answer: 0
+- id: event-loop-scroll-raf
+  skill: raf-scheduling
+  question: raf-microtask-macrotask-order
+  difficulty: 2
+  prompt: Обработчик scroll срабатывает много раз за кадр. Нужно пересчитывать transform липкой шапки не чаще раза в кадр и прямо перед отрисовкой. Чем планировать обновление?
+  explanation: "Правило выбора: работа, связанная с отрисовкой (стили, анимации, чтение и запись layout), — rAF. Уступить потоку и дать браузеру отрисовать кадр — макрозадача (setTimeout, scheduler.yield). Доделать что-то до возврата в event loop — микрозадача. Фоновая некритичная работа — requestIdleCallback."
+  type: choose-tool
+  options:
+    - label: requestAnimationFrame с флагом «уже запланировано»
+      why: Коллбэк выполнится один раз перед ближайшей отрисовкой, а лишние scroll-события внутри кадра схлопнутся. Именно это и нужно.
+    - label: setTimeout(update, 16)
+      why: "Таймер не синхронизирован с кадрами: возможны два обновления за кадр или ни одного, на экранах 120 Гц он отстаёт. Подходит, чтобы уступить поток, а не для анимаций."
+    - label: queueMicrotask(update)
+      why: Микрозадача выполнится сразу после каждого обработчика, то есть по разу на каждое событие, без троттлинга. Подходит, чтобы отложить работу до конца текущей задачи.
+    - label: requestIdleCallback(update)
+      why: Вызывается, только когда браузер простаивает, может пропустить кадры или отложить обновление надолго. Хорош для аналитики и прогрева кэша, но не для визуала.
+  answer: 0

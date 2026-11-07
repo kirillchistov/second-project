@@ -878,3 +878,188 @@
     - Map нельзя объявлять на уровне модуля — функция упадёт при импорте
     - hits.set нужно вызывать с await, иначе запись не успевает сохраниться
   answer: 0
+
+# use-client-boundary: принято из черновика 2026-11-07
+- id: use-client-function-prop
+  skill: rsc-serializable-props
+  question: use-client-boundary
+  difficulty: 2
+  prompt: Серверный компонент рендерит клиентский `<Filter onChange={(v) => console.log(v)} />`. Что произойдёт?
+  explanation: "Через границу `'use client'` проходят только сериализуемые значения: примитивы, простые объекты и массивы, JSX как `children`. Обычной функции нет места в RSC payload. Чтобы клиент мог вызвать серверный код, передают Server Action с `'use server'` или пишут обработчик в самом клиентском компоненте."
+  type: quiz
+  options:
+    - label: "Ошибка: обычную функцию нельзя сериализовать в RSC payload. Пропустить можно только Server Action с 'use server'"
+      why: "Верно. React так и пишет: функции нельзя передавать в Client Components, если не пометить их 'use server'."
+    - label: React сериализует исходный код функции, и она выполнится в браузере
+      why: Код функции не передаётся. Её замыкание может ссылаться на серверные данные, поэтому перенести её на клиент нельзя.
+    - label: Функция автоматически станет RPC-вызовом и выполнится на сервере
+      why: Так работают только явные Server Actions с директивой 'use server'. Обычная функция сама RPC-вызовом не становится.
+    - label: Проп молча станет undefined, и компонент отрендерится без обработчика
+      why: Молчаливого отбрасывания нет. React сообщает об ошибке, чтобы баг не остался незамеченным.
+  answer: 0
+- id: use-client-db-import
+  skill: client-bundle-imports
+  question: use-client-boundary
+  difficulty: 2
+  prompt: После добавления кнопки лайка клиентский бандл заметно вырос, а в браузере при загрузке страницы падает ошибка. Найдите строку с проблемой.
+  explanation: Всё, что импортирует файл с `'use client'`, уходит в клиентский бандл. Клиент базы данных тянет Node-зависимости и секреты, в браузере он бесполезен. Правильно вынести запись в Server Action (`'use server'`) и вызывать её из обработчика. Для страховки серверные модули помечают `import 'server-only'`.
+  type: find-bug
+  language: tsx
+  code: |-
+    'use client';
+    import { useState } from 'react';
+    import { db } from '@/lib/db';
+
+    export function LikeButton({ postId }: {
+      postId: string;
+    }) {
+      const [count, setCount] = useState(0);
+      async function like() {
+        await db.likes.add(postId);
+        setCount((c) => c + 1);
+      }
+      return <button onClick={like}>❤️ {count}</button>;
+    }
+  bugLines:
+    - 3
+  causes:
+    - Серверный клиент БД импортируется в файл с 'use client' и попадает в клиентский бандл, где выполниться не может
+    - async-функцию нельзя передавать в onClick
+    - useState нельзя использовать вместе с асинхронными обработчиками
+    - Директива 'use client' должна стоять после импортов
+  answer: 0
+- id: use-client-server-children
+  skill: server-in-client-children
+  question: use-client-boundary
+  difficulty: 2
+  prompt: Нужна клиентская раскрывающаяся панель (useState), а внутри — статья, которую тяжёлая markdown-библиотека рендерит на сервере. Библиотека не должна попасть в бандл. Как устроить?
+  explanation: "Граница односторонняя: клиентский файл не может импортировать серверный компонент, не сделав его клиентским. Зато серверный родитель может отрендерить серверное дерево и передать его клиенту как `children`. Клиент получит готовый результат, а код библиотеки останется на сервере."
+  type: choose-tool
+  options:
+    - label: Серверная страница рендерит <Collapsible><Article /></Collapsible>, Article передаётся как children
+      why: "Лучший вариант: Article рендерится на сервере, в Collapsible приходит готовое дерево в RSC payload, библиотека в бандл не попадает."
+    - label: Импортировать Article прямо внутри Collapsible.tsx с 'use client'
+      why: Импорт из клиентского файла делает Article клиентским модулем. Markdown-библиотека уедет в бандл, а серверные API в нём сломаются.
+    - label: Поставить 'use client' и в Article, чтобы обе части были интерактивными
+      why: Подходит, только если сама статья интерактивна. Здесь это просто перенос тяжёлого рендера в браузер.
+    - label: Грузить markdown в useEffect и рендерить его на клиенте
+      why: Уместно для данных, которые известны только в браузере. Здесь это лишние запрос и вес бандла, и нет контента в первом HTML.
+  answer: 0
+- id: use-client-server-action-prop
+  skill: server-actions-across-boundary
+  question: use-client-boundary
+  difficulty: 2
+  prompt: Допишите код так, чтобы серверный компонент мог законно передать функцию likePost в клиентский LikeButton.
+  explanation: "Обычную функцию через границу передать нельзя. Функцию из файла с `'use server'` можно: на клиент уходит ссылка на серверное действие, и при вызове выполняется запрос к серверу. Серверный компонент может быть `async` и ждать данные из БД через `await` прямо в теле."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    // actions.ts
+    ___;
+    export async function likePost(id: string) {
+      await db.likes.add(id);
+    }
+
+    // Post.tsx — Server Component
+    import { likePost } from './actions';
+    import { LikeButton } from './LikeButton';
+    export default ___ function Post({ id }: { id: string }) {
+      const post = ___ db.posts.find(id);
+      return <LikeButton postId={id}
+        initial={post.likes} onLike={likePost} />;
+    }
+  tokens:
+    - "'use server'"
+    - async
+    - await
+  decoys:
+    - "'use client'"
+    - use
+    - "'server-only'"
+
+# suppress-hydration-warning: принято из черновика 2026-11-07
+- id: suppress-hydration-vs-client-only
+  skill: hydration-mismatch-handling
+  question: suppress-hydration-warning
+  difficulty: 2
+  prompt: Чем `suppressHydrationWarning` принципиально отличается от рендера значения только на клиенте?
+  explanation: "`suppressHydrationWarning` ничего не исправляет. Он только разрешает тексту одного элемента отличаться от серверного: это ожидаемая и безобидная разница, например у относительного времени. Если значения на сервере нет вообще (`window`, `localStorage`), сервер и первый клиентский рендер показывают общий fallback, а настоящее значение появляется после гидрации."
+  type: quiz
+  options:
+    - label: Он лишь глушит предупреждение о разнице текста одного элемента, а клиентский рендер нужен, когда данных на сервере нет вообще
+      why: Верно. Атрибут подходит для неизбежного расхождения, например «5 минут назад». Для значения из браузера он ничего не решает, только прячет симптом.
+    - label: Он заставляет React перерисовать узел клиентским значением, так что результат тот же, только без Suspense
+      why: "Нет. Атрибут ничего не перерисовывает: он только убирает предупреждение. Текст может остаться серверным до следующего обновления."
+    - label: Он отключает гидрацию для всего поддерева, и оно рендерится на клиенте с нуля
+      why: "Нет. Атрибут действует на один уровень: на текст и атрибуты самого элемента. Дочерние элементы проверяются как обычно, гидрация не отключается."
+    - label: "Разницы нет: оба способа убирают mismatch, выбор зависит от стиля кода"
+      why: "Нет. Первый скрывает предупреждение, второй устраняет само несовпадение: сервер и первый клиентский рендер отдают одинаковую разметку."
+  answer: 0
+- id: suppress-hydration-wrong-level
+  skill: suppress-hydration-scope
+  question: suppress-hydration-warning
+  difficulty: 2
+  prompt: Разработчик хотел убрать предупреждение о гидрации из-за относительного времени, но оно осталось. Где ошибка?
+  explanation: "`suppressHydrationWarning` действует только на один уровень: на текст и атрибуты элемента, у которого он стоит. Атрибут нужно ставить прямо на `<time>`. Если повесить его на контейнер, нужное предупреждение не уйдёт. Хуже того, это создаёт ложное ощущение, что всё поддерево «защищено»."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Comment({ c }: { c: CommentT }) {
+      return (
+        <article suppressHydrationWarning>
+          <p>{c.text}</p>
+          <time>{formatRelative(c.createdAt)}</time>
+        </article>
+      );
+    }
+  bugLines:
+    - 3
+    - 5
+  causes:
+    - Атрибут стоит на контейнере, а действует только на собственный текст элемента. Его нужно перенести на `<time>`
+    - formatRelative нельзя вызывать в JSX — только в useEffect
+    - У `<time>` не хватает атрибута dateTime, поэтому React считает разметку несовпавшей
+    - suppressHydrationWarning работает только в клиентских компонентах с 'use client'
+  answer: 0
+- id: suppress-hydration-localstorage-choice
+  skill: client-only-rendering
+  question: suppress-hydration-warning
+  difficulty: 2
+  prompt: На SSR-странице нужен блок «Вы недавно смотрели» с id товара из `localStorage`. Гидрация должна пройти без ошибок и без мигания чужого контента. Что выбрать?
+  explanation: "Правило: разница в тексте ожидаема и безобидна (время, локаль) — ставим `suppressHydrationWarning` на конкретный узел. Значения на сервере нет вообще — рендерим одинаковый fallback на сервере и при гидрации, а настоящее значение показываем после монтирования."
+  type: choose-tool
+  options:
+    - label: Плейсхолдер на сервере и при гидрации, чтение localStorage после монтирования (useEffect или useSyncExternalStore)
+      why: "Лучший вариант: разметка сервера и первого клиентского рендера совпадает, а браузерное значение появляется уже после гидрации."
+    - label: suppressHydrationWarning на блоке с товаром
+      why: Уберёт только предупреждение о тексте одного узла. Структура разметки всё равно будет отличаться, а данных на сервере как не было, так и нет.
+    - label: Проверка `typeof window !== 'undefined'` прямо в рендере
+      why: "Это гарантированный mismatch: на сервере одна ветка, при гидрации другая. Такая проверка годится только в обработчиках и эффектах."
+    - label: "Читать localStorage в ленивом инициализаторе: useState(() => localStorage.getItem(...))"
+      why: Инициализатор выполняется и на сервере, где localStorage нет, и там будет ReferenceError. С проверкой window вместо ошибки получится mismatch.
+  answer: 0
+- id: suppress-hydration-mounted-pattern
+  skill: client-only-rendering
+  question: suppress-hydration-warning
+  difficulty: 2
+  prompt: Допишите компонент так, чтобы сервер и первый клиентский рендер совпали, а значение из localStorage появилось после гидрации.
+  explanation: Начальное состояние `null` одинаково на сервере и при гидрации, поэтому оба рендера дают `<Skeleton />`. `useEffect` не выполняется на сервере и запускается после гидрации, а пустой массив зависимостей означает, что чтение будет один раз. `useMemo` выполнился бы во время рендера, в том числе на сервере, где localStorage нет. `useCallback` не вызвал бы функцию вовсе.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function LastViewed() {
+      const [id, setId] = useState<string | null>(___);
+      ___(() => {
+        setId(localStorage.getItem('lastViewed'));
+      }, ___);
+      if (id === null) return <Skeleton />;
+      return <Link href={`/p/${id}`}>Вы смотрели</Link>;
+    }
+  tokens:
+    - "null"
+    - useEffect
+    - "[]"
+  decoys:
+    - useMemo
+    - useCallback
+    - undefined

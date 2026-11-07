@@ -273,6 +273,56 @@
     - Отключение правила линтера `exhaustive-deps` исправляет проблему.
     - Добавить `count` в массив зависимостей — правильное решение без побочных эффектов.
     - Функцию из `useEffectEvent` нужно указывать в зависимостях эффекта, или её можно вызывать во время рендера и передавать как проп.
+- question: use-imperative-handle
+  points:
+    - id: uih-narrow-api
+      text: "`useImperativeHandle` подменяет значение `ref` родителя: вместо DOM-узла родитель получает объект с узким, выбранным ребёнком API (например, только `play()`/`pause()` или `focus()`)."
+      weight: 3
+    - id: ref-callback-attach-detach
+      text: "Ref-колбэк с cleanup нужен, когда важен сам момент присоединения и отсоединения DOM-узла: при маунте подключить сторонний виджет или подписку, а в возвращённой функции уничтожить их."
+      weight: 3
+    - id: react19-ref-as-prop
+      text: В React 19 функциональный компонент получает `ref` как обычный prop, поэтому `forwardRef` не обязателен. `useImperativeHandle` при этом работает так же и по-прежнему нужен для ограничения API.
+      weight: 2
+    - id: plain-forward-enough
+      text: "Если родителю нужен DOM-узел целиком без изменений, `useImperativeHandle` не нужен: достаточно передать `ref` насквозь на элемент."
+      weight: 2
+    - id: cleanup-on-reattach
+      text: Без cleanup в ref-колбэке при повторном подключении узла (смена `key`, условный рендер) старая подписка или экземпляр виджета остаётся висеть.
+      weight: 1
+    - id: imperative-is-exception
+      text: "Императивный handle — исключение из декларативного стиля. Через него не стоит напрямую менять состояние родителя: для этого колбэк поднимают через props, сохраняя однонаправленный поток данных."
+      weight: 1
+  misconceptions:
+    - "`useImperativeHandle` нужен для любой передачи ref дочернему DOM-элементу, иначе родитель не получит узел."
+    - В React 19 `useImperativeHandle` больше не нужен, потому что `ref` стал обычным prop.
+    - Ref-колбэк с cleanup ограничивает, какие методы узла видит родитель, то есть решает ту же задачу, что и `useImperativeHandle`.
+    - Через `useImperativeHandle` нормально выставлять наружу прямое изменение состояния родителя (`setState` родителя из ребёнка).
+- question: use-controllable-state
+  points:
+    - id: source-of-truth-by-value
+      text: "Источник истины определяется проверкой `value !== undefined`. В controlled-режиме текущее значение берётся из props `value`, в uncontrolled — из внутреннего `useState(defaultValue)`. Источники не смешиваются: `current = isControlled ? value : internal`."
+      weight: 3
+    - id: setter-per-mode
+      text: "`setValue` в uncontrolled-режиме обновляет внутренний state через `setInternal`. В controlled-режиме внутренний state не трогается: значение меняет родитель, получив `onChange` и передав новый `value`."
+      weight: 3
+    - id: onchange-both-modes
+      text: "`onChange` вызывается в обоих режимах, чтобы родитель узнавал об изменениях и без полного контроля (например, для аналитики)."
+      weight: 2
+    - id: no-mode-switch
+      text: "Режим не должен меняться за время жизни экземпляра: переход `value` → `undefined` и обратно — антипаттерн, поведение становится непредсказуемым. Защищаются так: запоминают первое значение `isControlled` в `useRef` и предупреждают в dev-режиме, либо явно документируют, что так использовать API нельзя."
+      weight: 2
+    - id: no-effect-sync
+      text: Нельзя хранить копию `value` во внутреннем state и синхронизировать её через `useEffect`. Это даёт расхождение на один рендер и лишний источник правды.
+      weight: 2
+    - id: stable-setter-and-input-analogy
+      text: "Сильный ответ отмечает детали: `setValue` мемоизирован через `useCallback` с зависимостями `[isControlled, onChange]`. Паттерн повторяет пару `value`/`defaultValue` у нативного `<input>`."
+      weight: 1
+  misconceptions:
+    - В controlled-режиме нужно копировать `value` во внутренний state через `useEffect` и читать значение оттуда.
+    - "`onChange` нужен только в controlled-режиме, в uncontrolled его вызывать не надо."
+    - Переключение компонента между controlled и uncontrolled в процессе жизни (передать `value`, потом `undefined`) — нормальный и безопасный сценарий.
+    - Изменение `defaultValue` после монтирования обновит внутреннее состояние в uncontrolled-режиме (на деле `useState` использует начальное значение только при первом рендере).
 - question: use-effect-event
   points:
     - id: reactive-vs-nonreactive

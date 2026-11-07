@@ -84,9 +84,9 @@ function Tabs({ defaultTab, value, onChange, children }: TabsProps) {
 }
 
 function TabList({ children }: { children: React.ReactNode }) {
+  const ctx = useContext(TabsContext)!; // хук — на верхнем уровне компонента, не внутри обработчика
   const ids = Children.map(children, (c) => (isValidElement(c) ? c.props.id : null)) ?? [];
   function onKeyDown(e: React.KeyboardEvent) {
-    const ctx = useContext(TabsContext)!;
     const i = ids.indexOf(ctx.active);
     if (e.key === 'ArrowRight') ctx.setActive(ids[(i + 1) % ids.length]);
     if (e.key === 'ArrowLeft') ctx.setActive(ids[(i - 1 + ids.length) % ids.length]);

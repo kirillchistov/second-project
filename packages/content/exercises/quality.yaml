@@ -964,3 +964,278 @@
     - registerPolicy
     - escape
     - toString
+
+# accessible-modal: принято из черновика 2026-11-07
+- id: accessible-modal-requirements-quiz
+  skill: accessible-modal-behavior
+  question: accessible-modal
+  difficulty: 2
+  prompt: Модалка сделана на `div`. Какой набор поведения нужен, чтобы ею могли пользоваться с клавиатуры и через скринридер?
+  explanation: "ARIA-атрибуты только описывают семантику, поведение пишете вы. Нужно: перенести фокус внутрь, запереть Tab, закрывать по Escape, заблокировать прокрутку фона и вернуть фокус на триггер. Если пропустить последний шаг, пользователь окажется в начале страницы."
+  type: quiz
+  options:
+    - label: Фокус внутрь при открытии, Tab заперт в модалке, Escape закрывает, фон не скроллится, при закрытии фокус возвращается на триггер
+      why: "Верно. Это полный набор: пользователь не уходит фокусом под модалку и после закрытия продолжает с того места, где был."
+    - label: 'Достаточно `role="dialog"` и `aria-modal="true"`: браузер сам перенесёт фокус и не выпустит его наружу'
+      why: ARIA меняет только то, что объявляет скринридер. На `div` браузер не переносит и не запирает фокус и не обрабатывает Escape.
+    - label: Фокус внутрь и Escape; после закрытия браузер сам вернёт фокус на кнопку, которая открыла модалку
+      why: Когда сфокусированный `div` удаляется из DOM, фокус уходит на body. Возвращать его на триггер нужно вручную.
+    - label: "Затемняющий overlay с большим z-index: перекрытые элементы становятся недоступны для Tab"
+      why: z-index влияет только на отрисовку. Tab по-прежнему проходит по всем фокусируемым элементам под overlay.
+  answer: 0
+- id: accessible-modal-focus-restore-bug
+  skill: modal-focus-restore
+  question: accessible-modal
+  difficulty: 2
+  prompt: После закрытия модалки фокус не возвращается на кнопку, которая её открыла. Найдите ошибку.
+  explanation: "Строки 2–3 стоят не в том порядке. После `focus()` в `document.activeElement` уже лежит сам диалог, и в cleanup фокус уходит на удалённый элемент. Правило: сначала запомнить активный элемент, потом переносить фокус."
+  type: find-bug
+  language: tsx
+  code: |-
+    useEffect(() => {
+      dialogRef.current?.focus();
+      const trigger = document.activeElement as HTMLElement;
+      document.body.style.overflow = 'hidden';
+      function onKey(e: KeyboardEvent) {
+        if (e.key === 'Escape') onClose();
+      }
+      document.addEventListener('keydown', onKey);
+      return () => {
+        document.removeEventListener('keydown', onKey);
+        document.body.style.overflow = '';
+        trigger?.focus();
+      };
+    }, [onClose]);
+  bugLines:
+    - 2
+    - 3
+  causes:
+    - "activeElement читается уже после focus() на диалоге: запоминается сам диалог, а не кнопка-триггер"
+    - Escape нужно слушать на keyup, иначе событие не дойдёт до document
+    - removeEventListener не снимет обработчик, потому что onKey пересоздаётся при каждом рендере
+    - overflow нужно сбрасывать до вызова removeEventListener, иначе фокус не вернётся
+  answer: 0
+- id: accessible-modal-lifecycle-recipe
+  skill: accessible-modal-behavior
+  question: accessible-modal
+  difficulty: 2
+  prompt: "Расставьте события жизни доступной модалки по порядку: от клика по кнопке до возврата фокуса."
+  explanation: Эффект запускается после монтирования. Он сначала запоминает activeElement, пока там ещё кнопка-триггер, и только потом переносит фокус внутрь, иначе запомнится сама модалка. Escape вызывает onClose, модалка размонтируется, и cleanup эффекта возвращает фокус на триггер.
+  type: order
+  kind: timeline
+  steps:
+    - Пользователь нажимает кнопку «Открыть», и модалка монтируется
+    - Эффект запоминает document.activeElement, то есть кнопку-триггер
+    - "Фокус переносится внутрь модалки: на первый интерактивный элемент или заголовок"
+    - Пользователь нажимает Escape, обработчик keydown вызывает onClose
+    - Модалка размонтируется, cleanup эффекта возвращает фокус на запомненную кнопку
+- id: accessible-modal-native-dialog-choice
+  skill: modal-implementation-choice
+  question: accessible-modal
+  difficulty: 3
+  prompt: "Простая модалка подтверждения в проекте без UI-библиотеки. Нужно минимум своего кода: Escape закрывает, фон недоступен для Tab и скринридера, модалка поверх всего без войны z-index. Что выбрать?"
+  explanation: "`showModal()` даёт top layer, делает фон inert, закрывает модалку по Escape (событие cancel) и даёт `::backdrop`. Современные браузеры при закрытии возвращают фокус на прежний элемент. Прокрутку фона всё равно блокируйте сами, например через `body:has(dialog[open]) { overflow: hidden }`."
+  type: choose-tool
+  options:
+    - label: Нативный `<dialog>` и `showModal()`
+      why: "Лучше всего подходит под эти условия: inert-фон, Escape, top layer и backdrop встроены в браузер. Своего кода остаётся минимум, в основном блокировка прокрутки."
+    - label: '`div` с `role="dialog"`, свой focus trap и обработчик Escape'
+      why: Оправдан, если нужно нестандартное поведение, которое не укладывается в `<dialog>`. Иначе это много ручного кода и лишний риск ошибок с фокусом.
+    - label: Готовый Dialog из Radix UI или React Aria
+      why: Хорош, если библиотека уже в проекте или нужны вложенные диалоги и сложные анимации. Тащить зависимость ради одной простой модалки избыточно.
+    - label: Overlay с высоким z-index и `aria-hidden` на корне приложения
+      why: "`aria-hidden` прячет фон только от скринридера, а Tab по-прежнему уходит под модалку. Без focus trap или inert этого недостаточно."
+  answer: 0
+
+# accessible-autocomplete: принято из черновика 2026-11-07
+- id: a11y-autocomplete-activedescendant-quiz
+  skill: combobox-active-descendant
+  question: accessible-autocomplete
+  difficulty: 3
+  prompt: Почему в доступном автокомплите стрелки меняют `aria-activedescendant` на `<input>`, а не переносят DOM-фокус на пункты списка?
+  explanation: "В паттерне combobox фокус всё время на `<input>`: ввод не прерывается, а `aria-activedescendant` сообщает скринридеру, какая опция активна. Перенос фокуса подходит для меню и listbox без поля ввода. В автокомплите он ломает печать."
+  type: quiz
+  options:
+    - label: Пользователь должен продолжать печатать, а скринридер — озвучивать активную опцию по id, на который указывает инпут
+      why: Верно. Фокус и каретка остаются в поле, а `aria-activedescendant` даёт ассистивным технологиям «виртуальный фокус» на опции.
+    - label: Иначе браузер не прокрутит список к подсвеченному пункту
+      why: Прокрутка — вторичный вопрос, её легко сделать через scrollIntoView. Главная причина — фокус нужен полю для ввода.
+    - label: Элементы `<li>` нельзя сделать фокусируемыми даже через tabIndex
+      why: "Можно: `tabIndex={-1}` и `.focus()` работают. Так делают в меню, но в автокомплите это ломает ввод текста."
+    - label: "`aria-activedescendant` автоматически выбирает опцию по Enter, так что обработчик не нужен"
+      why: Атрибут ничего не выбирает и не обрабатывает клавиши. Enter, стрелки и Escape по-прежнему обрабатывает ваш onKeyDown.
+  answer: 0
+- id: a11y-autocomplete-focus-moved-bug
+  skill: combobox-active-descendant
+  question: accessible-autocomplete
+  difficulty: 2
+  prompt: "Клавиатурные пользователи жалуются: после нажатия стрелки вниз нельзя дописать запрос. Найдите строку с ошибкой."
+  explanation: "`.focus()` на пункте списка уводит фокус из `<input>`, и следующие символы уже не попадают в поле. В combobox фокус остаётся на инпуте. Меняйте только индекс активной опции и `aria-activedescendant`, а пункт подсвечивайте стилями."
+  type: find-bug
+  language: tsx
+  code: |-
+    function onKeyDown(e: React.KeyboardEvent) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const next = Math.min(active + 1, last);
+        setActive(next);
+        itemRefs.current[next]?.focus();
+      }
+      if (e.key === 'Enter' && active >= 0) {
+        onSelect(options[active]);
+      }
+      if (e.key === 'Escape') setActive(-1);
+    }
+  bugLines:
+    - 6
+  causes:
+    - "`e.preventDefault()` блокирует ввод любых символов в поле"
+    - DOM-фокус переносится на пункт списка, и `<input>` перестаёт получать ввод
+    - Нужно было передать в setActive колбэк, иначе индекс не обновится
+    - Escape должен очищать query, иначе фокус застревает в списке
+  answer: 1
+- id: a11y-autocomplete-aria-roles
+  skill: combobox-aria-markup
+  question: accessible-autocomplete
+  difficulty: 2
+  prompt: Допишите ARIA-разметку автокомплита по паттерну combobox.
+  explanation: '`<input>` получает role="combobox" и через `aria-controls` ссылается на listbox. `aria-activedescendant` указывает id активной опции. Пункты списка — role="option" с `aria-selected`. Без этой связки скринридер не поймёт, что поле управляет списком.'
+  type: fill-tokens
+  language: tsx
+  code: |-
+    <input
+      role="___"
+      aria-expanded={open}
+      aria-controls={listboxId}
+      aria-___={active >= 0 ? optId(active) : undefined}
+      value={query}
+      onChange={(e) => setQuery(e.target.value)}
+    />
+    <ul role="listbox" id={listboxId}>
+      {options.map((o, i) => (
+        <li key={o.id} id={optId(i)} role="___"
+          aria-selected={i === active}>{o.label}</li>
+      ))}
+    </ul>
+  tokens:
+    - combobox
+    - activedescendant
+    - option
+  decoys:
+    - textbox
+    - describedby
+    - menuitem
+    - listbox
+- id: a11y-autocomplete-announce-results
+  skill: live-region-announcements
+  question: accessible-autocomplete
+  difficulty: 2
+  prompt: После каждого введённого символа список подсказок обновляется. Как сообщить пользователю скринридера, сколько вариантов найдено, не перебивая его ввод?
+  explanation: "Изменение содержимого listbox скринридер сам не объявляет. Нужен отдельный, заранее смонтированный live-регион с polite: он озвучит текст, когда пользователь сделает паузу. Вежливость важна: assertive на каждый символ раздражает и перебивает."
+  type: choose-tool
+  options:
+    - label: 'Визуально скрытый `<div aria-live="polite">` с текстом «Найдено: N»'
+      why: Лучший вариант. Регион существует с первого рендера, обновление текста озвучивается в паузе и не прерывает ввод.
+    - label: '`role="alert"` с количеством результатов'
+      why: "Alert — assertive: он перебивает речь на каждый символ. Подходит для срочных ошибок, например «сеть недоступна», а не для частых подсказок."
+    - label: "Обновлять `aria-label` у listbox: «Список, 5 вариантов»"
+      why: Смена атрибута не объявляется. Label прочтут, только когда пользователь сам перейдёт к списку.
+    - label: Переносить фокус на список после каждого ответа сервера
+      why: "Ломает ввод: фокус уходит из поля. Перенос фокуса уместен для смены контекста, например при открытии диалога."
+  answer: 0
+
+# csp-sri-headers: принято из черновика 2026-11-07
+- id: csp-sri-headers-layers-quiz
+  skill: web-security-defense-layers
+  question: csp-sri-headers
+  difficulty: 3
+  prompt: На сайте строгая CSP с nonce, а сторонняя библиотека грузится с разрешённого `https://cdn.example.com`. Зачем ещё SRI на этом скрипте и `HttpOnly` на cookie сессии?
+  explanation: CSP, SRI и флаги cookie — независимые слои против разных векторов. CSP решает, *откуда* можно выполнять код. SRI проверяет, *что именно* пришло с CDN. `HttpOnly` ограничивает ущерб, если XSS всё же прошёл. `SameSite` защищает от CSRF. Ни один слой не заменяет другой, поэтому их закладывают в архитектуру сразу, а не добавляют потом.
+  type: quiz
+  options:
+    - label: "Они закрывают другие угрозы: CSP не заметит подмену файла на разрешённом CDN, а HttpOnly спасёт сессию, если XSS всё же прошёл"
+      why: "Верно. Allowlist и nonce проверяют источник, а не содержимое файла. HttpOnly — последний рубеж: даже выполненный чужой скрипт не прочитает cookie."
+    - label: "Не нужны: CSP с nonce проверяет и содержимое внешних скриптов, так что подменённый файл не выполнится"
+      why: Nonce и список доменов говорят только «этому источнику можно доверять». Хэш содержимого сверяет именно SRI через атрибут integrity.
+    - label: "SRI нужен, а HttpOnly — нет: при строгой CSP XSS невозможен, значит читать cookie из JS некому"
+      why: "CSP сильно снижает риск XSS, но не обнуляет его: бывают дыры в политике, JSONP-эндпоинты и скомпрометированные разрешённые домены. Слои защиты дублируют друг друга намеренно."
+    - label: "Вместо HttpOnly достаточно SameSite=Strict: cookie не уйдёт чужому сайту, значит её не украдут"
+      why: SameSite ограничивает отправку cookie в межсайтовых запросах (защита от CSRF). Чтение cookie через document.cookie внедрённым скриптом он не запрещает.
+  answer: 0
+- id: csp-sri-headers-static-nonce
+  skill: csp-nonce-per-request
+  question: csp-sri-headers
+  difficulty: 3
+  prompt: SSR-обработчик отдаёт HTML со строгой CSP. Найдите строку, из-за которой nonce почти не защищает от XSS.
+  explanation: "Nonce должен быть непредсказуемым и **новым для каждого ответа**. Константа уровня модуля видна в исходнике любой страницы, и атакующий просто подставит её в свой `<script nonce>`. По той же причине HTML с nonce нельзя кешировать на CDN как статику: закешированная страница раздаёт всем один и тот же nonce."
+  type: find-bug
+  language: ts
+  code: |-
+    const nonce = crypto.randomUUID();
+
+    export async function handle(req: Request) {
+      const html = await renderApp({ nonce });
+      return new Response(html, {
+        headers: {
+          'Content-Type': 'text/html',
+          'Content-Security-Policy':
+            `script-src 'nonce-${nonce}'; ` +
+            "object-src 'none'",
+        },
+      });
+    }
+  bugLines:
+    - 1
+  causes:
+    - Nonce создаётся один раз при загрузке модуля и одинаков для всех запросов — его можно узнать из любой страницы и подставить во внедрённый скрипт
+    - В script-src нет 'self', поэтому собственные бандлы приложения перестанут загружаться
+    - crypto.randomUUID недостаточно случаен для nonce — нужен Math.random с длинной строкой
+    - CSP нужно передавать через <meta http-equiv> в HTML, а не заголовком ответа
+  answer: 0
+- id: csp-sri-headers-cookie-and-integrity
+  skill: cookie-flags-and-sri
+  question: csp-sri-headers
+  difficulty: 2
+  prompt: Допишите код по требованиям. Сессионная cookie недоступна из JS и не отправляется ни в каких межсайтовых запросах, даже при переходе по ссылке. Скрипт с CDN не выполнится, если файл на CDN подменят.
+  explanation: "`HttpOnly` закрывает `document.cookie` для JS, то есть для кражи сессии через XSS. `SameSite=Strict` не шлёт cookie ни в одном межсайтовом запросе (`Lax` пропускает переходы по ссылкам). `integrity` с хэшем включает SRI: при несовпадении хэша браузер не выполнит скрипт. Для кросс-доменного SRI нужен ещё `crossOrigin` и CORS-ответ от CDN."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    res.headers.append(
+      'Set-Cookie',
+      `sid=${id}; Path=/; ___; Secure; SameSite=___`,
+    );
+
+    const vendor = (
+      <script
+        src="https://cdn.example.com/lib@2.1.0.js"
+        ___="sha384-oqVuAfXRKap7fdgcCY5u"
+        crossOrigin="anonymous"
+      />
+    );
+  tokens:
+    - HttpOnly
+    - Strict
+    - integrity
+  decoys:
+    - Lax
+    - nonce
+    - HostOnly
+    - checksum
+- id: csp-sri-headers-rollout-report-only
+  skill: csp-rollout-strategy
+  question: csp-sri-headers
+  difficulty: 3
+  prompt: В большом легаси-приложении нужно ввести строгую CSP с nonce. Сколько инлайн-скриптов и сторонних источников сломается, неизвестно, а ломать прод нельзя. С чего начать?
+  explanation: "Строгую CSP вводят итерациями. Сначала политику ставят в режиме `Content-Security-Policy-Report-Only` и собирают отчёты через `report-to`/`report-uri`. Затем выносят инлайн-скрипты или добавляют им nonce и чистят источники. Только после этого включают блокирующий заголовок. Отчёты остаются полезны и потом: всплеск нарушений часто означает попытку атаки."
+  type: choose-tool
+  options:
+    - label: Заголовок Content-Security-Policy-Report-Only со строгой политикой и report-to
+      why: Браузер ничего не блокирует, но присылает отчёт о каждом нарушении. Можно собрать полный список проблем на реальном трафике и исправить их до включения блокировки.
+    - label: Сразу блокирующая CSP с 'unsafe-inline', ужесточить позже
+      why: "Типичная ловушка: «временное» 'unsafe-inline' остаётся навсегда и почти обнуляет защиту от XSS. Годится разве что как явно ограниченный по сроку шаг с планом перехода на nonce."
+    - label: CSP через <meta http-equiv> только на части страниц
+      why: Meta-тег сразу блокирует, режим Report-Only и report-to в нём не поддерживаются. Подходит лишь для статики, где нельзя управлять заголовками, и не помогает безопасно найти поломки.
+    - label: Сначала добавить SRI ко всем сторонним скриптам
+      why: SRI полезен против подмены файлов на CDN, но не показывает, какие инлайн-скрипты и источники нарушат CSP. Это отдельный слой, а не способ раскатки политики.
+  answer: 0

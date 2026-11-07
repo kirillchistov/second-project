@@ -1483,3 +1483,305 @@
     - label: "Блокировка документа на сервере: правит один"
       why: Простой единый источник истины, подходит для форм и редких правок. Но одновременное редактирование и офлайн-работа исключаются.
   answer: 0
+
+# compound-component-tabs: принято из черновика 2026-11-07
+- id: compound-tabs-main-idea
+  skill: compound-components
+  question: compound-component-tabs
+  difficulty: 2
+  prompt: В чём главное преимущество compound-API `<Tabs.List>`/`<Tabs.Tab>`/`<Tabs.Panel>` перед пропом `tabs={[{ id, label, content }]}`?
+  explanation: "Compound-компонент отдаёт структуру виджета потребителю: набор и порядок частей задаются в JSX, а состояние они делят через общий Context. Поэтому динамические вкладки и произвольные обёртки работают без синхронизации отдельного массива. Tab и Panel связывают по `id`, а не по индексу."
+  type: quiz
+  options:
+    - label: "Потребитель собирает структуру в JSX: оборачивает вкладки, вставляет свои элементы, меняет набор условно; части делят состояние через Context"
+      why: Верно. Гибкость разметки — суть паттерна. Context доходит до частей через любую вложенность, поэтому обёртки и условный рендер ничего не ломают.
+    - label: "Он быстрее: Context не вызывает перерендеров, в отличие от пропа с массивом"
+      why: "Наоборот: при смене value Context перерисовывает всех потребителей. Выигрыш не в производительности, а в гибкости API."
+    - label: Массив конфигурации нельзя менять в рантайме, поэтому динамические вкладки возможны только в compound-варианте
+      why: Массив тоже можно менять. Но каждую новую вариацию разметки придётся добавлять полем в конфиг, а в JSX её просто пишут.
+    - label: Tabs прокидывает части props через cloneElement, поэтому у них не бывает лишних зависимостей
+      why: "cloneElement — хрупкая альтернатива: он видит только прямых детей и ломается от обёрток. Устойчивый compound строят на Context."
+  answer: 0
+- id: compound-tabs-hook-in-handler
+  skill: hooks-in-event-handler
+  question: compound-component-tabs
+  difficulty: 2
+  prompt: Нажатие стрелки на вкладке роняет приложение. Найдите строку с ошибкой.
+  explanation: "Хуки вызывают только на верхнем уровне компонента во время рендера. В обработчике события диспетчера хуков нет: React сообщает «Invalid hook call», и вызов падает. Исправление: перенести `const ctx = useContext(TabsContext)!` в тело TabList выше onKeyDown, тогда обработчик прочитает ctx из замыкания. Для полного roving tabindex фокус тоже надо переводить на новую вкладку."
+  type: find-bug
+  language: tsx
+  code: |-
+    function TabList({ children }: Props) {
+      const ids = Children.map(children, (c) =>
+        isValidElement<{ id: string }>(c) ? c.props.id : null) ?? [];
+      function onKeyDown(e: React.KeyboardEvent) {
+        const ctx = useContext(TabsContext)!;
+        const i = ids.indexOf(ctx.active);
+        if (e.key === 'ArrowRight')
+          ctx.setActive(ids[(i + 1) % ids.length]);
+      }
+      return <div role="tablist" onKeyDown={onKeyDown}>{children}</div>;
+    }
+  bugLines:
+    - 5
+  causes:
+    - "useContext вызывается внутри обработчика события, а не на верхнем уровне компонента: вне рендера хук падает с Invalid hook call"
+    - Children.map нельзя вызывать на каждом рендере — его нужно обернуть в useMemo
+    - "onKeyDown нужно вешать на каждую кнопку вкладки: на tablist событие клавиатуры не дойдёт"
+    - (i + 1) % ids.length даёт неверный индекс на последней вкладке, нужен Math.min
+  answer: 0
+- id: compound-tabs-roving-tabindex
+  skill: tabs-roving-tabindex-aria
+  question: compound-component-tabs
+  difficulty: 2
+  prompt: "Допишите вкладку по WAI-ARIA: связь с панелью для скринридера и roving tabindex."
+  explanation: При roving tabindex клавиша Tab заходит только на активную вкладку (`tabIndex=0`), остальные получают `-1`, а между ними фокус двигают стрелки. `aria-controls` связывает вкладку с её панелью. Панель ссылается обратно через `aria-labelledby`, указывая id вкладки (`tab-${id}`).
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function Tab({ id, children }: TabProps) {
+      const ctx = useContext(TabsContext)!;
+      const selected = ctx.active === id;
+      return (
+        <button
+          role="tab"
+          id={`tab-${id}`}
+          aria-selected={selected}
+          aria-___={`panel-${id}`}
+          tabIndex={selected ? ___ : ___}
+          onClick={() => ctx.setActive(id)}
+        >{children}</button>
+      );
+    }
+  tokens:
+    - controls
+    - "0"
+    - "-1"
+  decoys:
+    - labelledby
+    - describedby
+    - "1"
+    - "true"
+- id: compound-tabs-api-choice
+  skill: component-api-design
+  question: compound-component-tabs
+  difficulty: 3
+  prompt: Вы делаете Tabs для дизайн-системы. Команды хотят оборачивать отдельные вкладки в `<Can permission>`, вставлять бейджи и разделители, добавлять вкладки в рантайме. Какой API выбрать?
+  explanation: "Правило: если потребителю нужна свобода разметки (обёртки, условные части, вставки), выбирайте compound-компонент на Context. Конфиг-массив хорош для однотипных данных, а render prop — для кастомизации только внешнего вида. Для синхронизации с URL тот же API получает controlled-режим: `value` + `onChange`."
+  type: choose-tool
+  options:
+    - label: "Compound-компонент: Tabs, Tabs.List, Tabs.Tab, Tabs.Panel с общим Context"
+      why: Лучший выбор. Context доходит до частей через любые обёртки, набор вкладок — это просто JSX, а Tab и Panel связаны по id.
+    - label: Проп tabs={[{ id, label, content }]}
+      why: Подходит для простых однотипных вкладок, генерируемых из данных. Каждая новая вариация разметки превращается в новое поле конфига.
+    - label: Tabs перебирает children и прокидывает isActive/onSelect через cloneElement
+      why: "Видит только прямых детей: обёртка `<Can>` или фрагмент рвёт связь. Терпимо лишь для жёстко фиксированной структуры."
+    - label: Render prop renderTab(tab, isActive) поверх массива вкладок
+      why: Даёт свободу в отрисовке самой вкладки, но набор и структура всё равно задаются массивом. Годится, когда нужна кастомизация только вида.
+  answer: 0
+
+# notification-system-design: принято из черновика 2026-11-07
+- id: notification-system-why-global-store
+  skill: toast-architecture
+  question: notification-system-design
+  difficulty: 2
+  prompt: Почему в системе уведомлений компонент вызывает `notify({ type, message })` в глобальный стор, а не рендерит `<Toast />` у себя?
+  explanation: "Уведомление — глобальный объект UI с собственным жизненным циклом. Схема такая: один стор (Context + reducer или Zustand), один `<Toaster />` у корня и императивный `notify()` из любого места. Тогда toast переживает размонтирование инициатора, а очередь, лимит, таймеры и `aria-live` живут в одном месте."
+  type: quiz
+  options:
+    - label: Toast должен пережить размонтирование инициатора, а очередь, лимит и aria-live — управляться в одном месте
+      why: Верно. JSX в инициаторе исчезнет вместе с ним. Единый Toaster у корня управляет стопкой, лимитом и live-регионом централизованно.
+    - label: Императивный вызов не вызывает ререндер, поэтому так быстрее
+      why: Неверно. dispatch в стор тоже вызывает ререндер, только у Toaster, а не у инициатора. Дело не в производительности, а во времени жизни уведомления.
+    - label: Достаточно рендерить Toast через createPortal прямо в компоненте — глобальный стор нужен только ради SSR
+      why: "Неверно. Портал меняет место в DOM, но не владельца: размонтируется компонент — исчезнет и портал. Очередь и лимит тоже останутся разрозненными."
+    - label: Context нельзя обновлять из обработчиков событий, поэтому нужен императивный API
+      why: Неверно. dispatch из useReducer, переданный через Context, можно вызывать в обработчиках. Императивный API нужен, чтобы отвязать жизнь toast от вызывающего компонента.
+  answer: 0
+- id: notification-timer-reset-on-rerender
+  skill: toast-autoclose-timer
+  question: notification-system-design
+  difficulty: 3
+  prompt: Если уведомления приходят часто, старые toast не закрываются, пока поступают новые. React Compiler не используется. Найдите причину.
+  explanation: "Каждое добавление toast перерисовывает Toaster, и все ToastItem получают новую стрелку onDismiss. Эффект зависит от onDismiss, поэтому перезапускается: cleanup гасит таймер, и отсчёт начинается заново. Исправления: передавать стабильный dispatch и id, держать onDismiss в ref или обернуть его в useEffectEvent (React 19.2)."
+  type: find-bug
+  language: tsx
+  code: |-
+    function ToastItem({ toast, onDismiss }: Props) {
+      useEffect(() => {
+        if (toast.duration === 0) return;
+        const ms = toast.duration ?? 4000;
+        const t = setTimeout(onDismiss, ms);
+        return () => clearTimeout(t);
+      }, [toast.duration, onDismiss]);
+      return <div role="status">{toast.message}</div>;
+    }
+
+    // в Toaster:
+    <ToastItem key={t.id} toast={t}
+      onDismiss={() => remove(t.id)} />
+  bugLines:
+    - 7
+    - 13
+  causes:
+    - onDismiss — новая функция на каждый рендер Toaster, эффект перезапускается, и таймер стартует заново
+    - key={t.id} заставляет React пересоздавать ToastItem при каждом новом уведомлении
+    - clearTimeout в cleanup отменяет таймер сразу после монтирования
+    - setTimeout нельзя вызывать внутри useEffect — нужен useLayoutEffect
+  answer: 0
+- id: notification-reducer-limit-a11y
+  skill: toast-queue-limit
+  question: notification-system-design
+  difficulty: 2
+  prompt: Допишите reducer и контейнер так, чтобы видимыми оставались только последние MAX_VISIBLE уведомлений, а скринридер объявлял новые, не перебивая текущую речь.
+  explanation: '`slice(-N)` без мутации возвращает последние N элементов: самые старые уходят, когда приходит серия событий. `filter` неизменяемо удаляет toast по id. `aria-live="polite"` объявляет новое содержимое после текущей фразы. `assertive` прерывает речь и уместен только для срочных ошибок.'
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function reducer(state: Toast[], action: Action) {
+      if (action.type === 'add') {
+        const next = [...state, action.toast];
+        return next.length > MAX_VISIBLE
+          ? next.___(-MAX_VISIBLE)
+          : next;
+      }
+      return state.___((t) => t.id !== action.id);
+    }
+
+    <div aria-live="___" className="toaster">
+      {toasts.map((t) => <ToastItem key={t.id} />)}
+    </div>
+  tokens:
+    - slice
+    - filter
+    - polite
+  decoys:
+    - at
+    - assertive
+    - map
+    - off
+- id: notification-urgent-error-announce
+  skill: toast-accessibility
+  question: notification-system-design
+  difficulty: 3
+  prompt: Пока пользователь заполняет форму, фоновая оплата завершилась ошибкой. Скринридер должен сообщить об этом сразу, сообщение не должно исчезнуть до прочтения, а работу с формой блокировать нельзя. Что выбрать?
+  explanation: 'Правило: обычные уведомления — polite-регион с автозакрытием. Срочные ошибки — `role="alert"` (неявно assertive) без таймера (`duration: 0`) и с кнопкой закрытия. Модалка нужна, только если без решения пользователя продолжать нельзя.'
+  type: choose-tool
+  options:
+    - label: 'Toast с role="alert" и duration: 0 (закрывается только вручную)'
+      why: Лучший вариант. alert объявляется немедленно, ручное закрытие даёт время прочитать, а фокус и форма не блокируются.
+    - label: Обычный toast в aria-live="polite" с автозакрытием через 4 с
+      why: Подходит для «Сохранено» и других неважных событий. Срочную ошибку объявят с задержкой, и она может исчезнуть раньше, чем её прочтут.
+    - label: Модальный диалог с ловушкой фокуса
+      why: Уместен, если продолжать без решения пользователя нельзя (например, подтвердить списание). Здесь он блокирует форму, а это противоречит условию.
+    - label: Красный текст ошибки рядом с формой без live-региона
+      why: Inline-ошибки хороши для валидации полей. Без live-региона скринридер не объявит появившийся текст, а фоновая ошибка к полям не относится.
+  answer: 0
+
+# undo-redo-design: принято из черновика 2026-11-07
+- id: undo-redo-grouping-quiz
+  skill: undo-redo-grouping
+  question: undo-redo-design
+  difficulty: 3
+  prompt: Как сделать, чтобы быстрый ввод текста задачи отменялся одним undo, а не по одному символу?
+  explanation: Группируют по времени. Если правка того же поля пришла в коротком окне после предыдущей, меняют только present, а past не трогают. Верхушка past остаётся состоянием до начала серии, поэтому один undo откатит всю серию. Пауза или смена поля начинают новую группу.
+  type: quiz
+  options:
+    - label: Если правка того же поля пришла в пределах ~500 мс после предыдущей, обновить present, не добавляя новую запись в past
+      why: Верно. Непрерывный ввод сливается в один шаг, а пауза или смена поля начинают новую группу. UI обновляется на каждой клавише.
+    - label: "Дебаунсить dispatch({ type: 'set' }) на 500 мс, чтобы в историю попадало только итоговое значение"
+      why: "Тогда с задержкой обновится и present, то есть само поле ввода: контролируемый инпут будет отставать. Группировать нужно записи истории, а не обновление состояния."
+    - label: Объединять в одну запись past каждые 10 последовательных правок
+      why: Группировка по количеству не учитывает паузы. Один undo может отменить сразу две смысловые правки, а длинный ввод без пауз — разбить на произвольные куски.
+    - label: Сливать все правки поля в одну запись, пока пользователь не перейдёт к другому полю
+      why: "Без временного окна пауза не разбивает группу: после долгого редактирования одного поля один undo сотрёт всё сразу."
+  answer: 0
+- id: undo-redo-future-cleared
+  skill: undo-redo-history-stacks
+  question: undo-redo-design
+  difficulty: 2
+  prompt: Через historyReducer из вопроса (стеки past/present/future) прогнали последовательность действий. Что выведет console.log?
+  explanation: "set 1 и set 2 дают past [0, 1] и present 2. undo переносит 2 в future, present становится 1. set 3 кладёт 1 в past и очищает future: ветка с 2 потеряна. Поэтому redo — no-op. Правило: новое действие после отмены обнуляет redo."
+  type: predict-output
+  language: ts
+  code: |-
+    const steps = [
+      { type: 'set', value: 1 },
+      { type: 'set', value: 2 },
+      { type: 'undo' },
+      { type: 'set', value: 3 },
+      { type: 'redo' },
+    ] as const;
+
+    let h: History<number> =
+      { past: [], present: 0, future: [] };
+    for (const a of steps) h = historyReducer(h, a);
+
+    console.log(h.present, h.past, h.future);
+  options:
+    - 3 [0, 1] []
+    - 3 [0, 1] [2]
+    - 2 [0, 1, 3] []
+    - 3 [0, 1, 2] []
+  answer: 0
+- id: undo-redo-mutated-snapshot
+  skill: undo-redo-immutable-snapshots
+  question: undo-redo-design
+  difficulty: 2
+  prompt: После toggle задача отмечается выполненной, но undo её не «разотмечает». Найдите строку с ошибкой.
+  explanation: "`[...h.present]` копирует только массив, а объекты задач в нём те же, что лежат в снимке past. Мутация `todo.done` меняет и прошлое состояние, поэтому undo возвращает уже изменённую задачу. Решение — иммутабельное обновление: `h.present.map((t) => t.id === id ? { ...t, done: !t.done } : t)`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function useTodoActions(
+      h: History<Todo[]>,
+      dispatch: Dispatch<HistoryAction<Todo[]>>
+    ) {
+      function toggle(id: string) {
+        const todo = h.present.find((t) => t.id === id)!;
+        todo.done = !todo.done;
+        dispatch({ type: 'set', value: [...h.present] });
+      }
+      return { toggle };
+    }
+  bugLines:
+    - 7
+  causes:
+    - "Мутируется объект задачи, который разделяется со снимком в past: история меняется вместе с present"
+    - "[...h.present] не создаёт новую ссылку, поэтому React не перерисует список"
+    - Non-null assertion после find упадёт, и dispatch не вызовется
+    - toggle нужно обернуть в useCallback, иначе dispatch получит устаревший h
+  answer: 0
+- id: undo-redo-coalesce-fill
+  skill: undo-redo-grouping
+  question: undo-redo-design
+  difficulty: 3
+  prompt: "Допишите установку значения с группировкой: правки того же поля в пределах 500 мс сливаются в один шаг отмены. GroupedHistory<T> — это History<T> плюс lastKey и lastAt."
+  explanation: "При слиянии past не трогаем: его верхушка — состояние до начала серии, и undo откатит её целиком. lastAt обновляется на каждой правке, поэтому окно считается от предыдущей правки. Пауза больше 500 мс начинает новую группу. Любая правка очищает future. В проде ещё ограничивают past, например `.slice(-100)`."
+  type: fill-tokens
+  language: ts
+  code: |-
+    function setValue<T>(
+      s: GroupedHistory<T>,
+      value: T, key: string, now: number
+    ): GroupedHistory<T> {
+      const merge =
+        key === s.___ && now - s.lastAt < 500;
+      return {
+        past: merge ? s.___ : [...s.past, s.___],
+        present: value,
+        future: ___,
+        lastKey: key,
+        lastAt: now,
+      };
+    }
+  tokens:
+    - lastKey
+    - past
+    - present
+    - "[]"
+  decoys:
+    - lastAt
+    - future
+    - value
+    - s.future

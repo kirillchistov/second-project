@@ -1,3 +1,28 @@
+- question: ts-unknown-vs-any
+  points:
+    - id: any-disables-checks
+      text: "`any` полностью отключает проверку типов: компилятор разрешает любые обращения к свойствам, вызовы и присваивания, даже если они упадут в рантайме"
+      weight: 3
+    - id: unknown-requires-narrowing
+      text: "`unknown` тоже принимает любое значение, но не позволяет им пользоваться (читать свойства, вызывать), пока тип не сужен проверкой — `typeof`, `in`, `instanceof` или пользовательским type guard"
+      weight: 3
+    - id: type-predicate-guard
+      text: Пользовательский type guard с предикатом `value is T` (например, `isApiError`) проверяет форму данных в рантайме и сужает тип для компилятора внутри ветки `if`
+      weight: 2
+    - id: as-no-runtime-check
+      text: Приведение `value as T` ничего не проверяет в рантайме и лишь заставляет компилятор поверить на слово, поэтому не заменяет type guard
+      weight: 2
+    - id: catch-unknown
+      text: В `catch` переменная ошибки имеет тип `unknown` при `useUnknownInCatchVariables` (входит в `strict`), потому что в JavaScript можно бросить что угодно, не только `Error`
+      weight: 1
+    - id: rethrow-unmatched
+      text: Если значение не прошло ни один type guard, его нужно явно обработать или перебросить, а не молча проигнорировать
+      weight: 1
+  misconceptions:
+    - "`unknown` и `any` эквивалентны, разница только в названии — оба отключают проверку типов"
+    - Приведение `as SomeType` проверяет данные в рантайме и делает работу с внешними данными безопасной
+    - "Аннотация типа результата `JSON.parse` (например, `const data: Config = JSON.parse(raw)`) гарантирует, что данные действительно имеют эту форму"
+    - В `catch` пойманная ошибка всегда является экземпляром `Error`, поэтому `error.message` безопасно читать без проверки
 - question: typescript-props
   points:
     - id: props-type-destructure
@@ -148,6 +173,56 @@
     - Достаточно валидировать форму на клиенте, а сервер может доверять пришедшим данным
     - "Аннотация `const data: User = await res.json()` проверяет структуру ответа"
     - Схему валидации и TypeScript-тип нужно описывать и поддерживать отдельно вручную
+- question: ts-deep-utility-types
+  points:
+    - id: special-types-first
+      text: "Функции и `Date` проверяются отдельными ветками условного типа и возвращаются как есть. Эти проверки стоят до `T extends object`: массивы, функции и `Date` тоже проходят `extends object`, и иначе рекурсия пошла бы по их служебным полям (`length`, `call`, методы `Date`)."
+      weight: 3
+    - id: arrays-via-infer
+      text: "Массивы обрабатываются отдельной веткой через `T extends readonly (infer U)[]` или `(infer U)[]`: рекурсия применяется к типу элемента `U`, и результат остаётся массивом (`readonly DeepReadonly<U>[]` / `DeepPartial<U>[]`), а не объектом с числовыми ключами."
+      weight: 3
+    - id: mapped-type-recursion
+      text: "Для обычных объектов используется mapped type с рекурсией по значениям: `{ readonly [K in keyof T]: DeepReadonly<T[K]> }` для `DeepReadonly` и `{ [K in keyof T]?: DeepPartial<T[K]> }` для `DeepPartial`."
+      weight: 2
+    - id: primitive-base-case
+      text: Последняя ветка возвращает примитивы (`string`, `number`, `boolean` и т.д.) без изменений. Это база рекурсии на листьях объекта.
+      weight: 2
+    - id: partial-array-difference
+      text: "В `DeepPartial` массив не делают `readonly` и не делают элементы опциональными: иначе `number[]` превратился бы в бессмысленный `(number | undefined)[]`, хотя ожидался просто более короткий или пустой массив. В `DeepReadonly` `readonly`-массив безопасен, потому что чтение не ломается."
+      weight: 1
+    - id: compile-time-only
+      text: Эти типы работают только на уровне компиляции и не дают рантайм-гарантий. Их не стоит применять к данным, которые реально мутирует библиотека (например, драфты Immer), — тип будет противоречить рантайм-поведению.
+      weight: 1
+  misconceptions:
+    - Встроенные `Readonly<T>` и `Partial<T>` уже работают рекурсивно на всю глубину вложенности (на самом деле только на один уровень).
+    - "`DeepReadonly<T>` делает объект неизменяемым в рантайме, как `Object.freeze`."
+    - "Достаточно одной проверки `T extends object` с mapped type: массивы, функции и `Date` при этом обработаются корректно, а порядок веток не важен."
+    - Для `DeepPartial` массива нужно делать элементы опциональными, то есть `T[]` превращать в `(T | undefined)[]`.
+- question: ts-discriminated-loading-state
+  points:
+    - id: discriminated-union-tag
+      text: Состояние описывается discriminated union с общим полем-тегом (`status`), а не набором независимых флагов `isLoading`/`isError`/`data`
+      weight: 3
+    - id: fields-only-in-branch
+      text: Поля `data` и `error` объявлены только в своих ветках (`success` и `error`), поэтому обращение к `data` вне ветки `success` — ошибка компиляции
+      weight: 3
+    - id: narrowing-by-tag
+      text: TypeScript сужает тип по проверке тега (`switch`/`if` по `state.status`), и внутри ветки доступны только её поля
+      weight: 2
+    - id: impossible-combinations
+      text: "Независимые булевы флаги допускают невозможные комбинации (например, `isLoading: true` и `isError: true` одновременно), а union их исключает на уровне типа"
+      weight: 2
+    - id: exhaustiveness-never
+      text: Exhaustiveness check через `never` в `default` заставляет компилятор сообщить о необработанном новом варианте `status`
+      weight: 1
+    - id: no-optional-in-all-branches
+      text: Опциональные `data?`/`error?` во всех ветках разрушают защиту — union вырождается обратно в «флаги плюс опциональные поля»
+      weight: 1
+  misconceptions:
+    - Достаточно сделать `data?` и `error?` опциональными в общем типе — это тоже защитит от чтения данных в неверном состоянии
+    - "`switch` по тегу без проверки на `never` сам по себе гарантирует, что TypeScript предупредит о необработанном новом статусе"
+    - Discriminated union описывает и ограничивает допустимые переходы между состояниями, как конечный автомат
+    - Сужение по тегу — это рантайм-проверка, которую TypeScript добавляет в скомпилированный код
 - question: typescript-advanced
   points:
     - id: generic-element-type
@@ -198,3 +273,28 @@
     - Vite/esbuild при сборке проверяют типы, поэтому отдельный `tsc --noEmit` не нужен
     - "`@ts-ignore` и `@ts-expect-error` равнозначны"
     - Утверждение типа через `as` гарантирует соответствие реальным данным, поэтому валидация внешних данных не нужна
+- question: ts-route-params-type
+  points:
+    - id: template-literal-infer
+      text: "Параметры извлекаются через template literal types с `infer` в условном типе: шаблон вида `${string}:${infer Param}/${infer Rest}` сопоставляется с сегментами строкового литерала."
+      weight: 3
+    - id: recursive-rest
+      text: "Тип рекурсивный: после извлечения одного параметра он применяется к оставшейся части пути (`Rest`), а результаты объединяются в mapped type `{ [K in ...]: string }`."
+      weight: 3
+    - id: base-cases
+      text: "Нужны терминальные случаи: последний параметр без завершающего `/` и путь без параметров (например, `'/about'` → `{}`), иначе рекурсия не завершится корректно или вернёт не тот тип."
+      weight: 2
+    - id: generic-function-usage
+      text: "Функция вида `useParams<Path extends string>(path: Path): ExtractParams<Path>` выводит литеральный тип пути из аргумента, и деструктуризация даёт типизированные ключи с автокомплитом."
+      weight: 2
+    - id: type-runtime-divergence
+      text: "Тип и рантайм-парсер — две независимые реализации: компилятор не проверяет, что regexp в рантайме совпадает с логикой типа, поэтому при правке одной стороны они могут разойтись."
+      weight: 2
+    - id: recursion-limits
+      text: "Упоминает ограничения рекурсивных условных типов: лимит глубины инстанцирования и рост времени компиляции на длинных строках."
+      weight: 1
+  misconceptions:
+    - Template literal types выполняют регулярное выражение или какой-то код при компиляции — на деле это чистое сопоставление с шаблоном в системе типов.
+    - TypeScript проверяет, что рантайм-парсинг пути соответствует выведенному типу параметров.
+    - Тип параметров сохраняется в рантайме и может быть использован для валидации значений.
+    - Вывод работает для любой строки типа `string`, а не только для строкового литерала — при широком `string` конкретные ключи не извлекаются.

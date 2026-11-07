@@ -1095,3 +1095,92 @@
     - label: Три await подряд, каждый в своём try/catch
       why: "Работает, но это водопад: запросы идут по очереди, и время складывается. Оправдано, только если запросы зависят друг от друга."
   answer: 0
+
+# structured-clone-vs-spread: принято из черновика 2026-11-07
+- id: structured-clone-vs-spread-quiz
+  skill: object-copy-depth
+  question: structured-clone-vs-spread
+  difficulty: 1
+  prompt: Чем отличаются spread, `JSON.parse(JSON.stringify(x))` и `structuredClone(x)` при копировании данных?
+  explanation: "Spread даёт поверхностную копию. JSON копирует глубоко, но только то, что есть в JSON: Date становится строкой, Map и Set — пустым `{}`, а поля с undefined пропадают. structuredClone — встроенный глубокий клон: он сохраняет Date, Map, Set и циклические ссылки, но на функциях и DOM-узлах бросает DataCloneError."
+  type: quiz
+  options:
+    - label: Spread копирует один уровень; JSON — глубоко, но теряет Date, Map, Set, undefined; structuredClone — глубоко с этими типами
+      why: Верно. Это три разные глубины и точности копирования. Функции не клонируются ни через JSON, ни через structuredClone.
+    - label: structuredClone и JSON-трюк дают одинаковый результат, structuredClone просто быстрее и короче
+      why: Неверно. JSON превращает Date в строку, Map и Set — в `{}`, теряет undefined и падает на циклах. structuredClone сохраняет типы и циклы.
+    - label: Spread копирует плоские объекты глубоко, а structuredClone нужен только для экземпляров классов
+      why: "Неверно. Spread всегда копирует только верхний уровень: вложенные объекты остаются общими ссылками. Прототип класса structuredClone как раз не сохраняет."
+    - label: structuredClone копирует всё, включая функции и DOM-узлы, поэтому подходит для любых данных
+      why: Неверно. На функциях и DOM-узлах structuredClone выбрасывает DataCloneError.
+  answer: 0
+- id: structured-clone-vs-spread-predict
+  skill: object-copy-depth
+  question: structured-clone-vs-spread
+  difficulty: 1
+  prompt: Что выведет код в консоль?
+  explanation: "Spread скопировал только верхний уровень, поэтому `copy.nested` и `src.nested` — один объект, и в src тоже стало 2. JSON.stringify превращает Date в ISO-строку и выбрасывает поля со значением undefined. Правило: spread — не глубокая копия, JSON — копия с потерями."
+  type: predict-output
+  language: tsx
+  code: |-
+    const src = {
+      date: new Date(0),
+      note: undefined,
+      nested: { count: 1 },
+    };
+    const copy = { ...src };
+    copy.nested.count = 2;
+    const json = JSON.parse(JSON.stringify(src));
+    console.log(src.nested.count);
+    console.log(typeof json.date, 'note' in json);
+  options:
+    - 2 → string false
+    - 1 → string false
+    - 2 → object true
+    - 1 → object true
+  answer: 0
+- id: structured-clone-vs-spread-reducer-bug
+  skill: immutable-nested-update
+  question: structured-clone-vs-spread
+  difficulty: 2
+  prompt: После действия rename мемоизированный `<UserCard user={state.user} />` не обновляется, а история состояний «портится». Найдите ошибку.
+  explanation: "Строка 5 мутирует объект, общий с прошлым состоянием. Spread на строке 4 поверхностный, поэтому `next.user` — тот же объект, что и `state.user`. Прошлое состояние меняется, ссылка на user остаётся прежней, и memo вместе со сравнением зависимостей изменений не видят. Исправление: `{ ...state, user: { ...state.user, name } }` или Immer."
+  type: find-bug
+  language: tsx
+  code: |-
+    function reducer(state: State, action: Action) {
+      switch (action.type) {
+        case 'rename': {
+          const next = { ...state };
+          next.user.name = action.name;
+          return next;
+        }
+        default:
+          return state;
+      }
+    }
+  bugLines:
+    - 5
+  causes:
+    - Spread копирует один уровень — вложенный user мутируется в общем объекте, и его ссылка не меняется
+    - Reducer обязан возвращать результат structuredClone(state), иначе React не заметит изменений
+    - Нельзя объявлять переменные внутри case без отдельной функции
+    - default должен бросать ошибку, а не возвращать state
+  answer: 0
+- id: structured-clone-vs-spread-undo-snapshot
+  skill: deep-clone-choice
+  question: structured-clone-vs-spread
+  difficulty: 2
+  prompt: "Редактор схем: перед вызовом сторонней библиотеки, которая мутирует граф на месте, нужен независимый снимок для «Отменить». Граф — обычные объекты без функций и классов, но в нём есть Date, Map и циклические ссылки между узлами. Что выбрать?"
+  explanation: "Правило: точечный spread или Immer — для иммутабельного обновления своего state. structuredClone — когда нужна полностью независимая глубокая копия: снимок для undo, защита от чужих мутаций, данные с Date, Map, Set и циклами. JSON-трюк годится только для чистых JSON-данных."
+  type: choose-tool
+  options:
+    - label: structuredClone(graph)
+      why: "Глубокая независимая копия: сохраняет Date и Map, корректно обрабатывает циклы. Функций в данных нет, поэтому DataCloneError не будет."
+    - label: JSON.parse(JSON.stringify(graph))
+      why: Упадёт на циклических ссылках, Date станет строкой, Map — пустым объектом. Подходит только для простых JSON-данных.
+    - label: "Spread: { ...graph }"
+      why: Копирует только верхний уровень, поэтому библиотека испортит и снимок через общие вложенные объекты. Хорош для точечных обновлений state.
+    - label: Immer produce
+      why: Удобен, когда изменения пишете вы сами. Если чужой код мутирует объект напрямую, нужен готовый снимок. Для Map в Immer ещё нужно вызвать enableMapSet.
+  answer: 0

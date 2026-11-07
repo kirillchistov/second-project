@@ -846,3 +846,273 @@
     - RouterProvider нужно дополнительно обернуть в <BrowserRouter>
     - В data mode маршруты задаются только через JSX <Routes>, а не массивом объектов
   answer: 0
+
+# css-grid-container-queries: принято из черновика 2026-11-07
+- id: css-grid-auto-fill-minmax-quiz
+  skill: css-grid-responsive-columns
+  question: css-grid-container-queries
+  difficulty: 1
+  prompt: "Что делает `grid-template-columns: repeat(auto-fill, minmax(240px, 1fr))` у списка карточек?"
+  explanation: "`auto-fill` + `minmax(min, 1fr)` — стандартный рецепт адаптивной сетки без JS и медиазапросов. Браузер сам считает число колонок по ширине контейнера, а `1fr` растягивает их на остаток. Фиксированный `repeat(N, 1fr)` так не умеет."
+  type: quiz
+  options:
+    - label: Кладёт в ряд столько колонок от 240px, сколько влезает, и растягивает их на всю ширину контейнера
+      why: Верно. Число колонок пересчитывается при любом изменении ширины контейнера, без брейкпоинтов и измерений в JS.
+    - label: Делает все карточки ровно по 240px, а лишнее место остаётся справа
+      why: Максимум трека — `1fr`, поэтому колонки растягиваются. Ровно 240px было бы при `repeat(auto-fill, 240px)`.
+    - label: Подстраивает колонки под ширину окна, но только вместе с медиазапросами под каждый брейкпоинт
+      why: "Медиазапросы здесь не нужны: браузер считает колонки по ширине самого grid-контейнера. Брейкпоинты нужны при фиксированном `repeat(N, 1fr)`."
+    - label: Создаёт по колонке на каждую карточку и сжимает их до 240px, если места не хватает
+      why: Число колонок зависит от доступной ширины, а не от числа карточек. Лишние карточки переносятся в следующий ряд, а не сжимаются.
+  answer: 0
+- id: css-grid-auto-fit-two-cards
+  skill: css-grid-responsive-columns
+  question: css-grid-container-queries
+  difficulty: 2
+  prompt: Контейнер шириной 1000px, внутри всего 2 карточки. Как они будут выглядеть?
+  explanation: "Вместе с gap влезает 3 колонки: 4·240 + 3·16 = 1008 > 1000. С `auto-fit` пустой трек схлопывается вместе со своим gap, и две карточки делят ширину: (1000 − 16) / 2 = 492px. С `auto-fill` пустая колонка осталась бы, и карточки были бы по ~323px."
+  type: predict-output
+  language: tsx
+  code: |-
+    .cards {
+      width: 1000px;
+      display: grid;
+      grid-template-columns:
+        repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+    }
+    /* внутри .cards — 2 карточки */
+  options:
+    - 2 карточки по 492px — на всю ширину
+    - 2 карточки по ~323px, справа пустая колонка
+    - 2 карточки по 240px, остальное место пустое
+    - 2 карточки по ~238px и 2 пустые колонки
+  answer: 0
+- id: css-container-type-on-self
+  skill: container-queries-setup
+  question: css-grid-container-queries
+  difficulty: 2
+  prompt: Карточка должна раскладываться в две колонки, когда ей доступно от 320px, но `@container` не срабатывает. Где ошибка?
+  explanation: "`@container` ищет ближайшего **предка** с `container-type`, а не сам элемент. Элемент не может менять свои стили по собственному размеру, иначе возник бы цикл. Нужна обёртка: `.card-wrapper { container-type: inline-size; }`, и стили `.card` внутри `@container`."
+  type: find-bug
+  language: tsx
+  code: |-
+    .card {
+      container-type: inline-size;
+      display: grid;
+      gap: 12px;
+    }
+
+    @container (min-width: 320px) {
+      .card { grid-template-columns: 100px 1fr; }
+    }
+  bugLines:
+    - 2
+  causes:
+    - Контейнером объявлена сама карточка, а `@container` проверяет размер предка — у `.card` его нет
+    - В `@container` нельзя использовать `min-width`, только `inline-size`
+    - "`grid-template-columns` не работает внутри `@container`"
+    - "Нужно `container-type: size`, с `inline-size` запрос по ширине не работает"
+  answer: 0
+- id: css-card-sidebar-vs-main
+  skill: container-vs-media-queries
+  question: css-grid-container-queries
+  difficulty: 2
+  prompt: Один компонент карточки стоит и в узком сайдбаре, и в широкой основной колонке. В широком месте картинка и текст должны идти в ряд, в узком — друг под другом. Что выбрать?
+  explanation: "Правило: если раскладка зависит от ширины экрана — `@media`; если стили компонента зависят от места, куда его вставили, — `@container`. Число колонок в списке задаёт `repeat(auto-fill/auto-fit, minmax())`. JS-измерения нужны, только если CSS не справляется."
+  type: choose-tool
+  options:
+    - label: "Container queries: `container-type` на обёртке + `@container`"
+      why: "Лучший вариант: карточка реагирует на ширину своего контейнера, поэтому одинаково работает в сайдбаре и основной колонке."
+    - label: Media queries по ширине экрана
+      why: При одной ширине экрана сайдбар узкий, а колонка широкая — `@media` их не различит. Подходит для раскладки всей страницы.
+    - label: ResizeObserver и CSS-класс по ширине из JS
+      why: Сработает, но это лишний JS, ре-рендеры и возможное мигание (например, при SSR). Оправдано, если ширина нужна логике, а не стилям.
+    - label: "`repeat(auto-fit, minmax(240px, 1fr))` на списке"
+      why: Решает, сколько карточек влезает в ряд, но не меняет внутреннюю раскладку самой карточки.
+  answer: 0
+
+# theme-switch-no-fouc: принято из черновика 2026-11-07
+- id: theme-switch-where-to-apply
+  skill: theme-flash-prevention
+  question: theme-switch-no-fouc
+  difficulty: 2
+  prompt: Пользователь выбрал тёмную тему, она сохранена в localStorage. Где её применить, чтобы при загрузке не мелькала светлая?
+  explanation: Мигание возникает, когда первый кадр уже отрисован с темой по умолчанию. Любой код в React (useEffect, useLayoutEffect, state) выполняется после загрузки бандла и, при SSR, после того как HTML уже виден. Блокирующий инлайн-скрипт в <head> ставит data-theme до отрисовки <body>.
+  type: quiz
+  options:
+    - label: "Синхронным инлайн-скриптом в <head>: прочитать localStorage и выставить data-theme на <html> до отрисовки <body>"
+      why: Верно. Инлайн-скрипт блокирует парсинг и выполняется до первого paint, поэтому первый же кадр рисуется с нужной темой.
+    - label: "В useLayoutEffect корневого компонента: он срабатывает до paint, значит мигания не будет"
+      why: Он срабатывает до paint только своего коммита. HTML (особенно SSR) и фон страницы видны ещё до загрузки бандла, а тема по умолчанию уже успела отрисоваться.
+    - label: "В useEffect с пустыми зависимостями: прочитать localStorage и вызвать setTheme"
+      why: useEffect выполняется после монтирования и обычно после paint — первый кадр гарантированно будет с темой по умолчанию.
+    - label: Хранить тему в Context-провайдере в корне приложения, тогда её увидят все компоненты
+      why: Context только раздаёт значение. Без localStorage выбор сбросится при перезагрузке, а применится он всё равно после рендера React.
+  answer: 0
+- id: theme-switch-effect-flash
+  skill: theme-flash-prevention
+  question: theme-switch-no-fouc
+  difficulty: 2
+  prompt: С этим хуком у пользователей с тёмной темой при каждой загрузке на миг мелькает светлая. Найдите причину.
+  explanation: Сохранённая тема читается в useEffect — уже после монтирования и первой отрисовки. Первый кадр рисуется с 'light', затем тема перескакивает. Начальную тему нужно выставить инлайн-скриптом в <head>, а хук пусть берёт стартовое значение из data-theme на <html>.
+  type: find-bug
+  language: tsx
+  code: |-
+    function useTheme() {
+      const [theme, setTheme] = useState('light');
+
+      useEffect(() => {
+        const saved = localStorage.getItem('theme');
+        if (saved) setTheme(saved);
+      }, []);
+
+      useEffect(() => {
+        document.documentElement.dataset.theme = theme;
+      }, [theme]);
+
+      return [theme, setTheme] as const;
+    }
+  bugLines:
+    - 5
+    - 6
+  causes:
+    - Сохранённая тема читается и применяется только после монтирования, когда первый кадр уже отрисован со светлой темой
+    - localStorage.getItem асинхронный — без await в saved попадает промис
+    - У <html> нельзя менять dataset, нужен только setAttribute
+    - Пустой массив зависимостей не даёт эффекту перезапуститься при смене темы
+  answer: 0
+- id: theme-switch-inline-script
+  skill: theme-inline-script
+  question: theme-switch-no-fouc
+  difficulty: 1
+  prompt: "Допишите инлайн-скрипт для <head>: сохранённый выбор важнее, иначе — системная тема."
+  explanation: localStorage.getItem синхронно вернёт сохранённый выбор или null. Если его нет, matchMedia(...).matches показывает системную тему. Оператор ?? срабатывает только на null/undefined, поэтому явный выбор 'light' не перетрётся системной тёмной.
+  type: fill-tokens
+  language: js
+  code: |-
+    (function () {
+      const saved = localStorage.___('theme');
+      const mq = ___('(prefers-color-scheme: dark)');
+      const theme = saved ?? (mq.___ ? 'dark' : 'light');
+      document.documentElement.setAttribute(
+        'data-theme',
+        theme,
+      );
+    })();
+  tokens:
+    - getItem
+    - matchMedia
+    - matches
+  decoys:
+    - get
+    - media
+    - querySelector
+- id: theme-switch-static-next-site
+  skill: theme-strategy-choice
+  question: theme-switch-no-fouc
+  difficulty: 3
+  prompt: Маркетинговый сайт на Next.js App Router, страницы статические и раздаются с CDN. Нужно учитывать ручной выбор темы и системную тему, без мигания. Что выбрать?
+  explanation: "Для статического HTML тему знает только браузер, поэтому нужен блокирующий скрипт до paint. Cookie на сервере — хороший путь для динамического SSR. В Next.js на <html> ставят suppressHydrationWarning: атрибут, выставленный скриптом, отличается от серверного HTML."
+  type: choose-tool
+  options:
+    - label: Инлайн-скрипт в <head> (вручную или через next-themes) + suppressHydrationWarning на <html>
+      why: "Работает с любым статическим HTML: скрипт выставляет data-theme до первой отрисовки, CDN-кеш не страдает."
+    - label: Хранить тему в cookie и на сервере рендерить data-theme в <html>
+      why: Отлично для динамического SSR, но чтение cookies() делает маршрут динамическим — статика и CDN-кеш страниц теряются.
+    - label: ThemeProvider с useEffect, читающий localStorage после монтирования
+      why: Подходит разве что для переключения темы во время сессии; начальную тему применит после paint — мигание гарантировано.
+    - label: Только @media (prefers-color-scheme) в CSS
+      why: Без мигания и без JS, но ручной выбор пользователя не учитывается. Годится, если переключателя темы нет.
+  answer: 0
+
+# css-cascade-layers: принято из черновика 2026-11-07
+- id: css-cascade-layers-vs-modules
+  skill: css-layers-vs-modules
+  question: css-cascade-layers
+  difficulty: 2
+  prompt: Дизайн-система страдает от «войн специфичности» и случайных совпадений имён классов. Как делят работу `@layer` и CSS Modules?
+  explanation: "Это две разные оси. `@layer` отвечает за **приоритет**: порядок слоёв проверяется раньше специфичности. CSS Modules отвечают за **имена**: классы получают уникальный хеш на файл. Внутри одного слоя специфичность и порядок в исходнике работают как обычно."
+  type: quiz
+  options:
+    - label: Слои задают приоритет групп стилей поверх специфичности, а CSS Modules делают имена классов уникальными на файл
+      why: Верно. Слой выигрывает до сравнения специфичности, а хеширование имён убирает коллизии `.button` между компонентами.
+    - label: Слои изолируют имена классов между компонентами, а CSS Modules упорядочивают приоритет стилей
+      why: "Роли перепутаны. `@layer` ничего не переименовывает, а CSS Modules не меняют каскад: хешированный класс имеет обычную специфичность."
+    - label: CSS Modules повышают специфичность за счёт хеша в имени, поэтому слои нужны только для reset
+      why: "Хеш меняет имя класса, но не его вес: `.Button_x1y2` — по-прежнему один класс, то есть (0,1,0)."
+    - label: С `@layer` специфичность перестаёт учитываться везде, в том числе внутри одного слоя
+      why: "Нет: специфичность игнорируется только при сравнении правил из разных слоёв. Внутри слоя `.card .button` всё ещё сильнее `.button`."
+  answer: 0
+- id: css-cascade-layers-unlayered-wins
+  skill: css-unlayered-priority
+  question: css-cascade-layers
+  difficulty: 3
+  prompt: 'Разметка: `<div id="app"><button class="btn primary">`. Других стилей нет. Какого цвета будет текст кнопки?'
+  explanation: "Обычные (не `!important`) правила вне слоёв приоритетнее любого слоя, поэтому побеждает зелёный, хотя его селектор самый слабый. Без последнего правила был бы синий: components объявлен позже base, и специфичность `#app .btn.primary` уже не важна."
+  type: predict-output
+  language: tsx
+  code: |-
+    @layer base, components;
+
+    @layer components {
+      .btn { color: blue; }
+    }
+
+    @layer base {
+      #app .btn.primary { color: red; }
+    }
+
+    .btn { color: green; }
+  options:
+    - green
+    - blue
+    - red
+    - Зависит от порядка блоков @layer в файле
+  answer: 0
+- id: css-cascade-layers-order-declared-late
+  skill: css-layer-order
+  question: css-cascade-layers
+  difficulty: 3
+  prompt: utilities.css подключается раньше main.css. У `<div class="card p-0">` всё равно padding 16px, хотя утилиты задумывались как самый сильный слой. В чём ошибка?
+  explanation: "Порядок слоёв задаёт **первое** появление имени. utilities встретился раньше списка, поэтому итоговый порядок такой: utilities, reset, base, components. Повторное объявление в списке его не меняет. Правило: выносите `@layer a, b, c;` в самый первый подключаемый файл."
+  type: find-bug
+  language: tsx
+  code: |-
+    /* utilities.css — подключается первым */
+    @layer utilities {
+      .p-0 { padding: 0; }
+    }
+
+    /* main.css */
+    @layer reset, base, components, utilities;
+
+    @layer components {
+      .card { padding: 16px; }
+    }
+  bugLines:
+    - 2
+    - 7
+  causes:
+    - Слой utilities впервые объявлен до списка порядка, поэтому он стал самым ранним и проигрывает components
+    - "`.card` и `.p-0` имеют одинаковую специфичность, а `.card` объявлен позже в исходнике"
+    - "Один и тот же слой нельзя наполнять из разных файлов: правила второго файла игнорируются"
+    - Список `@layer reset, base, ...` работает только при `!important` в правилах слоёв
+  answer: 0
+- id: css-cascade-layers-vendor-css
+  skill: css-vendor-layering
+  question: css-cascade-layers
+  difficulty: 2
+  prompt: "Стили дизайн-системы разложены по `@layer`. Подключили CSS сторонней библиотеки дат: он не в слоях и перебивает ваши кнопки и инпуты. Код библиотеки менять нельзя. Что сделать?"
+  explanation: "Чужой CSS вне слоёв сильнее любого слоя. Его нужно не перебивать, а встроить в каскад: `@import url(vendor.css) layer(vendor);` и поставить vendor в начало списка слоёв. Тогда ваши components и utilities выигрывают без `!important` и раздувания специфичности."
+  type: choose-tool
+  options:
+    - label: "`@import url(vendor.css) layer(vendor)` и vendor первым в `@layer`"
+      why: Безслойный CSS попадает в ранний слой и проигрывает вашим слоям независимо от своей специфичности. Код библиотеки при этом не трогается.
+    - label: CSS Modules для своих компонентов
+      why: Модули решают коллизии имён, а не приоритет. Глобальные селекторы библиотеки останутся вне слоёв и продолжат выигрывать.
+    - label: "`!important` в своих правилах"
+      why: Сработает точечно, но начнётся новая война. В важных правилах порядок слоёв инвертируется, и следующий конфликт снова потребует «молоток».
+    - label: "Поднять специфичность: `#root .btn.btn`"
+      why: "Внутри слоя это не поможет вовсе: безслойный CSS побеждает любой слой независимо от специфичности."
+  answer: 0

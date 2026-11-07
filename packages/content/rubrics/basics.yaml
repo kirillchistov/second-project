@@ -273,3 +273,28 @@
     - "`setTimeout(fn, 0)` выполняется сразу или раньше колбэков `Promise.then`, потому что задержка нулевая"
     - Тело `async`-функции целиком выполняется асинхронно, включая код до первого `await`
     - "`array.forEach(async ...)` дожидается завершения всех асинхронных колбэков"
+- question: structured-clone-vs-spread
+  points:
+    - id: spread-shallow
+      text: "Spread (`{ ...obj }`, `[...arr]`) копирует только верхний уровень: вложенные объекты остаются общими ссылками, и их изменение затрагивает оригинал"
+      weight: 3
+    - id: json-loses-types
+      text: "`JSON.parse(JSON.stringify())` копирует глубоко, но теряет `undefined` и функции, превращает `Date` в строку, а `Map`/`Set` — в пустой объект `{}`"
+      weight: 3
+    - id: json-circular
+      text: "`JSON.parse(JSON.stringify())` падает с ошибкой на циклических ссылках, а `structuredClone` их корректно обрабатывает"
+      weight: 2
+    - id: structured-clone-types
+      text: "`structuredClone` — встроенный глубокий клон, сохраняющий `Date`, `Map`, `Set`, `ArrayBuffer`, но функции и DOM-узлы он не клонирует и выбрасывает `DataCloneError`"
+      weight: 3
+    - id: react-state-spread
+      text: Для иммутабельного обновления одного поля вложенного state в React лучше точечный spread на каждом уровне или Immer, а не клонирование всего объекта
+      weight: 2
+    - id: structured-clone-use-cases
+      text: "`structuredClone` уместен для независимого снимка (undo, защита от мутации сторонним кодом); тот же structured clone algorithm используется при передаче данных в Web Worker через `postMessage`"
+      weight: 1
+  misconceptions:
+    - Spread-оператор делает глубокую копию объекта
+    - "`JSON.parse(JSON.stringify())` корректно сохраняет `Date`, `Map`, `Set` и `undefined`"
+    - "`structuredClone` умеет клонировать функции, методы класса или DOM-узлы"
+    - "`structuredClone` не справляется с циклическими ссылками так же, как JSON"

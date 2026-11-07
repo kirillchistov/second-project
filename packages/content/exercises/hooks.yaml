@@ -1234,3 +1234,208 @@
     - setIsOn
     - isOn
     - prev
+
+# use-imperative-handle: принято из черновика 2026-11-07
+- id: use-imperative-handle-vs-ref-callback-quiz
+  skill: imperative-handle-vs-ref-callback
+  question: use-imperative-handle
+  difficulty: 2
+  prompt: Чем по назначению отличаются `useImperativeHandle` и ref-колбэк с cleanup?
+  explanation: "`useImperativeHandle` отвечает на вопрос «что увидит родитель в ref». Ref-колбэк с cleanup отвечает на вопрос «когда узел появился и исчез». Если родителю нужен весь DOM-узел, ничего не оборачивайте, а просто передайте ref дальше."
+  type: quiz
+  options:
+    - label: useImperativeHandle задаёт, что получит ref родителя (узкий API), а ref-колбэк с cleanup реагирует на присоединение и отсоединение узла
+      why: "Верно. Первый управляет содержимым ref. Второй даёт хук на жизненный цикл DOM-узла: подписаться при маунте и убрать подписку при отсоединении."
+    - label: Это взаимозаменяемые способы получить DOM-узел. useImperativeHandle просто новее и предпочтительнее
+      why: Нет. useImperativeHandle как раз нужен, чтобы не отдавать узел целиком. Задачу «получить узел» решает обычная передача ref.
+    - label: useImperativeHandle нужен, чтобы ребёнок мог императивно менять состояние родителя
+      why: "Это анти-паттерн: он ломает однонаправленный поток данных. Для связи «ребёнок → родитель» передают колбэк через props."
+    - label: В React 19 ref стал обычным prop, поэтому useImperativeHandle больше не нужен
+      why: В React 19 необязательным стал forwardRef, а не useImperativeHandle. Чтобы сузить API, по-прежнему нужен useImperativeHandle.
+  answer: 0
+- id: use-imperative-handle-video-api
+  skill: imperative-handle-vs-ref-callback
+  question: use-imperative-handle
+  difficulty: 2
+  prompt: VideoPlayer из дизайн-системы. Родитель должен уметь вызывать play() и pause(), но не должен менять стили, src и прочие свойства <video>. Что выбрать?
+  explanation: "Правило: узкий набор команд для родителя — `useImperativeHandle`. Родителю нужен весь узел — передайте ref насквозь. Важен момент маунта и анмаунта узла — ref-колбэк с cleanup. Сообщить родителю о событии — колбэк в props."
+  type: choose-tool
+  options:
+    - label: useImperativeHandle с { play, pause }
+      why: Родитель получает только нужные методы, а сам <video> скрыт внутри компонента. Это ровно та задача, для которой хук создан.
+    - label: Передать ref родителя прямо на <video>
+      why: Подходит, когда родителю действительно нужен весь узел, например для измерений. Здесь же откроется весь HTMLVideoElement, а этого просили избежать.
+    - label: Ref-колбэк с cleanup на <video>
+      why: Нужен, чтобы реагировать на присоединение и отсоединение узла, например подписаться на виджет. Сам по себе он не даёт родителю API play/pause.
+    - label: Пропсы-колбэки onPlay и onPause
+      why: Колбэки передают события от ребёнка к родителю. Команду «запусти видео» от родителя к ребёнку они не отправят.
+  answer: 0
+- id: use-imperative-handle-search-input
+  skill: imperative-handle-api
+  question: use-imperative-handle
+  difficulty: 2
+  prompt: React 19, ref приходит как prop. Допишите компонент так, чтобы родитель получил только метод focus(), а не весь <input>.
+  explanation: "`useImperativeHandle(ref, create, deps)` подставляет в ref родителя объект из create. Внутренний `inputRef` указывает на настоящий DOM-узел, а методы handle его используют. Если отдать input сам `ref`, родитель получит весь узел, и обёртка потеряет смысл."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    type Handle = { focus(): void };
+
+    function SearchInput(
+      { ref }: { ref?: Ref<Handle> }
+    ) {
+      const inputRef = useRef<HTMLInputElement>(null);
+      ___(ref, () => ({
+        focus: () => inputRef.current?.___(),
+      }), []);
+      return <input ref={___} />;
+    }
+  tokens:
+    - useImperativeHandle
+    - focus
+    - inputRef
+  decoys:
+    - forwardRef
+    - useRef
+    - ref
+    - select
+- id: ref-callback-missing-cleanup
+  skill: ref-callback-cleanup
+  question: use-imperative-handle
+  difficulty: 2
+  prompt: Через какое-то время в приложении копятся «мёртвые» экземпляры графика и их слушатели. Найдите строку с ошибкой.
+  explanation: "В React 19 ref-колбэк может вернуть cleanup, и React вызовет его при отсоединении узла. Здесь его нет, поэтому график не уничтожается. К тому же инлайн-колбэк — новая функция на каждый рендер, и график пересоздаётся. Исправление: `const chart = createChart(...); return () => chart.destroy();`."
+  type: find-bug
+  language: tsx
+  code: |-
+    function Chart({ data }: { data: Point[] }) {
+      return (
+        <div
+          ref={(node) => {
+            if (!node) return;
+            const chart = createChart(node, data);
+          }}
+        />
+      );
+    }
+  bugLines:
+    - 6
+  causes:
+    - Колбэк не возвращает cleanup с chart.destroy(), и экземпляр не уничтожается при отсоединении узла
+    - Ref-колбэк никогда не получает null, поэтому проверка !node приводит к ошибке
+    - Сторонние виджеты можно подключать только через useImperativeHandle
+    - В ref-колбэке нельзя трогать DOM, createChart нужно перенести в рендер
+  answer: 0
+
+# use-controllable-state: принято из черновика 2026-11-07
+- id: controllable-state-single-source-quiz
+  skill: controllable-state-single-source
+  question: use-controllable-state
+  difficulty: 2
+  prompt: "Какой принцип делает `useControllableState` корректным в обоих режимах: controlled и uncontrolled?"
+  explanation: "Источник истины выбирается по `value !== undefined`. В controlled-режиме значение всегда берётся из props, в uncontrolled — из внутреннего state. `onChange` вызывается всегда. Режим не должен меняться за жизнь экземпляра: переключение controlled↔uncontrolled — антипаттерн, как и у `<input>`."
+  type: quiz
+  options:
+    - label: "В каждом режиме один источник истины: controlled — всегда value из props, uncontrolled — внутренний state; onChange вызывается в обоих"
+      why: Верно. Источники не смешиваются, значит, рассинхронизации нет. Родитель узнаёт об изменениях даже в uncontrolled-режиме.
+    - label: Всегда хранить внутренний state и синхронизировать его с value через useEffect — так оба режима работают одинаково
+      why: Появляются два источника правды. Эффект срабатывает после рендера, поэтому один кадр UI показывает устаревшее значение.
+    - label: В controlled-режиме тоже обновлять внутренний state, чтобы UI откликался мгновенно, а затем вызывать onChange
+      why: Если родитель отклонит изменение и оставит value прежним, компонент покажет значение, которого у родителя нет.
+    - label: "Вызывать onChange только в controlled-режиме: в uncontrolled родитель сам отказался следить за значением"
+      why: "Родителю может быть нужно знать об изменениях без полного контроля: для аналитики, валидации или автосохранения."
+  answer: 0
+- id: controllable-state-fill-core
+  skill: controllable-state-implementation
+  question: use-controllable-state
+  difficulty: 2
+  prompt: Допишите хук так, чтобы он читал значение из одного источника и всегда сообщал родителю об изменении.
+  explanation: "Режим определяется через `value !== undefined`: проверка на null ошибочно сочла бы отсутствующий value переданным. В controlled-режиме читаем `value`, внутренний state обновляем только в uncontrolled-режиме, а `onChange` зовём в обоих."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function useControllableState<T>({
+      value, defaultValue, onChange,
+    }: Options<T>) {
+      const isControlled = value !== ___;
+      const [internal, setInternal] =
+        useState(defaultValue);
+      const current = isControlled ? ___ : internal;
+      const setValue = useCallback((next: T) => {
+        if (!isControlled) ___(next);
+        ___?.(next);
+      }, [isControlled, onChange]);
+      return [current, setValue] as const;
+    }
+  tokens:
+    - undefined
+    - value
+    - setInternal
+    - onChange
+  decoys:
+    - "null"
+    - internal
+    - defaultValue
+    - setValue
+- id: controllable-state-effect-sync-bug
+  skill: controllable-state-single-source
+  question: use-controllable-state
+  difficulty: 2
+  prompt: Компонент на этом хуке используют как controlled. Иногда UI показывает не то значение, что у родителя. Где ошибка?
+  explanation: "Внутренний state остаётся источником правды и в controlled-режиме. Эффект копирует value в state уже после рендера, поэтому один рендер показывает старое значение. setState(next) срабатывает и в controlled-режиме: если родитель отклонил изменение, value не меняется, эффект не запускается, и UI показывает next. Исправление: `current = isControlled ? value : internal`, а setState вызывать только в uncontrolled-режиме."
+  type: find-bug
+  language: tsx
+  code: |-
+    function useControllableState<T>({
+      value, defaultValue, onChange,
+    }: Options<T>) {
+      const [state, setState] =
+        useState(value ?? defaultValue);
+      useEffect(() => {
+        if (value !== undefined) setState(value);
+      }, [value]);
+      const setValue = (next: T) => {
+        setState(next);
+        onChange?.(next);
+      };
+      return [state, setValue] as const;
+    }
+  bugLines:
+    - 6
+    - 7
+    - 10
+  causes:
+    - "Внутренний state остаётся источником правды и в controlled-режиме: синхронизация через эффект отстаёт на рендер и не откатывает отклонённые родителем значения"
+    - "Нельзя передавать в useState выражение `value ?? defaultValue`: начальное значение должно быть константой"
+    - setValue не обёрнут в useCallback, поэтому компонент уйдёт в бесконечный цикл рендеров
+    - "Нельзя вызывать onChange в одном обработчике с setState: React отбросит одно из обновлений"
+  answer: 0
+- id: controllable-state-rejected-change
+  skill: controlled-component-flow
+  question: use-controllable-state
+  difficulty: 2
+  prompt: "`useControllableState` реализован как в вопросе: режим controlled, если `value !== undefined`. Родитель рендерит Toggle как в последней строке и никогда не меняет value. Кнопку нажали дважды. Что будет на экране и в консоли?"
+  explanation: "Toggle работает в controlled-режиме: value всегда false. Каждый клик вызывает setOn(true), но внутренний state не меняется, срабатывает только onChange(true). Родитель value не обновил, поэтому на экране остаётся OFF. В controlled-режиме компонент лишь предлагает новое значение, решает родитель."
+  type: predict-output
+  language: tsx
+  code: |-
+    function Toggle(props: {
+      value?: boolean;
+      onChange?: (v: boolean) => void;
+    }) {
+      const [on, setOn] = useControllableState({
+        ...props, defaultValue: false,
+      });
+      return (
+        <button onClick={() => setOn(!on)}>
+          {on ? 'ON' : 'OFF'}
+        </button>
+      );
+    }
+    // <Toggle value={false} onChange={console.log} />
+  options:
+    - На экране OFF; в консоли true, true
+    - На экране OFF; в консоли true, false
+    - На экране OFF; в консоли ничего
+    - На экране ON, затем OFF; в консоли true, false
+  answer: 0

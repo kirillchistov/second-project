@@ -929,3 +929,568 @@
     - Воспроизвести на бюджетном устройстве или с CPU throttling в DevTools
     - "Записать Performance-профиль и найти долгую фазу: input delay, обработка или presentation"
     - Применить фикс под эту фазу и подтвердить улучшение по полевым данным после релиза
+
+# debounce-cancel-flush: принято из черновика 2026-11-07
+- id: debounce-flush-semantics
+  skill: debounce-cancel-flush
+  question: debounce-cancel-flush
+  difficulty: 2
+  prompt: Поле валидируется через debounce. Пользователь отправляет форму до окончания паузы. Что должен сделать `flush()`?
+  explanation: "`cancel` отбрасывает ожидающий вызов, а `flush` выполняет его прямо сейчас. В обоих случаях таймер гасится, а `lastArgs` сбрасывается. Если вызова в очереди нет, `flush` ничего не делает. Иначе получится двойной вызов или вызов с устаревшими аргументами."
+  type: quiz
+  options:
+    - label: Если вызов ожидается — погасить таймер и сразу вызвать fn с последними накопленными аргументами
+      why: "Верно. Отложенная работа выполняется синхронно и ровно один раз: таймер больше не сработает, а lastArgs сброшен."
+    - label: Сразу вызвать fn с текущими данными формы и не трогать таймер — он сработает с теми же данными
+      why: Таймер всё равно выстрелит, и fn вызовется второй раз. Это именно та ошибка, которую flush должен предотвращать.
+    - label: Погасить таймер и отбросить аргументы, чтобы валидация не мешала отправке
+      why: Это семантика cancel. Он нужен при размонтировании, а при отправке формы валидацию как раз нужно выполнить.
+    - label: "Перезапустить таймер с нулевой задержкой: setTimeout(fn, 0)"
+      why: Вызов остаётся асинхронным, и submit пройдёт раньше валидации. Немедленного выполнения не будет.
+  answer: 0
+- id: debounce-flush-double-call
+  skill: debounce-cancel-flush
+  question: debounce-cancel-flush
+  difficulty: 2
+  prompt: Форма вызывает `flush()` при отправке, и иногда `fn` срабатывает дважды. Найдите строку с ошибкой.
+  explanation: "`flush` вызывает `fn`, но не делает `clearTimeout` и не сбрасывает `last`. Запланированный таймер позже снова вызовет `flush` с теми же аргументами. Правильно так: `if (!last) return; clearTimeout(timer); const a = last; last = undefined; fn(...a);`."
+  type: find-bug
+  language: ts
+  code: |-
+    function debounce<A extends unknown[]>(
+      fn: (...args: A) => void, ms: number) {
+      let timer: ReturnType<typeof setTimeout>;
+      let last: A | undefined;
+      const d = (...args: A) => {
+        last = args;
+        clearTimeout(timer);
+        timer = setTimeout(() => d.flush(), ms);
+      };
+      d.cancel = () => { clearTimeout(timer); last = undefined; };
+      d.flush = () => { if (last) fn(...last); };
+      return d;
+    }
+  bugLines:
+    - 11
+  causes:
+    - flush не гасит таймер и не сбрасывает last — запланированный вызов сработает ещё раз с теми же аргументами
+    - cancel должен присваивать timer = undefined, иначе clearTimeout не сработает
+    - "Таймер должен вызывать fn напрямую: вызов d.flush изнутри setTimeout приводит к рекурсии"
+    - clearTimeout в d нужно вызывать после setTimeout, а не перед ним
+  answer: 0
+- id: debounce-cancel-flush-trace
+  skill: debounce-cancel-flush
+  question: debounce-cancel-flush
+  difficulty: 2
+  prompt: "`debounce` — реализация из вопроса, с `cancel` и `flush`. Что окажется в консоли через 200 мс?"
+  explanation: Вызов `'b'` заменяет `'a'`, и `flush` сразу печатает `b`, гася таймер. Затем `'c'` запланирован, но `cancel` отбрасывает его. Вызов `'d'` запускает новый таймер, и через 100 мс печатается `d`. После `cancel` debounce продолжает работать для новых вызовов.
+  type: predict-output
+  language: ts
+  code: |-
+    const log = debounce(
+      (x: string) => console.log(x), 100,
+    );
+    log('a');
+    log('b');
+    log.flush();
+    log('c');
+    log.cancel();
+    log('d');
+    // ждём 200 мс
+  options:
+    - b → d
+    - a → b → d
+    - b → c → d
+    - b → b → d
+  answer: 0
+- id: debounce-react-cleanup-submit
+  skill: debounce-in-react
+  question: debounce-cancel-flush
+  difficulty: 2
+  prompt: |-
+    Требования к debounce:
+    • создаётся один раз (пока не сменится `onSearch`);
+    • при размонтировании отложенный поиск отменяется;
+    • при отправке формы выполняется сразу.
+
+    Заполните пропуски.
+  explanation: "`useMemo` сохраняет один экземпляр между рендерами. Без него каждый рендер получал бы новый таймер, и debounce не работал бы. Вызов `cancel` в cleanup не даст таймеру сработать после размонтирования, а `flush` при submit выполнит отложенный поиск немедленно. Если `onSearch` нестабилен, экземпляр будет пересоздаваться — стабилизируйте колбэк."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    function Search({ onSearch }: Props) {
+      const search = ___(
+        () => debounce(onSearch, 300),
+        [___],
+      );
+      useEffect(() => () => search.___(), [search]);
+      return (
+        <form onSubmit={(e) => { e.preventDefault(); search.___(); }}>
+          <input onChange={(e) => search(e.target.value)} />
+        </form>
+      );
+    }
+  tokens:
+    - useMemo
+    - onSearch
+    - cancel
+    - flush
+  decoys:
+    - useCallback
+    - useEffect
+    - clear
+    - call
+
+# memoize-multi-arg: принято из черновика 2026-11-07
+- id: memoize-json-key-quiz
+  skill: memoize-cache-key
+  question: memoize-multi-arg
+  difficulty: 2
+  prompt: Почему ключ кэша `JSON.stringify(args)` в memoize ненадёжен, даже если функция чистая?
+  explanation: "Ключ кэша должен однозначно отражать аргументы. JSON-сериализация теряет информацию: `undefined`, функции и `NaN` превращаются в `null` или пропадают. Кроме того, она зависит от порядка ключей. Для примитивов надёжнее вложенные `Map`, для объектов — `Map`/`WeakMap` по ссылке."
+  type: quiz
+  options:
+    - label: Разные аргументы могут дать одинаковый ключ, а равные по содержимому объекты с другим порядком полей — разные ключи
+      why: Верно. `[undefined]` и `[null]` оба дают "[null]", а `{a,b}` и `{b,a}` дают разные строки. Возможны и ложные попадания, и промахи.
+    - label: "Главная проблема — скорость: на корректность результата сериализация не влияет"
+      why: "Сериализация на каждом вызове действительно стоит CPU. Но хуже другое: из-за коллизий ключей memoize может вернуть результат, посчитанный для других аргументов."
+    - label: JSON.stringify бросает исключение на любом объекте, поэтому подходит только для примитивов
+      why: Обычные объекты сериализуются без ошибок. Исключение будет только на циклических ссылках и BigInt.
+    - label: Map не может хранить слишком длинные строковые ключи, поэтому кэш теряет записи
+      why: Ограничения на длину строкового ключа у Map на практике нет. Проблема в том, что сама строка неточно описывает аргументы.
+  answer: 0
+- id: memoize-json-key-collision
+  skill: memoize-cache-key
+  question: memoize-multi-arg
+  difficulty: 2
+  prompt: "`memoize` — версия из вопроса с ключом `JSON.stringify(args)`. Что выведет консоль?"
+  explanation: "`JSON.stringify([null])`, `JSON.stringify([undefined])` и `JSON.stringify([NaN])` дают одну и ту же строку \"[null]\". Первый вызов кладёт в кэш 'object', следующие два попадают в кэш. Вывод: сериализация склеивает разные значения, и memoize молча возвращает чужой результат."
+  type: predict-output
+  language: ts
+  code: |-
+    const kind = memoize((v: unknown) => typeof v);
+
+    console.log(kind(null));
+    console.log(kind(undefined));
+    console.log(kind(NaN));
+  options:
+    - object, object, object
+    - object, undefined, number
+    - object, undefined, object
+    - object, затем TypeError при сериализации undefined
+  answer: 0
+- id: memoize-nested-map-build
+  skill: memoize-nested-map
+  question: memoize-multi-arg
+  difficulty: 2
+  prompt: Соберите memoize для функции двух примитивных аргументов на вложенных Map — без сериализации.
+  explanation: "Внешняя Map по первому аргументу хранит внутреннюю Map по второму. Map сравнивает ключи через SameValueZero, поэтому `NaN`, `null` и `undefined` различаются корректно. Проверять нужно через `has`, а не через truthy `get`: иначе результаты `0`, `''` и `false` никогда не попадут из кэша. WeakMap не принимает примитивы в качестве ключей."
+  type: parsons
+  language: ts
+  lines:
+    - "function memo2<A, B, R>(fn: (a: A, b: B) => R) {"
+    - "  const cache = new Map<A, Map<B, R>>();"
+    - "  return (a: A, b: B): R => {"
+    - "    let inner = cache.get(a);"
+    - "    if (!inner) {"
+    - "      inner = new Map<B, R>();"
+    - "      cache.set(a, inner);"
+    - "    }"
+    - "    if (inner.has(b)) return inner.get(b)!;"
+    - "    const result = fn(a, b);"
+    - "    inner.set(b, result);"
+    - "    return result;"
+    - "  };"
+    - "}"
+  distractors:
+    - "    if (inner.get(b)) return inner.get(b)!;"
+    - "  const cache = new WeakMap<A, Map<B, R>>();"
+- id: memoize-object-arg-weakmap
+  skill: memoize-weakmap
+  question: memoize-multi-arg
+  difficulty: 3
+  prompt: Дорогая `computeLayout(node)` вызывается много раз с одними и теми же объектами-узлами дерева. Узлы создаются и удаляются при редактировании. Как кэшировать результат без утечки памяти?
+  explanation: "Если аргумент — объект и важна идентичность, ключом служит сама ссылка. WeakMap держит ключ слабо: удалённый узел соберёт GC вместе с записью кэша. Для примитивов подходит Map или LRU, сериализация — только для простых случаев."
+  type: choose-tool
+  options:
+    - label: WeakMap<Node, Layout> с ключом по ссылке на узел
+      why: "Лучший выбор: поиск по ссылке быстрый и без искажений, а запись исчезает, когда узел больше нигде не используется."
+    - label: Map<string, Layout> с ключом JSON.stringify(node)
+      why: Сериализация дерева дорогая, зависит от порядка полей и падает на циклах (parent ↔ children). Годится только для маленьких плоских аргументов.
+    - label: Map<Node, Layout> с ключом по ссылке
+      why: Ссылочный ключ верный, но Map держит удалённые узлы вечно — это утечка. Подошла бы, если набор объектов фиксирован и живёт всё время работы приложения.
+    - label: LRU-кэш на 100 записей с ключом JSON.stringify(node)
+      why: Вытеснение ограничивает рост, но проблемы сериализации остаются. LRU уместен для примитивных ключей с большим разнообразием значений.
+  answer: 0
+
+# image-optimization-lcp: принято из черновика 2026-11-07
+- id: image-lcp-hero-attributes
+  skill: lcp-image-loading
+  question: image-optimization-lcp
+  difficulty: 2
+  prompt: Крупная hero-картинка в первом экране, скорее всего, станет LCP-элементом. Как правильно настроить её и картинки ниже экрана?
+  explanation: Для LCP-картинки важны две вещи. Её нельзя откладывать, и для неё нужно заранее зарезервировать место. Отсюда `width`/`height` (или `aspect-ratio`) и `fetchPriority="high"`. Lazy-загрузку оставляем картинкам ниже экрана, чтобы они не забирали полосу у важного.
+  type: quiz
+  options:
+    - label: 'Hero: width/height и fetchPriority="high", без lazy. Картинки ниже экрана — loading="lazy"'
+      why: Верно. Место резервируется заранее, поэтому нет CLS. Hero грузится с высоким приоритетом, а невидимые картинки не конкурируют с ним за сеть.
+    - label: 'Hero: loading="lazy" вместе с fetchPriority="high" — приоритет перекроет отложенную загрузку'
+      why: Не перекроет. lazy заставляет браузер ждать, пока картинка окажется у viewport, и загрузка всё равно стартует позже. Для LCP это вредно.
+    - label: "Hero: достаточно srcSet и sizes — по ним браузер сам поймёт размер и зарезервирует место"
+      why: sizes помогает только выбрать файл по ширине слота. Пропорции из него браузер не узнает, поэтому без width/height или aspect-ratio будет сдвиг разметки.
+    - label: Всем картинкам страницы loading="eager" и fetchPriority="high", чтобы ничего не задерживалось
+      why: Когда высокий приоритет у всех, он ничего не значит. Картинки ниже экрана начнут отнимать полосу у hero, и LCP станет хуже.
+  answer: 0
+- id: image-lcp-lazy-hero
+  skill: lcp-image-loading
+  question: image-optimization-lcp
+  difficulty: 1
+  prompt: Это главный баннер первого экрана. Lighthouse показывает плохой LCP. Найдите строку, которая в этом виновата.
+  explanation: '`loading="lazy"` откладывает загрузку, пока браузер не убедится, что картинка рядом с viewport. Для LCP-элемента это прямая задержка. Уберите lazy и поставьте `fetchPriority="high"`. Lazy нужен только картинкам ниже первого экрана.'
+  type: find-bug
+  language: tsx
+  code: |-
+    function Hero() {
+      return (
+        <img
+          src="/hero-960.webp"
+          srcSet="/hero-960.webp 960w, /hero-1920.webp 1920w"
+          sizes="100vw"
+          width={1920}
+          height={1080}
+          loading="lazy"
+          alt="Новая коллекция"
+        />
+      );
+    }
+  bugLines:
+    - 9
+  causes:
+    - loading="lazy" намеренно откладывает загрузку изображения первого экрана, и LCP наступает позже
+    - sizes="100vw" заставляет браузер всегда качать самый большой файл из srcSet
+    - width и height не совпадают с реальным размером на экране, поэтому LCP считается неверно
+    - Без атрибута type браузер не распознаёт WebP и долго перебирает варианты
+  answer: 0
+- id: image-picture-avif-fallback
+  skill: responsive-image-formats
+  question: image-optimization-lcp
+  difficulty: 2
+  prompt: "Допишите разметку: современные форматы с фолбэком на JPEG, без сдвига разметки и с приоритетной загрузкой LCP-картинки."
+  explanation: "Браузер берёт первый `<source>`, чей `type` он поддерживает. Если не подходит ни один, он использует `src` у `<img>`. Размеры и приоритет задаются на самом `<img>`: именно он отображается и становится LCP-элементом. `height` вместе с `width` даёт браузеру пропорции, чтобы зарезервировать место заранее."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    <picture>
+      <___ srcSet="/hero.avif" type="image/avif" />
+      <source srcSet="/hero.webp" type="image/webp" />
+      <img
+        src="/hero.jpg"
+        width={1920}
+        ___={1080}
+        fetchPriority="___"
+        alt="Горы на закате"
+      />
+    </picture>
+  tokens:
+    - source
+    - height
+    - high
+  decoys:
+    - img
+    - aspectRatio
+    - eager
+    - low
+- id: image-mobile-oversized-hero
+  skill: responsive-image-sizing
+  question: image-optimization-lcp
+  difficulty: 2
+  prompt: На мобильном hero занимает на экране около 400px в ширину, но Lighthouse показывает, что браузер скачал файл 1920px весом 2 МБ. Как это исправить?
+  explanation: Если файл крупнее, чем нужно экрану, проблема в выборе ресурса, а не в приоритете или отложенной загрузке. `srcSet` с w-дескрипторами и `sizes` позволяют браузеру взять файл под ширину слота и DPR. Формат (AVIF/WebP через `<picture>`) уменьшает вес дополнительно, но не заменяет правильный размер.
+  type: choose-tool
+  options:
+    - label: srcSet с вариантами 480w/960w/1920w и sizes
+      why: Лучший выбор. Браузер узнаёт ширину слота из sizes и с учётом плотности пикселей скачает подходящий файл вместо 1920px.
+    - label: loading="lazy" на hero
+      why: Это картинка первого экрана, она всё равно загрузится, и тот же файл в 2 МБ. Только LCP ухудшится. Lazy подходит для картинок ниже экрана.
+    - label: fetchPriority="high"
+      why: "Поднимает приоритет загрузки, это полезно для LCP. Но размер файла не меняется: мобильный пользователь по-прежнему качает 2 МБ."
+    - label: "CSS: width: 100%; height: auto"
+      why: Уменьшит картинку только визуально. Скачан будет всё тот же большой файл. Такое правило нужно для адаптивной вёрстки, а не для экономии трафика.
+  answer: 0
+
+# infinite-scroll-intersection-observer: принято из черновика 2026-11-07
+- id: infinite-scroll-loading-guard-quiz
+  skill: infinite-scroll-dedupe
+  question: infinite-scroll-intersection-observer
+  difficulty: 2
+  prompt: Бесконечная прокрутка на `IntersectionObserver`. Зачем перед загрузкой проверять флаг «уже грузится», если observer и так срабатывает только при пересечении якоря?
+  explanation: "Observer устраняет частые onScroll-события, но не гарантирует один вызов на страницу. Пока запрос летит, якорь может выйти и снова войти во viewport, а пересозданный observer сразу сообщает текущее пересечение. Правило: старт загрузки = якорь виден && !loading && hasMore."
+  type: quiz
+  options:
+    - label: "Колбэк может сработать снова до конца запроса: якорь вышел и вернулся или observer пересоздан. Без флага уйдут параллельные дубли"
+      why: Верно. Пересечение — это событие видимости, а не «одна страница». Защиту от дублей даёт только явный флаг идущего запроса.
+    - label: IntersectionObserver вызывает колбэк на каждый пиксель прокрутки, как onScroll, поэтому его нужно ограничивать флагом
+      why: "Нет: колбэк вызывается при пересечении порогов, а не на каждый пиксель. Именно поэтому IO и выбирают вместо onScroll с троттлингом."
+    - label: Флаг нужен, чтобы React не перерисовывал список, пока идёт загрузка следующей страницы
+      why: Флаг не управляет рендером списка. Его держат в useRef как раз для того, чтобы он вообще не влиял на рендер.
+    - label: Без флага браузер сам отменит предыдущий fetch при новом пересечении, и первая страница потеряется
+      why: "Браузер ничего не отменяет автоматически: оба запроса дойдут до конца, и данные задублируются, а не потеряются."
+  answer: 0
+- id: infinite-scroll-stale-loading-state
+  skill: infinite-scroll-dedupe
+  question: infinite-scroll-intersection-observer
+  difficulty: 2
+  prompt: При быстрой прокрутке туда-обратно уходят дублирующие запросы одной страницы, хотя флаг loading проверяется. Где ошибка?
+  explanation: "Колбэк observer создаётся один раз за запуск эффекта и видит `loading` из того рендера, т.е. false. setLoading(true) меняет state, но не значение в замыкании. Флаг, который читают из долгоживущего колбэка и который не влияет на UI, храните в `useRef`: `loadingRef.current` всегда актуален."
+  type: find-bug
+  language: tsx
+  code: |-
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+      const el = ref.current;
+      if (!el || !hasMore) return;
+      const io = new IntersectionObserver(async ([e]) => {
+        if (!e.isIntersecting || loading) return;
+        setLoading(true);
+        setHasMore(await loadMore());
+        setLoading(false);
+      });
+      io.observe(el);
+      return () => io.disconnect();
+    }, [hasMore, loadMore]);
+  bugLines:
+    - 1
+    - 7
+  causes:
+    - "Колбэк observer замкнул loading из рендера, где создан эффект: он всегда видит false, и проверка не защищает от повторов"
+    - setHasMore нельзя вызывать после await — обновление состояния потеряется
+    - disconnect в cleanup отменяет текущий запрос loadMore, и он стартует заново
+    - IntersectionObserver нужно создавать в useLayoutEffect, иначе он пропускает первые пересечения
+  answer: 0
+- id: infinite-scroll-observer-root-margin
+  skill: intersection-observer-setup
+  question: infinite-scroll-intersection-observer
+  difficulty: 2
+  prompt: "Допишите эффект: подгрузка должна начинаться за 400px до конца списка, а observer — корректно останавливаться."
+  explanation: "`isIntersecting` — виден ли якорь. `rootMargin` расширяет область наблюдения, и загрузка стартует заранее, пока пользователь ещё листает. `observe` подключает элемент, `disconnect` в cleanup снимает всё наблюдение — при смене hasMore или размонтировании."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    useEffect(() => {
+      if (!hasMore) return;
+      const el = sentinelRef.current;
+      if (!el) return;
+      const observer = new IntersectionObserver(
+        ([entry]) => {
+          if (!entry.___ || loadingRef.current) return;
+          void load();
+        },
+        { ___: '0px 0px 400px 0px' },
+      );
+      observer.___(el);
+      return () => observer.___();
+    }, [hasMore, load]);
+  tokens:
+    - isIntersecting
+    - rootMargin
+    - observe
+    - disconnect
+  decoys:
+    - inView
+    - threshold
+    - subscribe
+    - padding
+- id: infinite-scroll-feed-with-query
+  skill: infinite-scroll-approach-choice
+  question: infinite-scroll-intersection-observer
+  difficulty: 2
+  prompt: В проекте уже есть TanStack Query. Нужна лента с подгрузкой страниц при прокрутке, без дублей запросов и с мгновенным показом уже загруженных страниц при возврате из карточки. Что выбрать?
+  explanation: "Серверные страницы — это серверное состояние: кэш, курсоры и флаги загрузки отдают `useInfiniteQuery`. IntersectionObserver лишь сигнализирует «пора»: вызываем `fetchNextPage()`, только если `hasNextPage && !isFetchingNextPage`. Для очень длинных лент сверху добавляют виртуализацию."
+  type: choose-tool
+  options:
+    - label: useInfiniteQuery + якорь с IntersectionObserver
+      why: "Лучший вариант: страницы кешируются и сразу видны при возврате, hasNextPage и isFetchingNextPage дают готовую защиту от дублей, IO запускает fetchNextPage."
+    - label: onScroll с троттлингом и расчётом scrollTop
+      why: Подходит, только если IO недоступен или нужна логика по точной позиции. Частые события, ручной троттлинг и кэш страниц всё равно придётся писать самому.
+    - label: useEffect + useState с массивом страниц
+      why: Годится для простого списка без кэша. Флаги загрузки, гонки и сохранение страниц между экранами придётся писать вручную, а при возврате данные потеряются.
+    - label: Только виртуализация (TanStack Virtual)
+      why: Решает другую задачу — рендер тысяч строк без тормозов. Загружать страницы она не умеет, её комбинируют с useInfiniteQuery.
+  answer: 0
+
+# inp-debugging-react-tracks: принято из черновика 2026-11-07
+- id: inp-debugging-where-to-look
+  skill: inp-diagnosis
+  question: inp-debugging-react-tracks
+  difficulty: 3
+  prompt: Клик по фильтру таблицы даёт INP ≈ 220 мс, а сам `onClick` в профиле занимает 5 мс. Какой вывод верный?
+  explanation: "INP — это путь от ввода до следующего кадра: задержка до обработки, обработчики и всё, что мешает отрисовке (рендер, коммит, синхронные эффекты). Быстрый обработчик не значит быстрое взаимодействие. Ищите, какой компонент и какая фаза держат поток, в треках `Components ⚛`/`Scheduler ⚛`."
+  type: quiz
+  options:
+    - label: "Время съедает работа, запущенная кликом: рендер, коммит или эффекты до отрисовки. Искать компонент в треках React"
+      why: Верно. INP заканчивается на следующем paint, поэтому в него входит и рендер после setState. React-треки покажут, какой компонент и какая фаза виноваты.
+    - label: "Обработчик быстрый, значит задержка в сети: нужно ускорять API фильтрации"
+      why: Ожидание fetch асинхронно и не блокирует отрисовку. INP растёт от занятого главного потока, а не от ожидания ответа.
+    - label: INP, как FID, меряет только задержку до старта обработчика, так что виноваты чужие задачи до клика
+      why: "Это описание FID. INP учитывает весь путь: input delay, обработку и presentation delay до следующего кадра."
+    - label: "Хватит общего трека Long Tasks: он покажет, какой компонент тормозит"
+      why: Long Tasks показывает лишь, что JS шёл долго. Чтобы найти конкретный компонент и фазу рендера или эффекта, нужны треки Components ⚛ и Scheduler ⚛.
+  answer: 0
+- id: inp-debugging-recipe
+  skill: inp-diagnosis
+  question: inp-debugging-react-tracks
+  difficulty: 2
+  prompt: Расставьте шаги разбора плохого INP на конкретном экране React-приложения.
+  explanation: Сначала создайте условия, близкие к реальным. Затем найдите именно худшее взаимодействие, а не первое, что попалось в профиле. После этого определите фазу и компонент и только потом чините. Перемеряйте в тех же условиях, иначе улучшение может оказаться шумом.
+  type: order
+  kind: recipe
+  steps:
+    - Включить CPU throttling (4–6x), чтобы приблизиться к слабым устройствам
+    - Записать Performance-профиль, повторяя проблемное взаимодействие
+    - Найти в треке Interactions самое долгое взаимодействие
+    - "Понять, что доминирует: input delay, обработка или presentation delay"
+    - "В треках Components ⚛ / Scheduler ⚛ найти компонент и фазу: рендер или эффект"
+    - Исправить и перемерить в тех же условиях
+- id: inp-heavy-list-render
+  skill: inp-fix-choice
+  question: inp-debugging-react-tracks
+  difficulty: 3
+  prompt: "Трек Components ⚛ показывает: 180 из 220 мс после клика по фильтру уходит на рендер `OrdersTable`, который монтирует 5000 строк. На экране видно около 30. Обработчик быстрый. Что сделать в первую очередь?"
+  explanation: Сначала уберите лишнюю работу, потом решайте, когда выполнять оставшуюся. Если рендерится намного больше, чем видно, нужна виртуализация. Если работа действительно необходима, `startTransition` делает её прерываемой. memo помогает при повторных рендерах с теми же props, а не при монтировании новых строк.
+  type: choose-tool
+  options:
+    - label: Виртуализация списка (например, TanStack Virtual)
+      why: "Лучший выбор: рендерятся только видимые строки, и работа после клика сокращается в десятки раз."
+    - label: Обернуть обновление фильтра в startTransition
+      why: "Хорошо, когда тяжёлая работа неизбежна: обновление станет прерываемым, а срочный отклик отрисуется раньше. Но 5000 строк всё равно будут рендериться."
+    - label: React.memo на компонент строки
+      why: Помогает, если строки перерисовываются с теми же props. При смене фильтра монтируется новый набор строк, и memo почти ничего не даст.
+    - label: Debounce обработчика клика
+      why: Подходит для частого ввода, например при наборе текста. Для одиночного клика debounce только добавит задержку и не уменьшит рендер.
+  answer: 0
+- id: inp-rum-attribution
+  skill: inp-rum-collection
+  question: inp-debugging-react-tracks
+  difficulty: 2
+  prompt: Допишите сбор INP с реальных пользователей так, чтобы в аналитику уходили элемент взаимодействия и разбивка задержки по фазам.
+  explanation: "Сборка `web-vitals/attribution` добавляет в метрику `attribution`. Там есть элемент (`interactionTarget`) и три фазы: `inputDelay`, `processingDuration`, `presentationDelay`. RUM-данные показывают, какой экран и элемент тормозят у реальных пользователей. Затем этот экран разбирают локально в профиле."
+  type: fill-tokens
+  language: ts
+  code: |-
+    import { onINP } from 'web-vitals/___';
+
+    onINP((metric) => {
+      const a = metric.attribution;
+      sendToAnalytics({
+        value: metric.value,
+        target: a.___,
+        inputDelay: a.inputDelay,
+        processing: a.___,
+        presentation: a.___,
+      });
+    });
+  tokens:
+    - attribution
+    - interactionTarget
+    - processingDuration
+    - presentationDelay
+  decoys:
+    - targetElement
+    - handlerDuration
+    - renderDelay
+    - metrics
+
+# virtualization-variable-height: принято из черновика 2026-11-07
+- id: virtualization-variable-height-quiz
+  skill: variable-height-virtualization
+  question: virtualization-variable-height
+  difficulty: 3
+  prompt: Почему в списке строк переменной высоты нельзя найти первую видимую строку как `scrollTop / rowHeight`, и что делают вместо этого?
+  explanation: С переменной высотой позиция строки — это сумма высот всех строк перед ней. Офсеты строят из оценок и уточняют измерениями (ResizeObserver). Пересчитывают их только при изменении данных или высот. При скролле ищут видимый диапазон по готовому массиву, бинарным поиском за O(log n).
+  type: quiz
+  options:
+    - label: Хранят накопленные офсеты (оценка → измеренная высота), пересчитывают их при смене данных и высот, а при скролле ищут диапазон бинпоиском
+      why: Верно. Позиция строки равна сумме предыдущих высот. Офсеты зависят от данных и измерений, а не от scrollTop, поэтому при скролле нужен только быстрый поиск.
+    - label: "Делят scrollTop на среднюю высоту строки: погрешность на отдельной строке мала и незаметна"
+      why: "Ошибка накапливается. Через тысячи строк расхождение достигает тысяч пикселей: показывается не тот диапазон, контент прыгает."
+    - label: Один раз рендерят все строки скрытыми, измеряют их и только потом включают виртуализацию
+      why: "50 000 DOM-узлов на старте — это ровно то, от чего спасает виртуализация: долгий первый рендер, лишняя память и layout."
+    - label: На каждое событие scroll заново считают офсеты всех строк, чтобы они всегда были точными
+      why: Это O(n) на каждый кадр скролла при 50 000 элементах. Офсеты от прокрутки не меняются, пересчитывать их нужно только при смене данных или высот.
+  answer: 0
+- id: virtualization-prepend-scroll-jump
+  skill: scroll-anchoring-on-prepend
+  question: virtualization-variable-height
+  difficulty: 3
+  prompt: Сверху чата подгружаются старые сообщения. Позицию корректируют, но пользователь всё равно видит, как контент на кадр «прыгает». Где ошибка?
+  explanation: Коррекцию scrollTop надо сделать после изменения DOM, но до отрисовки кадра. useEffect обычно срабатывает уже после paint, поэтому браузер успевает показать сдвинутый контент. useLayoutEffect выполняется синхронно после commit и до paint — пользователь сразу видит исправленную позицию.
+  type: find-bug
+  language: tsx
+  code: |-
+    function ChatList({ messages }: Props) {
+      const ref = useRef<HTMLDivElement>(null);
+      const prevHeight = useRef(0);
+      const prevFirst = useRef(messages[0]?.id);
+      useEffect(() => {
+        const el = ref.current!;
+        if (messages[0]?.id !== prevFirst.current) {
+          el.scrollTop += el.scrollHeight - prevHeight.current;
+        }
+        prevHeight.current = el.scrollHeight;
+        prevFirst.current = messages[0]?.id;
+      }, [messages]);
+      return <div ref={ref}>{/* rows */}</div>;
+    }
+  bugLines:
+    - 5
+  causes:
+    - "useEffect выполняется после paint: браузер успевает отрисовать кадр со сдвинутым контентом. Нужен useLayoutEffect"
+    - "Вместо scrollHeight нужно брать clientHeight: он отражает высоту вставленного контента"
+    - Массив зависимостей должен быть пустым, иначе эффект срабатывает при каждой подгрузке
+    - Мутация prevHeight.current вызывает лишний ререндер, который и сбивает позицию
+  answer: 0
+- id: virtualization-binary-search-start
+  skill: variable-height-virtualization
+  question: virtualization-variable-height
+  difficulty: 2
+  prompt: "Допишите поиск первой видимой строки: это последний индекс, чей офсет не больше scrollTop. Массив offsets отсортирован по возрастанию."
+  explanation: Офсеты монотонно растут, поэтому на скролле достаточно бинарного поиска за O(log n) вместо линейного прохода по 50 000 элементам. Верхняя середина `(lo + hi + 1) >> 1` вместе с `lo = mid` гарантирует, что цикл завершится.
+  type: fill-tokens
+  language: ts
+  code: |-
+    function findStart(offsets: number[], scrollTop: number) {
+      let lo = 0;
+      let hi = offsets.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (offsets[mid] <= ___) lo = mid;
+        else hi = mid - ___;
+      }
+      return ___;
+    }
+  tokens:
+    - scrollTop
+    - "1"
+    - lo
+  decoys:
+    - containerHeight
+    - "0"
+    - mid
+- id: virtualization-chat-tool-choice
+  skill: virtualization-tool-choice
+  question: virtualization-variable-height
+  difficulty: 2
+  prompt: "Чат на 50 000 сообщений: высота каждого заранее неизвестна (текст, картинки), старые сообщения подгружаются сверху, скролл должен быть плавным. Что выбрать?"
+  explanation: "Правило выбора: высоты известны и одинаковы — хватит фиксированной арифметики. Высоты неизвестны — нужен виртуализатор с оценкой и динамическим измерением строк. CSS content-visibility экономит отрисовку, но не число компонентов и DOM-узлов."
+  type: choose-tool
+  options:
+    - label: "TanStack Virtual: `estimateSize` + `measureElement` на строках"
+      why: Оценка высоты для неотрисованных строк и измерение реальных после рендера закрывают переменную высоту. Корректировку позиции при вставке сверху всё равно нужно продумать.
+    - label: Виртуализация с фиксированной высотой строки
+      why: "Подходит для таблиц и списков с одинаковыми строками: там диапазон считается делением scrollTop. При разной высоте строки будут налезать друг на друга или прыгать."
+    - label: "CSS `content-visibility: auto` на каждом сообщении"
+      why: Хорошо для длинных статичных страниц. Но React всё равно создаёт 50 000 компонентов и DOM-узлов, а память и время первого рендера остаются большими.
+    - label: Постраничная навигация по 50 сообщений
+      why: Уместна для каталогов и админок. В чате ломает ожидаемый UX непрерывной ленты и не решает задачу сохранения позиции.
+  answer: 0
