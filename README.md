@@ -1,8 +1,8 @@
 # React Refresher
 
-180 актуальных вопросов для собеседования на React-разработчика: 32 Junior, 82 Middle, 66 Senior.
+207 актуальных вопросов для собеседования на React-разработчика: 35 Junior, 95 Middle, 77 Senior.
 Обновлённая и расширенная версия списка «React JS: 50 вопросов на собеседование» (`docs/react-50-questions-old.pdf`)
-под React 19.2, Server Components и React Compiler.
+под React 19.3, Server Components и React Compiler.
 
 ## Что внутри
 
@@ -43,7 +43,7 @@ apps/
   web/                  веб-версия: Vite SPA, страницы, компоненты, загрузка вопросов через import.meta.glob
 packages/
   content/              @rr/content — всё, что можно выучить
-    questions/          вопросы в Markdown: junior-1.md … senior-4.md
+    questions/          вопросы в Markdown: junior-1.md … senior-8.md
     exercises/          упражнения в YAML, по темам
     src/
       parse.ts          разбор Markdown в объекты Question
@@ -69,8 +69,8 @@ apps/api/               ИИ-прокси на Hono: оценка ответа �
 @slug kebab-case-id
 @topic hooks
 @legacy 36
-@verified react@19.2
-@updated 2026-10
+@verified react@19.3
+@updated 2026-11
 
 > Краткий ответ — 2–4 предложения, которые стоит сказать в первые 30 секунд.
 

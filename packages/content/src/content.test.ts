@@ -7,10 +7,10 @@ const QUESTIONS = loadQuestions();
 const questionBySlug = new Map(QUESTIONS.map((q) => [q.slug, q]));
 
 describe('контент вопросов', () => {
-  test('180 вопросов: 32 junior, 82 middle, 66 senior', () => {
-    expect(QUESTIONS).toHaveLength(180);
+  test('207 вопросов: 35 junior, 95 middle, 77 senior', () => {
+    expect(QUESTIONS).toHaveLength(207);
     const count = (level: string) => QUESTIONS.filter((q) => q.level === level).length;
-    expect([count('junior'), count('middle'), count('senior')]).toEqual([32, 82, 66]);
+    expect([count('junior'), count('middle'), count('senior')]).toEqual([35, 95, 77]);
   });
 
   test('slug уникальны и в формате kebab-case', () => {

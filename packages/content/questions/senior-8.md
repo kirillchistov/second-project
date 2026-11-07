@@ -1,6 +1,8 @@
 # Как разбить RTK Query API на части через code splitting?
 @slug rtk-query-code-splitting
 @topic state
+@verified react@19.3
+@updated 2026-11
 
 > В большом приложении все эндпоинты не обязательно описывать в одном `createApi` — `injectEndpoints` позволяет завести «базовый» API с общим `baseQuery`, а конкретные эндпоинты добавлять по частям, в том числе из отдельных файлов или лениво загружаемых модулей фич. Это снижает связность: фиче не нужно знать обо всех остальных эндпоинтах приложения, только о своих.
 
@@ -21,7 +23,7 @@ export const todosApi = baseApi.injectEndpoints({
 export const { useGetTodosQuery } = todosApi;
 ```
 
-Каждый вызов `injectEndpoints` возвращает тот же `baseApi`, расширенный новыми эндпоинтами, с теми же сгенерированными хуками — реальный Redux store при этом остаётся один, просто растёт постепенно, по мере того как код фич подгружается (например, через `React.lazy`).
+Каждый вызов `injectEndpoints` возвращает тот же `baseApi`, расширенный новыми эндпоинтами, с теми же сгенерированными хуками. Редьюсер в store один и регистрируется один раз при создании store — растёт не store, а набор эндпоинтов на самом объекте `baseApi`. Поэтому ленивый модуль фичи (`features/todos/api.ts`) должен быть импортирован ради этого побочного эффекта до первого использования хука — иначе `useGetTodosQuery` ещё не существует, даже если store уже создан.
 
 ### Подводные камни
 - Описывать все эндпоинты приложения в одном файле — он быстро становится узким местом для мёрджей и понимания зависимостей.
@@ -77,6 +79,8 @@ toggleTodo: builder.mutation<void, string>({
 # Как устроена реавторизация в RTK Query baseQuery?
 @slug rtk-query-reauth
 @topic state
+@verified react@19.3
+@updated 2026-11
 
 > `fetchBaseQuery` принимает `prepareHeaders` для подстановки токена в каждый запрос, но для обработки его истечения (ответ 401) нужна отдельная обёртка — `baseQuery` с собственной логикой: перехватить 401, попытаться обновить токен через refresh-запрос, и если это удалось — повторить исходный запрос уже с новым токеном.
 
@@ -89,14 +93,16 @@ const rawBaseQuery = fetchBaseQuery({
     return headers;
   },
 });
+// Отдельный baseQuery без prepareHeaders: refresh не должен слать уже протухший Bearer-токен
+const refreshBaseQuery = fetchBaseQuery({ baseUrl: '/api' });
 
 const baseQueryWithReauth: typeof rawBaseQuery = async (args, api, extraOptions) => {
   let result = await rawBaseQuery(args, api, extraOptions);
   if (result.error?.status === 401) {
-    const refreshResult = await rawBaseQuery('/auth/refresh', api, extraOptions);
+    const refreshResult = await refreshBaseQuery('/auth/refresh', api, extraOptions);
     if (refreshResult.data) {
       api.dispatch(tokenRefreshed(refreshResult.data));
-      result = await rawBaseQuery(args, api, extraOptions); // повтор исходного запроса
+      result = await rawBaseQuery(args, api, extraOptions); // повтор исходного запроса уже с новым токеном
     } else {
       api.dispatch(loggedOut());
     }
@@ -104,6 +110,8 @@ const baseQueryWithReauth: typeof rawBaseQuery = async (args, api, extraOptions)
   return result;
 };
 ```
+
+Если refresh завязан на `Authorization`, а не на `HttpOnly`-cookie, вызывать его через `rawBaseQuery` нельзя: `prepareHeaders` подставит тот же протухший токен, и refresh-запрос тоже получит 401. Поэтому у refresh — свой `baseQuery` без этого заголовка (или refresh-токен передают отдельным полем).
 
 Важная деталь — если в один момент параллельно 401 получат сразу несколько запросов (пользователь открыл страницу с тремя одновременными query), наивная реализация запустит несколько параллельных refresh-запросов. На практике это решают через `Mutex` (например, из библиотеки `async-mutex`): первый запрос на обновление токена блокирует остальные, пока не завершится, а они потом переиспользуют уже обновлённый токен.
 

@@ -117,7 +117,7 @@ export function Layout() {
 
       <footer className="footer">
         <div className="footer__inner">
-          <span>React Refresher · 180 вопросов для собеседования по React</span>
+          <span>React Refresher · 207 вопросов для собеседования по React</span>
           <span>
             Ответы опираются на <a href="https://react.dev" target="_blank" rel="noreferrer">react.dev</a>. Проект
             не связан с Meta и командой React.

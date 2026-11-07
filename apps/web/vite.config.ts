@@ -19,11 +19,11 @@ function pagesEntry(): Plugin {
         return html
           .replace('src="/src/main.tsx"', 'src="/src/demo/main.tsx"')
           .replace(
-            '180 актуальных вопросов для собеседования на React-разработчика: Junior, Middle, Senior. React 19, Server Components, React Compiler.',
+            '207 актуальных вопросов для собеседования на React-разработчика: Junior, Middle, Senior. React 19, Server Components, React Compiler.',
             'Демо React Refresher: путь обучения в браузере, без сервера и без ИИ. Прогресс хранится в этом браузере.',
           )
           .replace(
-            '<title>React Refresher — 180 вопросов для собеседования</title>',
+            '<title>React Refresher — 207 вопросов для собеседования</title>',
             '<title>React Refresher — демо</title>',
           )
       },

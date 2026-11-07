@@ -1,6 +1,8 @@
 # Как работает useOptimistic?
 @slug use-optimistic
 @topic modern
+@verified react@19.3
+@updated 2026-11
 
 > `useOptimistic(state, updateFn)` показывает временное «оптимистичное» состояние, пока выполняется Action. Как только действие завершается (успешно или с ошибкой), оптимистичное значение отбрасывается и UI возвращается к реальному `state` — откат при ошибке происходит автоматически. Используется для лайков, отправки сообщений, переключателей.
 
@@ -8,12 +10,14 @@
 function Messages({ messages, send }: { messages: Message[]; send: (text: string) => Promise<void> }) {
   const [optimistic, addOptimistic] = useOptimistic(
     messages,
-    (current, text: string) => [...current, { id: crypto.randomUUID(), text, pending: true }],
+    // Функция обновления должна быть чистой — React может вызвать её повторно,
+    // поэтому новое сообщение (с готовым id) передают аргументом, а не создают здесь
+    (current, message: Message) => [...current, message],
   );
 
   async function action(formData: FormData) {
     const text = String(formData.get('text'));
-    addOptimistic(text);          // сразу показываем сообщение
+    addOptimistic({ id: crypto.randomUUID(), text, pending: true }); // сразу показываем сообщение
     await send(text);             // реальное обновление messages придёт от родителя
   }
 
@@ -40,6 +44,7 @@ function Messages({ messages, send }: { messages: Message[]; send: (text: string
 
 ### Подводные камни
 - Использовать `useOptimistic` для данных, которые после успеха не обновляются из источника — значение «откатится» к старому.
+- Создавать случайные значения (`crypto.randomUUID()`, `Date.now()`) прямо внутри функции-обновления — она должна быть чистой, React может вызвать её повторно, и каждый вызов даст новый id, из-за чего элемент списка пересоздастся.
 
 ### Что спросят дальше
 - Как сделать оптимистичное обновление в TanStack Query?
