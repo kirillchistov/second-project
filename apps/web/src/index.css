@@ -1464,8 +1464,17 @@ h3 {
   gap: 4px;
 }
 
-.quiz__prompt {
+.quiz__topic {
+  margin: 14px 0 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
   color: var(--text-muted);
+}
+.quiz__prompt {
+  font-size: clamp(1.15rem, 2.8vw, 1.6rem);
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--text);
   margin: 0 0 20px;
 }
 .choices {
@@ -1917,6 +1926,12 @@ h3 {
   }
   .flashcard__title {
     margin: 10px 0 14px;
+  }
+  .quiz__topic {
+    margin: 10px 0 4px;
+  }
+  .quiz__prompt {
+    margin: 0 0 14px;
   }
   .progress {
     margin: 8px 0 16px;

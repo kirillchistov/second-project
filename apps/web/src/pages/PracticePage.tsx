@@ -484,8 +484,8 @@ function QuizCard({
         <TopicTag topic={question.topic} />
         <span className="flashcard__num">№{question.number}</span>
       </div>
-      <h1 className="flashcard__title">{question.title}</h1>
-      <p className="quiz__prompt"><Inline text={quiz.prompt} /></p>
+      <p className="quiz__topic">{question.title}</p>
+      <h1 className="quiz__prompt"><Inline text={quiz.prompt} /></h1>
 
       <div className="choices">
         {order.map((i) => {
