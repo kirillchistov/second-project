@@ -148,6 +148,81 @@
     - "`createAsyncThunk` можно протестировать, вызвав его как обычную функцию без `dispatch` через store"
     - Правильно мокать сам Redux (`jest.mock('@reduxjs/toolkit')`) вместо мока сети
     - Состояние после `dispatch` async thunk обновляется синхронно, и ждать завершения промиса не нужно
+- question: zustand-testing-store
+  points:
+    - id: test-without-render
+      text: "Стор тестируется без рендера компонентов: действие вызывается через `useStore.getState().action(...)`, результат проверяется через `useStore.getState()`"
+      weight: 3
+    - id: state-persists-between-tests
+      text: Состояние стора сохраняется между тестами, потому что модуль с `create()` импортируется один раз и автоматически не пересоздаётся, поэтому без сброса тесты влияют друг на друга
+      weight: 3
+    - id: reset-with-snapshot
+      text: "Сброс делается в `beforeEach`: снимок `getState()` сразу после создания стора восстанавливается через `setState(initialState, true)`"
+      weight: 2
+    - id: replace-flag
+      text: Второй аргумент `true` в `setState` означает полную замену состояния; без него объект сливается с текущим, и лишние поля из прошлого теста остаются
+      weight: 2
+    - id: act-for-rendered
+      text: Если компонент рендерится и стор меняется вне взаимодействия через Testing Library, ре-рендер оборачивают в `act()`; `userEvent` делает это сам
+      weight: 1
+    - id: mock-network-not-zustand
+      text: Мокать следует сетевой слой, который вызывают действия, а не сам Zustand, иначе тест не проверяет реальную логику действий
+      weight: 1
+  misconceptions:
+    - Состояние Zustand-стора автоматически сбрасывается между тестами, потому что каждый тест изолирован
+    - "`setState(initialState)` без второго аргумента полностью заменяет состояние стора"
+    - Для тестирования логики стора обязательно рендерить компонент или использовать `renderHook`
+    - Правильный способ тестирования стора — замокать сам модуль `zustand`
+- question: test-harness-setup
+  points:
+    - id: dom-environment
+      text: "В конфиге задаётся DOM-окружение `environment: 'jsdom'` или более быстрый `happy-dom`. Без него Node не предоставляет `document`, и рендер компонентов не работает."
+      weight: 3
+    - id: setup-files-jest-dom
+      text: Через `setupFiles` подключается глобальный файл, который импортирует `@testing-library/jest-dom/vitest`. Это расширяет `expect` матчерами вроде `toBeInTheDocument()`.
+      weight: 3
+    - id: reuse-vite-config
+      text: В Vite-проекте секция `test` описывается в том же `vite.config.ts` (через `defineConfig` из `vitest/config` или `vite`), отдельный Jest-конфиг не нужен. Тесты используют те же плагины (`@vitejs/plugin-react`), трансформации и алиасы путей, что и сборка.
+      weight: 2
+    - id: cleanup-after-each
+      text: После каждого теста нужно вызывать `cleanup()` (например, в `afterEach` в setup-файле), иначе отрендеренные узлы накапливаются в документе. Тогда `screen.getByText` или `getByRole` может найти элемент из предыдущего теста.
+      weight: 2
+    - id: jsdom-missing-apis
+      text: "`jsdom` не реализует часть браузерных API (`IntersectionObserver`, `ResizeObserver`, `matchMedia`). Их нужно мокать, обычно в setup-файле, иначе тесты падают с `ReferenceError` или `TypeError`."
+      weight: 1
+    - id: globals-and-aliases
+      text: "Кандидат упоминает две детали. Первая: `globals: true` делает `test`, `expect` и `afterEach` доступными без импорта. Вторая: алиасы вроде `@/components` должны совпадать в `tsconfig.json` и конфиге раннера, иначе импорты резолвятся в одном месте и падают в другом."
+      weight: 1
+  misconceptions:
+    - В Vite-проекте для Vitest обязательно нужен отдельный конфиг вроде `jest.config` или Babel-трансформации, а алиасы и плагины из `vite.config.ts` в тестах не действуют.
+    - "`jsdom` полностью реализует браузерные API, включая `IntersectionObserver`, `ResizeObserver` и `matchMedia`, поэтому моки не нужны."
+    - Матчеры `toBeInTheDocument()` и подобные встроены в `expect` Vitest и работают без подключения `@testing-library/jest-dom`.
+    - "`jsdom` или `happy-dom` выполняют реальную раскладку как браузер, поэтому размеры элементов (`getBoundingClientRect`, `offsetWidth`) в тестах соответствуют реальным."
+- question: ci-cd-pipeline
+  points:
+    - id: branch-protection-blocks-merge
+      text: "Branch protection на `main` делает проверки CI обязательными (required checks): pull request нельзя смержить, пока они не зелёные. Без этого CI только показывает статус, но не мешает merge."
+      weight: 3
+    - id: pipeline-runs-on-pr
+      text: "Пайплайн запускается автоматически на каждый pull request или push и прогоняет тот же набор проверок, что и локально: типизацию (`typecheck`), линтер, unit- и интеграционные тесты."
+      weight: 3
+    - id: npm-ci-lockfile
+      text: "В CI используется `npm ci`, а не `npm install`: он ставит зависимости строго по lock-файлу и падает при расхождении с `package.json`. Так CI не подтягивает непротестированные версии."
+      weight: 2
+    - id: cache-dependencies
+      text: "Зависимости кэшируются между запусками, например через `cache: 'npm'` в `setup-node`, чтобы не скачивать их заново на каждом прогоне и сократить время и стоимость пайплайна."
+      weight: 2
+    - id: build-check
+      text: В пайплайн иногда добавляют сборку production-бандла как проверку того, что сборка вообще не падает.
+      weight: 1
+    - id: coverage-meaning
+      text: Покрытие (`--coverage`) не гарантирует качество тестов, но помогает найти код, который не выполняется ни одним тестом.
+      weight: 1
+  misconceptions:
+    - "Достаточно настроить CI-пайплайн: красный статус сам по себе не даст смержить PR, branch protection не нужен."
+    - "`npm install` и `npm ci` в CI взаимозаменяемы, оба ставят одни и те же версии."
+    - Высокий процент покрытия (`--coverage`) гарантирует, что код хорошо протестирован.
+    - "CI — это то же самое, что деплой: после зелёных проверок код автоматически уходит в production."
 - question: testing-strategy
   points:
     - id: integration-core

@@ -95,6 +95,31 @@
     - "`@container` реагирует на ширину viewport так же, как media queries"
     - "`@container` работает без объявления `container-type` на родителе"
     - Адаптивную сетку карточек без медиазапросов или JS-измерения ширины контейнера сделать нельзя
+- question: production-vs-development-build
+  points:
+    - id: dev-extra-checks
+      text: Dev-сборка не минифицирована и содержит дополнительные проверки и предупреждения React (`console.warn` о депрекейтах, понятные сообщения об ошибках, двойные вызовы в Strict Mode), а также хуки для DevTools
+      weight: 3
+    - id: prod-minify-treeshake
+      text: Production-сборка минифицирует код и удаляет мёртвый код (tree-shaking), поэтому бандл заметно меньше и быстрее
+      weight: 3
+    - id: node-env-dead-code
+      text: Бандлер статически подставляет `process.env.NODE_ENV` и в production целиком вырезает dev-ветки вроде `if (process.env.NODE_ENV !== 'production')`, поэтому предупреждений React в prod-бандле физически нет
+      weight: 2
+    - id: measure-in-prod
+      text: "Производительность и размер бандла нужно измерять на production-сборке: dev-режим даёт нерепрезентативные результаты"
+      weight: 2
+    - id: source-maps-separate
+      text: В production source map обычно генерируются отдельными файлами, а не встраиваются в бандл
+      weight: 1
+    - id: node-env-vs-app-vars
+      text: "`NODE_ENV` управляет поведением фреймворка и бандлера, а переменные вроде `VITE_API_URL` — обычная конфигурация приложения, подставляемая при сборке; секретам не место в бандле ни в каком режиме"
+      weight: 1
+  misconceptions:
+    - В production-сборке предупреждения React просто скрыты/заглушены, но код проверок остаётся в бандле
+    - Двойные вызовы рендера и эффектов в Strict Mode происходят и в production
+    - "`NODE_ENV=production` делает безопасным хранение API-ключей и секретов в клиентском бандле"
+    - Замеры производительности в dev-режиме отражают то, что получит пользователь
 - question: forms
   points:
     - id: complexity-levels
