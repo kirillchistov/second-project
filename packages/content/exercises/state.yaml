@@ -3310,3 +3310,684 @@
     - label: "В кэше RTK Query: отдельный endpoint с queryFn, хранящий фильтр"
       why: "Антипаттерн: фильтр никогда не ходит на сервер, а кэш RTK Query рассчитан на серверные данные и может их вычистить."
   answer: 0
+
+# zustand-first-store: принято из черновика 2026-11-09
+- id: zustand-first-store-selector-rerender
+  skill: zustand-selectors
+  question: zustand-first-store
+  difficulty: 1
+  prompt: "Действие `increment` меняет qty товара через `map`: массив `items` новый, длина прежняя. Перерисуется ли `CartBadge` с селектором `(s) => s.items.length`?"
+  explanation: "Компонент подписан на **результат селектора**. После каждого `set` Zustand вызывает селектор и сравнивает новое значение со старым через `Object.is`. Число 2 равно числу 2, поэтому рендера не будет. Правило: выбирайте из стора узкий срез, лучше примитив, и компонент обновится только при его изменении."
+  type: quiz
+  options:
+    - label: "Нет: селектор вернул то же число, Zustand сравнил его через Object.is и не стал перерисовывать"
+      why: Верно. Сравнивается то, что вернул селектор, а не поля стора, которые он прочитал. Длина не изменилась, значит рендера нет.
+    - label: "Да: у items новая ссылка, а селектор читает items, значит компонент подписан на него"
+      why: Zustand не отслеживает, какие поля читает селектор. Он сравнивает только итоговое значение, а здесь это число.
+    - label: "Да: любой вызов set перерисовывает все компоненты, которые используют хук стора"
+      why: "Так ведёт себя `useCartStore()` без селектора: он возвращает весь state, а после set это новый объект."
+    - label: Нет, но только если обернуть CartBadge в React.memo
+      why: memo пропускает рендер при тех же props. Подписка на стор работает в обход props, и решение принимает селектор, а не memo.
+  answer: 0
+- id: zustand-first-store-push-mutation
+  skill: zustand-immutable-updates
+  question: zustand-first-store
+  difficulty: 1
+  prompt: После вызова `addTodo` компонент `TodoList` показывает старое число задач. Где ошибка?
+  explanation: "`push` меняет тот же массив, и `{ todos: state.todos }` отдаёт ту же ссылку. Селектор `s.todos` вернул прежний объект, `Object.is` не видит разницы, и рендера нет. Чтобы рендер случился, нужен новый массив: `return { todos: [...state.todos, todo] }`. В Zustand, как и в React state, обновления только иммутабельные."
+  type: find-bug
+  language: tsx
+  code: |-
+    const useTodoStore = create<TodoStore>((set) => ({
+      todos: [],
+      addTodo: (title) =>
+        set((state) => {
+          state.todos.push({ id: Date.now(), title });
+          return { todos: state.todos };
+        }),
+    }));
+
+    function TodoList() {
+      const todos = useTodoStore((s) => s.todos);
+      return <p>{todos.length} todos</p>;
+    }
+  bugLines:
+    - 5
+    - 6
+  causes:
+    - "push мутирует существующий массив: ссылка на todos не меняется, и селектор не видит изменений"
+    - В set нельзя передавать функцию, только готовый объект
+    - Без Provider стор недоступен в TodoList, поэтому он не получает обновлений
+    - Селектор нужно обернуть в useCallback, иначе подписка теряется между рендерами
+  answer: 0
+- id: zustand-first-store-increment-qty
+  skill: zustand-immutable-updates
+  question: zustand-first-store
+  difficulty: 1
+  prompt: Допишите действие, которое увеличивает qty товара без мутации, и бейдж, подписанный только на число позиций.
+  explanation: Новое значение зависит от старого, поэтому нужна функциональная форма `set((state) => ...)`. `map` возвращает новый массив, а изменённый товар — новый объект. Остальные товары сохраняют свои ссылки. Селектор `state.items.length` возвращает число, и бейдж перерисуется только при изменении количества позиций.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const useCartStore = create<CartStore>((set) => ({
+      items: [],
+      increment: (id) =>
+        ___((state) => ({
+          items: state.items.___((i) =>
+            i.id === id ? { ...i, qty: i.qty + 1 } : i,
+          ),
+        })),
+    }));
+
+    function CartBadge() {
+      const count = useCartStore((s) => s.___.length);
+      return <span>{count}</span>;
+    }
+  tokens:
+    - set
+    - map
+    - items
+  decoys:
+    - get
+    - forEach
+    - push
+    - filter
+- id: zustand-first-store-shallow-merge
+  skill: zustand-set-merge
+  question: zustand-first-store
+  difficulty: 2
+  prompt: Что выведет console.log?
+  explanation: "`setState` и `set` с объектом сливают его с состоянием **поверхностно**, только на верхнем уровне. Поле `a` сохранилось. Поле `b` целиком заменилось новым объектом, и `y` пропал. Вложенные объекты разворачивайте сами: `set((s) => ({ b: { ...s.b, x: 5 } }))`."
+  type: predict-output
+  language: js
+  code: |-
+    import { create } from 'zustand';
+
+    const useStore = create(() => ({
+      a: 1,
+      b: { x: 1, y: 2 },
+    }));
+
+    useStore.setState({ b: { x: 5 } });
+
+    const { a, b } = useStore.getState();
+    console.log(a, JSON.stringify(b));
+  options:
+    - 1 {"x":5}
+    - 1 {"x":5,"y":2}
+    - undefined {"x":5}
+    - undefined {"x":5,"y":2}
+  answer: 0
+
+# zustand-middleware: принято из черновика 2026-11-09
+- id: zustand-middleware-order-quiz
+  skill: zustand-middleware-composition
+  question: zustand-middleware
+  difficulty: 2
+  prompt: "Почему в Zustand `devtools` обычно ставят внешним слоем: `devtools(persist(...))`, а не наоборот?"
+  explanation: "Middleware — обёртки вокруг создателя стора: каждая получает `set`/`get`/`api` и отдаёт внутрь свою версию. Порядок в коде определяет, чей `set` видит стор. Правило из документации: `devtools` — как можно дальше снаружи, например `devtools(persist(immer(...)))`."
+  type: quiz
+  options:
+    - label: Слои оборачивают друг друга снаружи внутрь. Внешний devtools видит весь стор, а его `set` с именем action не перетирают другие слои
+      why: "Верно. Документация Zustand советует ставить devtools последним: он меняет `setState` и добавляет параметр action, а внешние слои могли бы эту версию потерять."
+    - label: "Порядок не важен: create собирает middleware в общий список и применяет их одинаково"
+      why: Списка нет — это вложенные вызовы функций. Каждый слой видит только то, что ему отдал соседний, поэтому перестановка меняет поведение.
+    - label: "devtools нужно ставить внутрь: внутренний слой первым видит изменения, и история будет точнее"
+      why: Внутренний слой ближе к исходному `set`, но не видит, что добавили внешние обёртки. Для отладки нужен взгляд на итоговый стор, то есть снаружи.
+    - label: persist обязан быть внешним, иначе он не сможет записать состояние в localStorage
+      why: persist пишет в хранилище и как внутренний слой — так и сделано в примере из документации. Внешним его ставить не обязательно.
+  answer: 0
+- id: zustand-middleware-devtools-persist-fill
+  skill: zustand-middleware-composition
+  question: zustand-middleware
+  difficulty: 2
+  prompt: "Допишите стор: devtools — внешний слой, persist сохраняет настройки в localStorage, а в DevTools действие видно как `setTheme`."
+  explanation: "`devtools` снаружи, `persist` внутри. У `set` три аргумента: `(partial, replace, actionName)`. `replace = false` сливает partial с текущим состоянием, третий аргумент — имя action в истории DevTools. С `true` состояние заменилось бы целиком, и `setTheme` пропал бы."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const useSettings = create<Settings>()(
+      ___(
+        ___(
+          (set) => ({
+            theme: 'system',
+            setTheme: (theme) =>
+              set({ theme }, ___, 'setTheme'),
+          }),
+          { name: 'settings-storage' },
+        ),
+        { name: 'SettingsStore' },
+      ),
+    );
+  tokens:
+    - devtools
+    - persist
+    - "false"
+  decoys:
+    - immer
+    - "true"
+    - combine
+    - subscribeWithSelector
+- id: zustand-middleware-replace-flag-bug
+  skill: zustand-set-signature
+  question: zustand-middleware
+  difficulty: 2
+  prompt: Типы опустим. После первого `addItem` вызов `clear()` падает с ошибкой «clear is not a function». В какой строке ошибка?
+  explanation: "Второй аргумент `set` — `replace`. Значение `true` заменяет всё состояние объектом из partial, поэтому action-функции исчезают из стора. Чтобы передать имя action для DevTools, ставьте `false`: `set(fn, false, 'cart/addItem')`."
+  type: find-bug
+  language: tsx
+  code: |-
+    const useCart = create<CartStore>()(devtools(
+      (set) => ({
+        items: [],
+        addItem: (item) =>
+          set(
+            (s) => ({ items: [...s.items, item] }),
+            true,
+            'cart/addItem',
+          ),
+        clear: () => set({ items: [] }, false, 'cart/clear'),
+      }),
+      { name: 'CartStore' },
+    ));
+  bugLines:
+    - 7
+  causes:
+    - "`replace = true` заменяет состояние целиком на `{ items }`, и `addItem` с `clear` пропадают из стора"
+    - Имя action со слэшем `cart/addItem` ломает devtools, и стор сбрасывается
+    - Функциональный `set` нельзя сочетать с devtools — нужен объект, а не колбэк
+    - devtools нужно обернуть в persist, иначе actions не сохраняются между вызовами
+  answer: 0
+- id: zustand-middleware-devtools-prod
+  skill: zustand-devtools-production
+  question: zustand-middleware
+  difficulty: 2
+  prompt: Команде нужна история actions стора в Redux DevTools при разработке. В production-сборке у пользователей стор не должен отправлять состояние в расширение. Как лучше поступить?
+  explanation: "У `devtools` есть опция `enabled`. Привяжите её к окружению: `{ enabled: process.env.NODE_ENV !== 'production' }` или `import.meta.env.DEV`. Код стора остаётся одним, а в production состояние не уходит в расширение. Свежие версии Zustand сами учитывают режим сборки, но это зависит от бандлера. Явная опция надёжнее и понятнее."
+  type: choose-tool
+  options:
+    - label: Передать в devtools опцию `enabled`, завязанную на окружение (NODE_ENV или import.meta.env.DEV)
+      why: "Лучший вариант: код один для всех сборок. В production devtools не подключается к расширению, а в разработке всё работает как раньше."
+    - label: Убирать обёртку devtools вручную перед каждым релизом
+      why: "Сработает, но держится на дисциплине: забудут один раз — и devtools уйдёт в прод. Подходит разве что для разового прототипа."
+    - label: "Оставить как есть: расширение стоит только у разработчиков"
+      why: "Довод неверный: расширение может поставить любой пользователь. Без явного enabled поведение зависит от настроек сборки и неочевидно."
+    - label: Заменить devtools на console.log в `api.subscribe`
+      why: Логи пригодятся для быстрой отладки, но пропадут time-travel и именованные actions. И логи тоже придётся отключать в production.
+  answer: 0
+
+# zustand-persist: принято из черновика 2026-11-09
+- id: zustand-persist-ssr-mismatch
+  skill: zustand-persist-hydration
+  question: zustand-persist
+  difficulty: 2
+  prompt: Next.js-приложение, стор с `persist` хранит тему в localStorage. Почему опасно сразу рендерить `theme` из стора в клиентском компоненте?
+  explanation: "Сервер не видит localStorage и рендерит значения по умолчанию. С синхронным localStorage клиентский стор восстанавливается ещё при создании, поэтому первый клиентский рендер не совпадает с HTML. Это ошибка гидрации React. Надёжный приём — `skipHydration: true` и вызов `persist.rehydrate()` в useEffect. Другой вариант — показывать сохранённое значение только после монтирования."
+  type: quiz
+  options:
+    - label: На сервере нет localStorage, и HTML собран с дефолтом. Клиентский стор может быть уже восстановлен — первый рендер не совпадёт
+      why: Верно. Это ошибка гидрации React, а не только логики. Помогает skipHydration + rehydrate() в useEffect или показ значения после монтирования.
+    - label: persist на сервере обращается к localStorage и падает с ReferenceError
+      why: "Нет: persist обращается к storage безопасно. Если хранилища нет, состояние просто не восстанавливается, и сервер рендерит значения по умолчанию."
+    - label: persist сериализует экшены, и после перезагрузки они становятся undefined
+      why: Функции в JSON не попадают. При восстановлении сохранённые данные сливаются с текущим состоянием, поэтому экшены остаются из инициализатора.
+    - label: "Опасности нет: React сам подставит значение из localStorage до гидрации"
+      why: React ничего не знает о localStorage. Он только сверяет первый клиентский рендер с серверным HTML и сообщает о расхождении.
+  answer: 0
+- id: zustand-persist-shape-change
+  skill: zustand-persist-migrations
+  question: zustand-persist
+  difficulty: 2
+  prompt: В прошлом релизе `user` хранился строкой, теперь это объект `User`. После обновления у старых пользователей Greeting падает с TypeError. Где ошибка?
+  explanation: persist восстанавливает то, что лежит в хранилище, не проверяя форму данных. Старая строка попадает в `user`, `user.name` равно undefined, и вызов `.toUpperCase()` падает. При изменении формы данных нужно поднять `version` и написать `migrate`, который приведёт старые данные к новому формату.
+  type: find-bug
+  language: tsx
+  code: |-
+    // v1: user был строкой, v2: объект User
+    const useAuth = create<AuthStore>()(
+      persist(
+        (set) => ({
+          user: null,
+          setUser: (user: User) => set({ user }),
+        }),
+        { name: 'auth-storage' },
+      ),
+    );
+    function Greeting() {
+      const user = useAuth((s) => s.user);
+      return <p>{user?.name.toUpperCase()}</p>;
+    }
+  bugLines:
+    - 8
+  causes:
+    - Форма данных изменилась, а version/migrate нет — старая строка из хранилища восстанавливается как user
+    - persist не умеет хранить объекты, только примитивы
+    - Селектор `(s) => s.user` нельзя использовать с persist-стором
+    - Опциональная цепочка `user?.` отключает подписку на изменения стора
+  answer: 0
+- id: zustand-persist-options-config
+  skill: zustand-persist-options
+  question: zustand-persist
+  difficulty: 2
+  prompt: Настройте persist для корзины. В хранилище должны попадать только items. Данные старого формата (до версии 2) нужно сбрасывать в пустой список.
+  explanation: "`partialize` выбирает поля для записи: временные флаги вроде isLoading не должны переживать перезагрузку. `version` помечает формат данных. `migrate` получает сохранённое состояние и его версию, когда версия в хранилище отличается от текущей, и возвращает данные нового формата."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    persist(
+      (set) => ({ ...initialCart, ...actions(set) }),
+      {
+        name: 'cart',
+        ___: (s) => ({ items: s.items }),
+        ___: 2,
+        ___: (persisted, version) =>
+          version < 2
+            ? { ...(persisted as object), items: [] }
+            : persisted,
+      },
+    )
+  tokens:
+    - partialize
+    - version
+    - migrate
+  decoys:
+    - select
+    - onRehydrateStorage
+    - upgrade
+    - whitelist
+- id: zustand-persist-react-native
+  skill: zustand-persist-storage
+  question: zustand-persist
+  difficulty: 2
+  prompt: Приложение на React Native с Zustand. Настройки пользователя должны переживать перезапуск, а partialize и version/migrate должны работать как в вебе. Как настроить хранение?
+  explanation: "Хранилище по умолчанию — localStorage, а его нет в React Native. `createJSONStorage(() => AsyncStorage)` превращает асинхронный строковый движок в storage для persist. Остальная механика при этом не меняется: partialize, migrate и флаг гидрации работают как в вебе."
+  type: choose-tool
+  options:
+    - label: "persist с `storage: createJSONStorage(() => AsyncStorage)`"
+      why: "Лучший вариант: AsyncStorage хранит строки, а createJSONStorage сериализует состояние в JSON. persist поддерживает асинхронные движки, partialize и migrate остаются."
+    - label: persist без опции storage, по умолчанию
+      why: В браузере это подходит. В RN нет window.localStorage, поэтому persist не сможет ни записать, ни восстановить состояние.
+    - label: "Вручную: AsyncStorage.getItem в useEffect корня и set в стор"
+      why: Работать будет, но версии, миграции, фильтрацию полей и флаг гидрации придётся писать самому. Оправдано, только если persist не подходит.
+    - label: "persist с `storage: createJSONStorage(() => sessionStorage)`"
+      why: sessionStorage есть только в браузере, и живёт он до закрытия вкладки. Подходит для данных одной сессии в вебе, но не для RN.
+  answer: 0
+
+# zustand-immer: принято из черновика 2026-11-09
+- id: zustand-immer-what-set-does
+  skill: zustand-immer-draft
+  question: zustand-immer
+  difficulty: 2
+  prompt: Что на самом деле происходит, когда внутри `set` с `immer` middleware вы пишете `draft.user.address.city = city`?
+  explanation: "`immer` оборачивает `set`: функция получает черновик, Immer записывает изменения и строит новое состояние. Изменённые ветки получают новые ссылки, а нетронутые переиспользуются. Поэтому селекторы по ссылке работают как раньше, и не нужно вручную раскрывать spread на каждом уровне."
+  type: quiz
+  options:
+    - label: "Immer записывает изменения черновика и создаёт новое состояние: новые ссылки только на изменённом пути, остальное переиспользуется"
+      why: "Верно. Это structural sharing: user и address получают новые объекты, а соседние ветки сохраняют прежние ссылки, и их подписчики не перерисуются."
+    - label: Zustand разрешает мутировать текущий state напрямую и сам уведомляет подписчиков об изменении
+      why: Нет. Мутируется не state, а прокси-черновик. Прямая мутация настоящего state не изменила бы ссылки, и селекторы не заметили бы обновления.
+    - label: Перед каждым set состояние глубоко клонируется, и изменения применяются к копии
+      why: Глубокого клонирования нет. Оно сменило бы все ссылки и перерисовало бы всех подписчиков. Immer копирует только узлы на пути изменения.
+    - label: Подписчики начинают сравнивать состояние по значению, поэтому мутация безопасна
+      why: "Сравнение не меняется: Zustand по умолчанию сравнивает результат селектора через Object.is. Immer как раз выдаёт новые ссылки, чтобы это сравнение сработало."
+  answer: 0
+- id: zustand-immer-mutate-and-return
+  skill: zustand-immer-producer-rules
+  question: zustand-immer
+  difficulty: 2
+  prompt: Стор корзины с `immer` middleware падает при вызове addItem. Найдите строку с ошибкой.
+  explanation: "Producer в Immer должен делать что-то одно: либо мутировать draft и ничего не возвращать, либо вернуть новое значение, не трогая draft. Смешение двух стилей приводит к ошибке Immer. Исправление: `draft.total += item.price;` вместо return. Такую же ловушку создаёт `set((d) => d.n++)`: стрелка неявно возвращает число."
+  type: find-bug
+  language: tsx
+  code: |-
+    const useCart = create<CartStore>()(
+      immer((set) => ({
+        items: [],
+        total: 0,
+        addItem: (item) =>
+          set((draft) => {
+            draft.items.push(item);
+            return { total: draft.total + item.price };
+          }),
+      })),
+    );
+  bugLines:
+    - 8
+  causes:
+    - Функция и мутирует draft, и возвращает новое значение. Immer запрещает смешивать стили, нужно `draft.total += item.price`
+    - push на draft мутирует настоящий state, поэтому массив нужно копировать через spread
+    - Скобки в `create<CartStore>()(` лишние, с middleware нужно писать `create<CartStore>(`
+    - Без обёртки devtools поверх immer функция set не получит draft
+  answer: 0
+- id: zustand-immer-toggle-todo
+  skill: zustand-immer-draft
+  question: zustand-immer
+  difficulty: 1
+  prompt: Допишите типизированный стор с `immer` middleware, в котором toggle переключает задачу мутацией черновика.
+  explanation: "С middleware в TypeScript используют каррированную форму `create<T>()(...)`, чтобы типы вывелись правильно. `immer` оборачивает инициализатор, а `set` принимает функцию, которая мутирует draft и ничего не возвращает. `produce` вызывать вручную не нужно: middleware делает это сам."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    import { create } from 'zustand';
+    import { immer } from 'zustand/middleware/immer';
+
+    const useTodos = create<TodoStore>___(
+      ___((set) => ({
+        todos: {},
+        toggle: (id) =>
+          ___((draft) => {
+            const t = draft.todos[id];
+            if (t) t.done = !t.done;
+          }),
+      })),
+    );
+  tokens:
+    - ()
+    - immer
+    - set
+  decoys:
+    - produce
+    - setState
+    - persist
+- id: zustand-immer-form-builder-choice
+  skill: nested-state-update-choice
+  question: zustand-immer
+  difficulty: 2
+  prompt: "Zustand-стор конструктора форм: секции → поля → правила валидации. Десятки экшенов меняют глубокие поля, вставляют и переставляют элементы массивов. Схема приходит с сервера и уходит обратно целиком, нормализовать её не хотите. Как писать обновления?"
+  explanation: "Правило выбора: если вложенность глубокая, апдейтов много и форму данных менять нельзя, берите `immer` middleware. Он даёт читаемые мутации и structural sharing. Для одного-двух неглубоких полей хватит spread. Если структура под вашим контролем, сначала подумайте о нормализации."
+  type: choose-tool
+  options:
+    - label: "`immer` middleware: мутации draft в set"
+      why: Лучший вариант. Глубокие изменения и push/splice пишутся одной строкой, а Immer сам создаёт новые ссылки только на изменённом пути.
+    - label: Ручной spread на каждом уровне
+      why: Подходит для 1–2 неглубоких полей без лишней зависимости. Здесь же десятки экшенов, и легко пропустить уровень, оставив старую ссылку.
+    - label: structuredClone всего состояния, затем мутация копии
+      why: Обновление будет корректным, но все ссылки поменяются, и все подписчики перерисуются при любом изменении. Так можно делать только для маленьких сторов без селекторов.
+    - label: Добавить `devtools` middleware
+      why: "Полезен для отладки: показывает экшены и историю состояния. Но писать вложенные обновления он никак не помогает."
+  answer: 0
+
+# zustand-async-actions: принято из черновика 2026-11-09
+- id: zustand-async-action-basics
+  skill: zustand-async-actions
+  question: zustand-async-actions
+  difficulty: 2
+  prompt: Что нужно, чтобы в Zustand-сторе сделать действие, которое загружает данные с сервера и показывает состояние загрузки?
+  explanation: "Действие в Zustand — обычная JS-функция в объекте стора. Она может быть `async`, читать актуальное состояние через `get()` и вызывать `set()` сколько угодно раз: до `await` для loading, после — для результата или ошибки. Middleware вроде thunk не нужен."
+  type: quiz
+  options:
+    - label: "Объявить действие как async-функцию: get() для чтения, set() до await для loading и после — для данных или ошибки"
+      why: Верно. Действие — просто функция, а set можно вызывать сколько угодно раз и в любой момент, в том числе после await.
+    - label: Подключить middleware наподобие redux-thunk, иначе set после await не обновит подписчиков
+      why: Это перенос опыта из Redux. В Zustand set — обычная функция из замыкания, она работает и после await, без всяких middleware.
+    - label: Вернуть из действия Promise с новым состоянием — Zustand сам применит его после resolve
+      why: Zustand не смотрит на возвращаемое значение действия. Состояние меняется только через вызов set.
+    - label: "Вызвать set один раз в конце: промежуточные set внутри async-действия приводят к рассинхрону"
+      why: "Несколько set подряд — нормальный паттерн: так UI видит переходы idle → loading → idle/error. Каждый set синхронно обновляет стор."
+  answer: 0
+- id: zustand-async-stuck-loading
+  skill: zustand-async-error-handling
+  question: zustand-async-actions
+  difficulty: 2
+  prompt: Один раз пропала сеть, и после этого список задач больше никогда не обновляется, хотя fetchTodos вызывают снова. Найдите причину.
+  explanation: "Без try/catch reject из fetch или json() просто «теряется» в промисе действия, и status навсегда остаётся 'loading'. После этого защита от повторного запроса в строке 6 блокирует все следующие вызовы. Правило: в async-действии всегда есть catch, который переводит стор в 'error'."
+  type: find-bug
+  language: tsx
+  code: |-
+    const useTodosStore = create<TodosStore>(
+      (set, get) => ({
+      todos: [],
+      status: 'idle',
+      fetchTodos: async () => {
+        if (get().status === 'loading') return;
+        set({ status: 'loading' });
+        const res = await fetch('/api/todos');
+        const todos = await res.json();
+        set({ todos, status: 'idle' });
+      },
+    }));
+  bugLines:
+    - 8
+    - 9
+  causes:
+    - "Нет try/catch: при reject status навсегда остаётся 'loading', и проверка выше блокирует все следующие вызовы"
+    - get() в async-действии возвращает состояние на момент создания стора, поэтому проверка всегда видит 'idle'
+    - set после await не уведомляет подписчиков — для этого нужен отдельный middleware
+    - set({ todos, status }) затирает остальные поля стора, включая саму функцию fetchTodos
+  answer: 0
+- id: zustand-async-fill-action
+  skill: zustand-async-actions
+  question: zustand-async-actions
+  difficulty: 1
+  prompt: "Допишите действие: оно не запускает второй параллельный запрос, а при сбое переводит стор в состояние ошибки."
+  explanation: "Действие объявляют `async`, текущее состояние читают через `get()`: оно всегда актуально, а не взято из замыкания. Ошибку ловят в `catch` и переводят стор в 'error', иначе UI зависнет в loading. `finally` здесь не подходит: он выполнился бы и при успехе."
+  type: fill-tokens
+  language: tsx
+  code: |-
+    fetchTodos: ___ () => {
+      if (___().status === 'loading') return;
+      set({ status: 'loading' });
+      try {
+        const res = await fetch('/api/todos');
+        const todos = await res.json();
+        set({ todos, status: 'idle' });
+      } ___ {
+        set({ status: ___ });
+      }
+    },
+  tokens:
+    - async
+    - get
+    - catch
+    - "'error'"
+  decoys:
+    - await
+    - getState
+    - finally
+    - "'idle'"
+- id: zustand-async-abort-previous
+  skill: zustand-abort-previous-request
+  question: zustand-async-actions
+  difficulty: 3
+  prompt: fetchTodos(filter) могут вызвать снова с новым фильтром, пока старый запрос ещё идёт. Расставьте шаги, чтобы отменять предыдущий запрос, а не игнорировать новый.
+  explanation: "Проверка `status === 'loading'` подходит, только когда новый вызов можно отбросить. Если важен последний вызов, старый запрос отменяют через AbortController: хранят его вне React-состояния, вызывают abort() перед новым запросом, передают signal в fetch и не считают AbortError настоящей ошибкой."
+  type: order
+  kind: recipe
+  steps:
+    - "Хранить текущий AbortController вне рендера: в переменной модуля или в нереактивном поле стора"
+    - В начале действия вызвать abort() у предыдущего контроллера, если он есть
+    - Создать новый AbortController и сохранить его как текущий
+    - "Вызвать set({ status: 'loading' }) и передать controller.signal в fetch"
+    - "После await записать результат через set({ todos, status: 'idle' })"
+    - "В catch пропустить AbortError, а при остальных ошибках вызвать set({ status: 'error' })"
+
+# zustand-slices-organization: принято из черновика 2026-11-09
+- id: zustand-slices-what-is-slice
+  skill: zustand-slices-pattern
+  question: zustand-slices-organization
+  difficulty: 2
+  prompt: Что на самом деле получается, когда большой Zustand-стор организуют через паттерн слайсов?
+  explanation: "Слайсы разносят по файлам **определение** стора. Сам стор остаётся один, хук `useStore` — тоже один. Каждый слайс типизирован на весь `StoreState` и получает общие `set`/`get`. Поэтому изоляция между слайсами — договорённость, а не гарантия. Неймспейсов тоже нет: поля всех слайсов лежат на одном уровне."
+  type: quiz
+  options:
+    - label: "Один стор и один хук: слайсы — функции (set, get, api) => ({...}), их результаты объединяют spread-ом в одном create()"
+      why: Верно. Физически код разнесён по файлам, но в рантайме это один объект состояния с общими set/get.
+    - label: Каждый слайс — отдельный стор со своим хуком, а create() связывает их подписками
+      why: Так устроен подход «несколько независимых сторов». Слайсы же собираются в один вызов create() и дают один useStore.
+    - label: "Слайсы изолированы: set внутри слайса может менять только поля этого слайса"
+      why: set и get общие для всего стора, а StateCreator<StoreState, ...> типизирован на весь стор. Слайс может читать и менять чужие поля.
+    - label: Каждый слайс получает свой неймспейс, поэтому одинаковые имена полей в разных слайсах не конфликтуют
+      why: "Неймспейсов нет: spread кладёт все поля на один уровень, и последний слайс молча перетирает одноимённое поле предыдущего."
+  answer: 0
+- id: zustand-slices-reset-collision
+  skill: zustand-slice-key-collision
+  question: zustand-slices-organization
+  difficulty: 2
+  prompt: "Store = CartSlice & UserSlice. При выходе вызывают useStore.getState().reset(): пользователь сбрасывается, а корзина — нет. Где ошибка?"
+  explanation: "Оба слайса объявляют поле `reset`. При сборке spread-ом `userSlice` идёт последним и перетирает `reset` корзины. TypeScript молчит: в пересечении типов обе сигнатуры `() => void` совместимы. Правило: давайте действиям в слайсах уникальные имена (`resetCart`, `resetUser`). Общий сброс делайте отдельным действием, которое явно вызывает оба."
+  type: find-bug
+  language: tsx
+  code: |-
+    const cartSlice: StateCreator<Store, [], [], CartSlice> =
+      (set) => ({
+        items: [],
+        reset: () => set({ items: [] }),
+      });
+    const userSlice: StateCreator<Store, [], [], UserSlice> =
+      (set) => ({
+        user: null,
+        reset: () => set({ user: null }),
+      });
+    export const useStore = create<Store>()((...a) => ({
+      ...cartSlice(...a),
+      ...userSlice(...a),
+    }));
+  bugLines:
+    - 4
+    - 9
+  causes:
+    - Оба слайса объявляют поле reset — при spread-объединении reset из userSlice молча перетирает reset корзины
+    - set внутри слайса может менять только поля этого слайса, поэтому items не обновляются
+    - Слайсы нужно передавать в create() без spread, иначе Zustand теряет их действия
+    - Аргументы ...a нельзя передавать сразу в несколько слайсов — второй слайс получает другой set
+  answer: 0
+- id: zustand-slices-cross-slice-logout
+  skill: zustand-cross-slice-actions
+  question: zustand-slices-organization
+  difficulty: 3
+  prompt: В cartSlice есть действие clearCart. Допишите userSlice так, чтобы logout очищал корзину через общий стор, и подключите слайс.
+  explanation: Слайс типизирован на **весь** `StoreState`, а не на свою часть. Только так `get()` видит действия других слайсов, в том числе `clearCart`, и не нужен импорт cartSlice — значит, нет циклической зависимости. Все слайсы получают одни и те же аргументы `(set, get, api)` через `...a`. Такую связность между слайсами стоит вводить осознанно.
+  type: fill-tokens
+  language: tsx
+  code: |-
+    const createUserSlice: StateCreator<
+      ___, [], [], UserSlice
+    > = (set, get) => ({
+      user: null,
+      logout: () => {
+        get().___();
+        set({ user: null });
+      },
+    });
+    export const useStore = create<StoreState>()((...a) => ({
+      ...createCartSlice(...a),
+      ...createUserSlice(___),
+    }));
+  tokens:
+    - StoreState
+    - clearCart
+    - ...a
+  decoys:
+    - UserSlice
+    - CartSlice
+    - a
+    - reset
+- id: zustand-slices-structure-choice
+  skill: zustand-store-structure-choice
+  question: zustand-slices-organization
+  difficulty: 3
+  prompt: "Zustand-стор разросся до 600 строк: корзина, пользователь, фильтры. При logout корзина должна очищаться атомарно, а persist и devtools должны остаться одни на всё. Как реорганизовать?"
+  explanation: Домены связаны (logout очищает корзину), а middleware должны быть общими. Значит, нужен один стор, определение которого разнесено по слайсам. Отдельные сторы подходят, когда домены действительно независимы. Если стор маленький, слайсы только усложнят код.
+  type: choose-tool
+  options:
+    - label: Слайсы в разных файлах, собранные spread-ом в одном create()
+      why: "Лучший вариант: один стор с одним persist/devtools, а связь корзины и пользователя выражается явно через общий get()/set()."
+    - label: Несколько независимых create() и синхронизация через subscribe
+      why: Подходит для действительно независимых доменов. Здесь связь пришлось бы синхронизировать снаружи, без атомарности, а middleware настраивать для каждого стора.
+    - label: Оставить один файл и разбить его комментариями-секциями
+      why: Нормально для небольшого стора на пару полей и действий. На 600 строках файл нечитаем и порождает конфликты при параллельной работе.
+    - label: Разнести состояние по нескольким React Context
+      why: "Context передаёт значения, но не даёт селекторов: любое изменение перерисует всех потребителей. Логику действий и persist придётся писать вручную."
+  answer: 0
+
+# zustand-outside-react: принято из черновика 2026-11-09
+- id: zustand-outside-react-quiz
+  skill: zustand-store-api-outside-react
+  question: zustand-outside-react
+  difficulty: 3
+  prompt: Loader роутера должен проверить токен из Zustand-стора ещё до первого рендера страницы. Почему это вообще возможно?
+  explanation: Стор Zustand живёт в модуле, а не в дереве React. Хук — лишь мост к нему через подписку. Вне компонентов читай через `getState()`, пиши через `setState()` или экшены, реагируй на изменения через `subscribe()`. Для полной независимости от React есть `createStore` из `zustand/vanilla`.
+  type: quiz
+  options:
+    - label: У результата create() есть getState/setState/subscribe — они работают с хранилищем напрямую, без рендера и правил хуков
+      why: Верно. create() возвращает хук, к которому прикреплено API стора. Стор — обычный объект в модуле, React для доступа к нему не нужен.
+    - label: Zustand хранит состояние в React Context, а loader выполняется внутри RouterProvider, поэтому хук там доступен
+      why: "Zustand не использует Context по умолчанию: стор — замыкание в модуле. А хук вне компонента нарушает правила хуков, даже если есть провайдер."
+    - label: Можно просто вызвать useAuthStore() — хуки Zustand, в отличие от встроенных, разрешено вызывать где угодно
+      why: Внутри хук опирается на useSyncExternalStore, поэтому подчиняется правилам хуков. Вызов вне рендера компонента — ошибка.
+    - label: "Никак: стор из create() привязан к React, вне компонентов нужен только createStore из zustand/vanilla"
+      why: vanilla нужен для полной изоляции от React, например в библиотеке. Но getState и subscribe есть и у стора из create().
+  answer: 0
+- id: zustand-outside-react-stale-getstate
+  skill: zustand-getstate-staleness
+  question: zustand-outside-react
+  difficulty: 2
+  prompt: Пользователь залогинился, но запросы всё равно уходят с `Bearer undefined`. Найдите строку с ошибкой.
+  explanation: "`getState()` — разовое чтение, а не подписка. Значение, сохранённое в переменную модуля при импорте, навсегда останется тем, что было в сторе в тот момент. Вызывайте `useAuthStore.getState()` внутри `apiFetch`, в момент использования."
+  type: find-bug
+  language: ts
+  code: |-
+    import { useAuthStore } from './authStore';
+
+    const { token } = useAuthStore.getState();
+
+    export function apiFetch(url: string) {
+      return fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    }
+  bugLines:
+    - 3
+  causes:
+    - "token читается один раз при загрузке модуля: getState() не создаёт подписку, и после логина значение не обновится"
+    - getState() нельзя вызывать вне компонента — здесь нужен хук useAuthStore()
+    - Деструктуризация результата getState() отключает реактивность всего стора
+    - Токен нужно записывать в стор через setState прямо перед fetch
+  answer: 0
+- id: zustand-outside-react-ws-subscribe
+  skill: zustand-subscribe-cleanup
+  question: zustand-outside-react
+  difficulty: 2
+  prompt: "Подключите WebSocket к стору без компонентов: входящие сообщения пишутся в стор, изменение typing отправляется на сервер, а функция отключения убирает всё за собой."
+  explanation: В обработчике события берём актуальные экшены через `getState()`. `subscribe((state, prev) => …)` вызывается при каждом изменении стора. Вне React никто не сделает cleanup за вас, поэтому отписку нужно вызвать вручную вместе с закрытием сокета.
+  type: fill-tokens
+  language: ts
+  code: |-
+    export function connectChat(url: string) {
+      const ws = new WebSocket(url);
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        useChatStore.___().addMessage(msg);
+      };
+      const unsub = useChatStore.___((s, prev) => {
+        if (s.typing !== prev.typing) {
+          ws.send(JSON.stringify({ t: s.typing }));
+        }
+      });
+      return () => { ___(); ws.close(); };
+    }
+  tokens:
+    - getState
+    - subscribe
+    - unsub
+  decoys:
+    - setState
+    - useStore
+    - destroy
+- id: zustand-outside-react-vanilla-widgets
+  skill: zustand-vanilla-store
+  question: zustand-outside-react
+  difficulty: 3
+  prompt: "Библиотека виджетов: состояние нужно и в vanilla-JS части без React, и в React-обёртке. На одной странице может быть несколько независимых виджетов. Как устроить стор?"
+  explanation: "Правило: стор без знания о React — `createStore` из `zustand/vanilla`. Компоненты подключаются к нему через `useStore(store, selector)`. Несколько экземпляров — фабрика, которая создаёт стор на каждый виджет и передаёт его через Context, а не модульный синглтон."
+  type: choose-tool
+  options:
+    - label: Фабрика createStore из zustand/vanilla на каждый виджет, в React — useStore(store, selector) через Context
+      why: Стор не зависит от React и работает в vanilla-части. Отдельный экземпляр на виджет даёт изоляцию, а хук подключается только там, где нужен.
+    - label: Один глобальный стор через create() из zustand
+      why: Подходит для приложения с единственным экземпляром. Здесь модульный синглтон смешает состояние всех виджетов на странице.
+    - label: useReducer + React Context внутри каждого виджета
+      why: "Изоляцию даёт, но состояние заперто в дереве React: vanilla-JS части до него не добраться без костылей."
+    - label: Глобальный Redux Toolkit store с ключом виджета в слайсе
+      why: Годится для большого приложения на Redux. Для библиотеки это тяжёлая зависимость и общий стор вместо изолированных экземпляров.
+  answer: 0

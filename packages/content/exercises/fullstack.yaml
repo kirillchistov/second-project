@@ -2282,3 +2282,164 @@
     - При реконнекте клиент передаёт lastSeq в запросе подписки
     - Сервер досылает сообщения с seq > lastSeq, а если их уже нет в буфере — отправляет полный снапшот
     - Клиент игнорирует сообщения с seq ≤ lastSeq как дубликаты
+
+# deploy-github-pages: принято из черновика 2026-11-09
+- id: deploy-github-pages-direct-link-404
+  skill: static-hosting-spa-fallback
+  question: deploy-github-pages
+  difficulty: 2
+  prompt: SPA опубликовано на `username.github.io/repo-name/`. Переходы по кнопкам работают, но перезагрузка на `/repo-name/settings` даёт 404 от GitHub. Почему?
+  explanation: "GitHub Pages — чистая статика без серверной логики: rewrite «любой путь → index.html» настроить нельзя. Обходной приём — положить копию `index.html` как `404.html`. GitHub отдаст её на любой несуществующий путь, и клиентский роутер сам разберёт `location.pathname`."
+  type: quiz
+  options:
+    - label: Сервер ищет физический файл по пути, его нет, а rewrite на index.html на Pages не настроить — нужна копия index.html как 404.html
+      why: Верно. Клиентский маршрут существует только в JS. Без fallback-страницы запрос до приложения просто не доходит.
+    - label: "В vite.config не указан base: '/repo-name/', поэтому ассеты ищутся в корне домена"
+      why: Это другая ошибка. Без base белый экран был бы и на главной, а в консоли — 404 на /assets/*.js. Здесь же 404 отдаёт сам GitHub на HTML-запрос.
+    - label: BrowserRouter не восстанавливает маршрут при перезагрузке — нужно вручную вызвать navigate в useEffect
+      why: "До JS дело не доходит: сервер вернул свою 404-страницу, и приложение вообще не загрузилось."
+    - label: Нужно добавить правило rewrites в настройки GitHub Pages, как в vercel.json или _redirects
+      why: У GitHub Pages нет конфигурации rewrites и redirects — это возможности Vercel и Netlify. Поэтому и нужен трюк с 404.html.
+  answer: 0
+- id: deploy-github-pages-router-basename
+  skill: subpath-base-config
+  question: deploy-github-pages
+  difficulty: 2
+  prompt: Проект задеплоен на `/repo-name/`, ассеты грузятся, `404.html` на месте. Но на любой странице, даже на главной, роутер показывает свою ошибку «404 Not Found». Где ошибка?
+  explanation: "`base` в Vite меняет только пути ассетов. Роутер же видит `pathname = /repo-name/...`, и маршрут `/` не совпадает. Нужно передать `{ basename: import.meta.env.BASE_URL }` вторым аргументом `createBrowserRouter`. Тогда префикс берётся из одного источника — конфига сборки."
+  type: find-bug
+  language: tsx
+  code: |-
+    // vite.config.ts
+    export default defineConfig({
+      plugins: [react()],
+      base: '/repo-name/',
+    });
+    // main.tsx
+    const router = createBrowserRouter([
+      { path: '/', element: <Home /> },
+      { path: '/profile', element: <Profile /> },
+    ]);
+    createRoot(root!).render(
+      <RouterProvider router={router} />
+    );
+  bugLines:
+    - 10
+  causes:
+    - Роутеру не передан basename, поэтому маршруты сравниваются с путём, в котором есть префикс /repo-name/
+    - В base нельзя ставить слеш в конце — нужно '/repo-name'
+    - Плагин react() несовместим с base и ломает пути
+    - На GitHub Pages работает только HashRouter, createBrowserRouter не поддерживается
+  answer: 0
+- id: deploy-github-pages-actions-pipeline
+  skill: ci-deploy-static-spa
+  question: deploy-github-pages
+  difficulty: 2
+  prompt: Расставьте шаги workflow GitHub Actions, который публикует Vite SPA на GitHub Pages.
+  explanation: Публикацию автоматизируют, чтобы сайт всегда соответствовал исходникам в main. Ручной коммит dist/ рано или поздно разойдётся с кодом. Копию 404.html создают после сборки и до загрузки артефакта, иначе она не попадёт на сайт.
+  type: order
+  kind: recipe
+  steps:
+    - Push в main запускает workflow
+    - actions/checkout и npm ci ставят зависимости
+    - npm run build собирает dist/ с base '/repo-name/'
+    - Копируем dist/index.html в dist/404.html
+    - actions/upload-pages-artifact загружает dist/
+    - actions/deploy-pages публикует сайт
+- id: deploy-github-pages-routing-fallback-choice
+  skill: static-hosting-spa-fallback
+  question: deploy-github-pages
+  difficulty: 2
+  prompt: Внутренний дашборд хостится на GitHub Pages. Нужны чистые URL без `#`, и прямые ссылки на `/repo-name/reports/42` должны открывать нужный экран. Что выбрать?
+  explanation: "Правило: на хостинге с rewrite-правилами (Vercel, Netlify, nginx) SPA-fallback настраивают на сервере. На GitHub Pages их нет, поэтому остаётся 404.html — копия index.html. Учтите: ответ придёт со статусом 404. Для внутреннего дашборда это некритично, для SEO-страниц плохо."
+  type: choose-tool
+  options:
+    - label: Копия index.html как 404.html после сборки
+      why: Лучше всего для этих условий. GitHub Pages отдаёт 404.html на любой несуществующий путь, SPA загружается и рендерит маршрут по pathname.
+    - label: HashRouter / createHashRouter
+      why: "Работает на любой статике без трюков: сервер видит только путь до #. Но условие требует чистых URL. Годится, если # в адресе допустим."
+    - label: Файл _redirects с правилом /* /index.html 200
+      why: Это механизм Netlify, GitHub Pages его игнорирует. Хороший выбор, если переехать на Netlify.
+    - label: rewrites в vercel.json
+      why: "Работает только на Vercel. Там это правильный способ: SPA-fallback со статусом 200, без трюков с 404."
+  answer: 0
+
+# deploy-own-server-nginx-tls: принято из черновика 2026-11-09
+- id: deploy-nginx-same-origin-quiz
+  skill: nginx-reverse-proxy-role
+  question: deploy-own-server-nginx-tls
+  difficulty: 2
+  prompt: SPA развёрнута на своём сервере за Nginx, а Node API слушает `localhost:3000`. Зачем проксировать `/api/` через тот же Nginx, а не открывать API на отдельном порту?
+  explanation: "Nginx решает две задачи: отдаёт статику SPA с диска и через `proxy_pass` пересылает `/api/*` на бэкенд. Для браузера сайт и API — один origin (схема, хост и порт совпадают), поэтому CORS не нужен. Бэкенд остаётся на localhost, а TLS обслуживает один Nginx."
+  type: quiz
+  options:
+    - label: Браузер видит сайт и API как один origin — CORS не нужен, бэкенд не торчит наружу, TLS настроен в одном месте
+      why: Верно. Origin определяют схема, хост и порт. Запросы на `/api/` идут на тот же `https://example.com`, а Nginx уже внутри сервера пересылает их на 3000.
+    - label: "Nginx ускоряет Node: он сам выполняет обработчики API и снимает нагрузку с процесса"
+      why: Nginx не выполняет код бэкенда. Он только принимает соединение и проксирует запрос, а обработчики по-прежнему работают в Node.
+    - label: "Без Nginx бэкенд вообще нельзя вызвать из браузера: fetch работает только с портами 80 и 443"
+      why: fetch может обратиться к любому порту. Но другой порт — это другой origin, и тогда понадобятся CORS-заголовки и открытый наружу порт.
+    - label: Так браузер кэширует ответы API вместе со статикой, и повторных запросов к бэкенду не будет
+      why: Общий origin сам по себе ничего не кэширует. Кэш определяют заголовки ответа, и для API их обычно выставляют отдельно.
+  answer: 0
+- id: deploy-nginx-spa-fallback-bug
+  skill: nginx-spa-fallback
+  question: deploy-own-server-nginx-tls
+  difficulty: 2
+  prompt: Код ниже — конфиг Nginx, а не TS. Главная страница открывается, переходы внутри приложения работают, но если обновить страницу на `/profile` или открыть прямую ссылку, Nginx отдаёт 404. Где ошибка?
+  explanation: Клиентские маршруты существуют только в JS-роутере, файла `profile` на диске нет. `try_files $uri /index.html` отдаёт index.html для любого несуществующего пути, дальше маршрут обрабатывает роутер SPA. Это серверный аналог SPA fallback. Реальные 404 тогда показывает само приложение.
+  type: find-bug
+  language: js
+  code: |-
+    server {
+      listen 443 ssl;
+      server_name example.com;
+      ssl_certificate     certs/fullchain.pem;
+      ssl_certificate_key certs/privkey.pem;
+      root /var/www/app/dist;
+      location / {
+        try_files $uri =404;
+      }
+      location /api/ {
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+      }
+    }
+  bugLines:
+    - 8
+  causes:
+    - "Нет fallback на index.html: при запросе к несуществующему файлу `profile` Nginx отдаёт 404, не загружая SPA"
+    - "`root` должен лежать внутри `location /`, иначе Nginx не найдёт dist"
+    - "`proxy_pass` перехватывает все пути, поэтому `/profile` уходит на бэкенд"
+    - Без `listen 80` Nginx не умеет обрабатывать прямые ссылки
+  answer: 0
+- id: deploy-own-server-recipe
+  skill: deploy-own-server-steps
+  question: deploy-own-server-nginx-tls
+  difficulty: 2
+  prompt: SPA уже выложена в /var/www/app/dist, Node API запущен на localhost:3000. Расставьте шаги, чтобы сайт заработал по HTTPS с сертификатом Let's Encrypt.
+  explanation: "Сначала нужен рабочий HTTP-конфиг: certbot --nginx ищет server-блок с нужным server_name. Конфиг проверяют через `nginx -t` и перезагружают Nginx. Затем certbot по HTTP подтверждает владение доменом, дописывает в конфиг SSL и редирект и ставит задачу на автопродление. Сертификат живёт 90 дней, поэтому в конце продление проверяют через `--dry-run`."
+  type: order
+  kind: recipe
+  steps:
+    - Описать server-блок на 80 с server_name, root, try_files $uri /index.html и location /api/ с proxy_pass
+    - Проверить конфиг через nginx -t и перезагрузить Nginx
+    - "Выполнить certbot --nginx: сертификат, блок 443 и редирект с HTTP"
+    - "Проверить автопродление: certbot renew --dry-run"
+- id: deploy-multi-service-one-domain
+  skill: hosting-approach-choice
+  question: deploy-own-server-nginx-tls
+  difficulty: 3
+  prompt: Есть арендованная VM. На одном домене нужны SPA, Node API на `/api` и внутренний админ-сервис на `/admin`. Также нужны свои security-заголовки и HTTPS. Бэкенды не должны быть доступны снаружи напрямую. Что выбрать?
+  explanation: Несколько сервисов за одним доменом, свои заголовки и закрытые бэкенды — типичная задача reverse proxy. Nginx отдаёт статику, маршрутизирует пути через `proxy_pass` на localhost и держит TLS в одном месте. Managed-хостинг снимает эксплуатацию, но плохо подходит, когда бэкенды живут на своей машине.
+  type: choose-tool
+  options:
+    - label: "Nginx: статика + proxy_pass для /api и /admin на localhost, TLS через certbot"
+      why: Лучший вариант. Один origin без CORS, бэкенды слушают только localhost, заголовки и редиректы задаются в конфиге, сертификат продлевается автоматически.
+    - label: Vercel для SPA с rewrites на публичные адреса бэкендов
+      why: Хорош, когда бэкенда нет или он serverless и не хочется заниматься эксплуатацией. Здесь бэкенды пришлось бы открыть в интернет, а это против требований.
+    - label: Поддомены api. и admin. на открытых портах с CORS
+      why: Подходит, если сервисы действительно независимы и публичны. Здесь добавляет CORS, preflight-запросы и несколько сертификатов, а бэкенды торчат наружу.
+    - label: Express раздаёт SPA, проксирует /admin и сам держит TLS на 443
+      why: Сработает для одного сервиса, но Node придётся брать на себя статику, TLS и продление сертификатов. При падении процесса ляжет весь домен.
+  answer: 0

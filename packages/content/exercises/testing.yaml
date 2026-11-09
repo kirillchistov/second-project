@@ -733,3 +733,253 @@
     - label: "`vi.mock('@reduxjs/toolkit')` и проверка, что action вызван"
       why: "Мок RTK подменяет то, что тестируем: реальная логика редьюсера не выполнится. Мокают внешние границы вроде сети, а не сам Redux."
   answer: 0
+
+# zustand-testing-store: принято из черновика 2026-11-09
+- id: zustand-testing-state-leak-quiz
+  skill: zustand-store-reset
+  question: zustand-testing-store
+  difficulty: 2
+  prompt: Тест корзины на Zustand проходит в одиночку, но падает в общем прогоне файла. В чём наиболее вероятная причина и как её исправить?
+  explanation: Стор, созданный через `create()`, — состояние на уровне модуля. Модуль импортируется один раз, поэтому всё, что изменил один тест, видят следующие. Снимок `getState()` сохраняют сразу после импорта, а в `beforeEach` вызывают `setState(initial, true)`.
+  type: quiz
+  options:
+    - label: "Модуль со стором импортируется один раз, и состояние живёт между тестами. Нужен сброс в beforeEach: setState(initial, true)"
+      why: Верно. `create()` выполняется при импорте, и сам стор между тестами не пересоздаётся. Изоляцию обеспечивает только явный сброс к снимку.
+    - label: Zustand по умолчанию сохраняет состояние в localStorage, и тесты читают данные предыдущего
+      why: В localStorage пишет только `persist` middleware, без него состояние живёт в памяти модуля. Утечка будет и без persist.
+    - label: Vitest запускает тесты одного файла параллельно, и они конкурируют за общий стор
+      why: Внутри файла тесты по умолчанию идут последовательно (параллелизм — опция `concurrent`). Проблема в общем состоянии, а не в гонке.
+    - label: getState() вне компонента возвращает устаревший снимок, поэтому нужно рендерить компонент
+      why: "`getState()` всегда возвращает актуальное состояние, и вызывать его вне React можно. Именно так стор тестируют без рендера."
+  answer: 0
+- id: zustand-testing-snapshot-in-before-each
+  skill: zustand-store-reset
+  question: zustand-testing-store
+  difficulty: 2
+  prompt: Сброс стора есть, но второй такой же тест в файле видит товары из первого. Найдите строку с ошибкой.
+  explanation: "Снимок нужно брать один раз, сразу после импорта модуля, пока стор чистый. Если брать его внутри `beforeEach`, стор «сбрасывается» в своё же текущее, уже грязное состояние. Правило: `const initial = store.getState()` пишется на уровне модуля теста."
+  type: find-bug
+  language: ts
+  code: |-
+    import { beforeEach, expect, test } from 'vitest';
+    import { useCartStore } from './cartStore';
+
+    beforeEach(() => {
+      const initial = useCartStore.getState();
+      useCartStore.setState(initial, true);
+    });
+
+    test('addItem adds one item', () => {
+      const { addItem } = useCartStore.getState();
+      addItem({ id: '1', title: 'Book' });
+      expect(useCartStore.getState().items)
+        .toHaveLength(1);
+    });
+  bugLines:
+    - 5
+  causes:
+    - Снимок берётся внутри beforeEach, уже после прошлых тестов, и стор сбрасывается в своё же грязное состояние
+    - Флаг true при замене удаляет действия, поэтому addItem становится undefined
+    - getState() нельзя вызывать вне React-компонента, ему нужен рендер
+    - Деструктуризация addItem теряет this, и действие пишет не в тот стор
+  answer: 0
+- id: zustand-testing-setstate-merge
+  skill: zustand-setstate-replace
+  question: zustand-testing-store
+  difficulty: 2
+  prompt: Тесты одного файла выполняются последовательно. Что выведет console.log во втором тесте?
+  explanation: "Без второго аргумента `setState` сливает переданный объект с текущим состоянием. Поле `items` сбросилось, а `coupon` из прошлого теста осталось. Для надёжного сброса нужна полная замена снимком: `setState(initial, true)`."
+  type: predict-output
+  language: ts
+  code: |-
+    const useCart = create<CartState>()((set) => ({
+      items: [],
+      coupon: null,
+      applyCoupon: (c) => set({ coupon: c }),
+    }));
+
+    beforeEach(() => useCart.setState({ items: [] }));
+
+    test('first', () => {
+      useCart.getState().applyCoupon('SALE');
+    });
+    test('second', () => {
+      console.log(useCart.getState().coupon);
+    });
+  options:
+    - SALE
+    - "null"
+    - undefined
+    - "TypeError: cannot read properties of undefined"
+  answer: 0
+- id: zustand-testing-mock-network-layer
+  skill: zustand-action-mocking
+  question: zustand-testing-store
+  difficulty: 2
+  prompt: Действие стора `loadCart` вызывает `api.fetchCart()` и кладёт ответ в `items`, а при ошибке заполняет `error`. Нужно быстро и изолированно проверить оба сценария. Что выбрать?
+  explanation: "Логика стора — это его действия. Подменять стоит только внешнюю границу (сеть или модуль API), а само действие вызывать по-настоящему: `await getState().loadCart()`, затем проверить `getState()`. Если мокать Zustand, тест перестаёт проверять что-либо реальное."
+  type: choose-tool
+  options:
+    - label: vi.mock('./api') + вызов действия через getState() и проверка состояния
+      why: Подменяется только сетевой слой, а реальная логика loadCart выполняется. Нет рендера, тест быстрый, и легко отдать как успешный ответ, так и ошибку.
+    - label: vi.mock('zustand') с фейковым create
+      why: Подменив сам стор, вы тестируете мок, а не логику действий. Такое оправдано разве что в тестах компонента, которому стор не важен.
+    - label: Рендер компонента корзины + userEvent, проверка UI
+      why: "Это уже интеграционный тест: он полезен, чтобы проверить связку UI и стора, но для логики одного действия медленнее и шумнее."
+    - label: Запросы к реальному dev-серверу
+      why: Тест получается медленным и нестабильным, а сценарий ошибки трудно воспроизвести. Это уровень e2e, а не изолированного теста стора.
+  answer: 0
+
+# test-harness-setup: принято из черновика 2026-11-09
+- id: test-harness-setup-minimal-quiz
+  skill: test-harness-setup
+  question: test-harness-setup
+  difficulty: 2
+  prompt: Проект на Vite + React, тестов ещё нет. Что составляет минимальную рабочую настройку Vitest и Testing Library?
+  explanation: Нужны три вещи. Первая — DOM-окружение (`jsdom` или `happy-dom`). Вторая — `setupFiles` с матчерами jest-dom и cleanup. Третья — блок `test` в конфиге Vite (через `vitest/config`). Тогда тесты используют те же алиасы, плагины и трансформации, что и сборка, и ничего не нужно дублировать.
+  type: quiz
+  options:
+    - label: DOM-окружение jsdom/happy-dom, setupFiles с jest-dom и cleanup, блок test в конфиге Vite через vitest/config
+      why: Верно. Окружение даёт document, setup подключает матчеры и чистит DOM, а общий конфиг переиспользует алиасы и плагины сборки.
+    - label: Отдельный jest.config с babel-jest и ts-jest, чтобы тесты не зависели от настроек сборки
+      why: Это путь Jest. С Vitest он только дублирует трансформации и алиасы, и они начинают расходиться с vite.config.
+    - label: "Достаточно установить @testing-library/react: окружение по умолчанию уже эмулирует DOM"
+      why: "По умолчанию в Vitest окружение node: там нет document, и render() упадёт. Матчеры вроде toBeInTheDocument тоже не появятся сами."
+    - label: "Обязательно Vitest Browser Mode с Playwright: без настоящего браузера компоненты не протестировать"
+      why: Browser Mode полезен, когда нужны реальные браузерные API. Для большинства unit-тестов компонентов хватает jsdom/happy-dom, и они быстрее.
+  answer: 0
+- id: test-harness-setup-node-environment
+  skill: test-dom-environment
+  question: test-harness-setup
+  difficulty: 1
+  prompt: "Любой тест с render() падает с «ReferenceError: document is not defined». Найдите строку с ошибкой."
+  explanation: Окружение `node` не создаёт `window` и `document`, а Testing Library рендерит в настоящий DOM. Кстати, `node` в Vitest — значение по умолчанию, так что ошибка возникает и если поле просто забыть. Для компонентов нужен `jsdom` или `happy-dom`.
+  type: find-bug
+  language: ts
+  code: |-
+    import { defineConfig } from 'vitest/config';
+    import react from '@vitejs/plugin-react';
+
+    export default defineConfig({
+      plugins: [react()],
+      test: {
+        environment: 'node',
+        setupFiles: './src/test/setup.ts',
+        globals: true,
+      },
+    });
+  bugLines:
+    - 7
+  causes:
+    - Окружение node не эмулирует DOM — нужен jsdom или happy-dom
+    - setupFiles должен быть массивом, строка игнорируется
+    - Плагин react() конфликтует с тестами, его надо убрать из конфига
+    - "globals: true скрывает document, глобальные API надо импортировать явно"
+  answer: 0
+- id: test-harness-setup-cleanup-file
+  skill: test-setup-cleanup
+  question: test-harness-setup
+  difficulty: 2
+  prompt: "Допишите setup-файл (globals выключены): подключите матчеры jest-dom для Vitest и размонтируйте компоненты после каждого теста."
+  explanation: "Подпуть `jest-dom/vitest` расширяет `expect` из Vitest, а старый `extend-expect` удалён в jest-dom v6. Testing Library сама вызывает cleanup, только если `afterEach` глобальный (`globals: true`). Иначе DOM накапливается, и `getByText` может найти элемент из прошлого теста. `afterAll` не подходит: он сработает один раз в конце."
+  type: fill-tokens
+  language: ts
+  code: |-
+    import '@testing-library/jest-dom/___';
+    import { cleanup } from '@testing-library/react';
+    import { ___ } from 'vitest';
+
+    ___(() => cleanup());
+  tokens:
+    - vitest
+    - afterEach
+    - afterEach
+  decoys:
+    - extend-expect
+    - afterAll
+    - beforeAll
+- id: test-harness-setup-intersection-observer
+  skill: mock-missing-browser-apis
+  question: test-harness-setup
+  difficulty: 2
+  prompt: Компонент подгружает следующую страницу, когда сентинел попадает в зону видимости через IntersectionObserver. В jsdom тест падает с ReferenceError. Нужен быстрый unit-тест в CI, который проверит вызов загрузки. Что выбрать?
+  explanation: jsdom не реализует IntersectionObserver и ResizeObserver. Для unit-тестов их мокают глобально в setupFiles или в самом тесте. Так тест сам вызывает callback и детерминированно проверяет реакцию компонента. Реальный браузер нужен, когда важно настоящее поведение API.
+  type: choose-tool
+  options:
+    - label: Мок через vi.stubGlobal('IntersectionObserver', ...) с ручным вызовом callback
+      why: "Лучший выбор: тест остаётся быстрым в jsdom, а пересечение вызывается вручную, поэтому результат предсказуем."
+    - label: Vitest Browser Mode с Playwright
+      why: "Подходит, когда важно реальное поведение API: пороги, скролл, layout. Для проверки логики загрузки это медленнее и сложнее, чем мок."
+    - label: Обернуть вызов в компоненте в if (process.env.NODE_ENV !== 'test')
+      why: "Тогда тестируется не тот код, что работает в проде: ветка с загрузкой вообще не проверяется. Тестовые костыли в продовом коде — плохая практика."
+    - label: Переключить environment на node
+      why: "В node нет ни DOM, ни IntersectionObserver: render() упадёт ещё раньше. Окружение node подходит для чистой логики без DOM."
+  answer: 0
+
+# ci-cd-pipeline: принято из черновика 2026-11-09
+- id: ci-branch-protection-quiz
+  skill: ci-branch-protection
+  question: ci-cd-pipeline
+  difficulty: 2
+  prompt: "CI на pull_request настроен: typecheck, lint, тесты. Что ещё нужно, чтобы PR с падающими тестами физически нельзя было смержить в main?"
+  explanation: "Сам по себе CI только сообщает статус. Защищает main связка: проверки на каждый PR плюс branch protection с required status checks. Только тогда красный job блокирует merge. Правило: CI без branch protection — это информирование, а не защита."
+  type: quiz
+  options:
+    - label: Включить branch protection на main и отметить job CI как required status check
+      why: Верно. Required check делает зелёный статус условием merge. Без него красный крестик — просто подсказка, которую можно проигнорировать.
+    - label: "Ничего: красный статус workflow в PR сам блокирует кнопку merge"
+      why: Без правил защиты ветки GitHub лишь показывает статус проверок. Кнопка merge остаётся доступной даже при падающих тестах.
+    - label: Добавить запуск CI на push в main, чтобы ловить сломанный код
+      why: Проверка на push в main срабатывает, когда код уже смержен. Она сообщит о поломке постфактум, но не предотвратит её.
+    - label: Поднять порог покрытия до 90% — тогда сломанный код не пройдёт
+      why: Coverage показывает, какой код выполнялся в тестах, а не то, что проверки качественные. И без required checks порог тоже ничего не блокирует.
+  answer: 0
+- id: ci-flaky-dependency-install
+  skill: ci-reproducible-install
+  question: ci-cd-pipeline
+  difficulty: 1
+  prompt: Тесты в CI иногда падают, а локально всё зелёное. Выяснилось, что в CI ставится более новая minor-версия библиотеки, чем в lock-файле у разработчиков. Как устанавливать зависимости в пайплайне?
+  explanation: "В CI нужна воспроизводимость: `npm ci` ставит ровно то, что записано в lock-файле. Если lock-файл расходится с package.json, команда падает. Lock-файл коммитят, а скорость дают через кэш, например `cache: 'npm'` в setup-node."
+  type: choose-tool
+  options:
+    - label: npm ci
+      why: Ставит строго по package-lock.json и падает при расхождении с package.json. В CI окажутся те же версии, что протестированы локально.
+    - label: npm install
+      why: Нужен локально, когда добавляешь или обновляешь зависимости. В CI может разрешить диапазоны иначе и тихо подтянуть непротестированную версию.
+    - label: Убрать ^ у всех версий в package.json
+      why: Фиксирует только прямые зависимости, транзитивные всё равно плавают. Lock-файл с npm ci решает задачу полностью и без ручной работы.
+    - label: Удалить lock-файл, чтобы CI всегда ставил свежие версии
+      why: "Так делать не надо: пропадает воспроизводимость и «работает у меня» становится нормой. Свежие версии лучше получать через Renovate или Dependabot отдельными PR."
+  answer: 0
+- id: ci-protect-main-recipe
+  skill: ci-pipeline-setup
+  question: ci-cd-pipeline
+  difficulty: 2
+  prompt: Расставьте шаги настройки CI так, чтобы он реально защищал main-ветку.
+  explanation: "Сначала пайплайн повторяет локальные проверки: код, Node с кэшем, `npm ci`, затем проверки. Любой упавший шаг делает job красным. Job попадает в список проверок после первого прогона, и только тогда его можно отметить как required в branch protection."
+  type: order
+  kind: recipe
+  steps:
+    - Описать workflow с триггером pull_request
+    - Сделать checkout и setup-node с кэшем npm
+    - "Поставить зависимости строго по lock-файлу: npm ci"
+    - Прогнать typecheck, lint и тесты — падение любого шага красит job
+    - Дождаться первого прогона, чтобы job появился в списке проверок
+    - Включить branch protection на main и отметить job как required check
+- id: ci-monorepo-slow-pipeline
+  skill: ci-monorepo-affected
+  question: ci-cd-pipeline
+  difficulty: 3
+  prompt: В монорепозитории 40 пакетов, CI на каждый PR идёт 35 минут, хотя типичный PR меняет 1–2 пакета. Как сократить и время, и стоимость CI-минут, не ослабив защиту main?
+  explanation: "Граф зависимостей монорепо позволяет проверять только изменённые пакеты и их зависимых: `nx affected -t test` или `turbo run test --filter=...[origin/main]`. Удалённый кэш задач ускоряет ещё сильнее. Набор проверок для PR остаётся прежним, но лишняя работа исчезает, а с ней и потраченные минуты."
+  type: choose-tool
+  options:
+    - label: Запускать задачи только для affected-пакетов (Nx affected / Turborepo --filter) с кэшем
+      why: Проверяются изменённые пакеты и всё, что от них зависит, а результаты для незатронутых берутся из кэша. Защита не слабеет, время и минуты падают в разы.
+    - label: Убрать тесты из PR и гонять полный набор ночью
+      why: Сломанный код попадёт в main до ночного прогона, и required checks теряют смысл. Ночной полный прогон годится только как дополнение.
+    - label: Распараллелить проверки матрицей по всем 40 пакетам
+      why: "Ждать придётся меньше, но суммарные CI-минуты не уменьшатся, а скорее вырастут: у каждого job есть накладные расходы. Матрица дополняет affected, но не заменяет его."
+    - label: Убрать typecheck и lint из CI — пусть разработчики запускают их локально
+      why: "Локальный запуск ничего не гарантирует: проверку легко пропустить, и она не блокирует merge. К тому же экономия обычно мала по сравнению с тестами."
+  answer: 0

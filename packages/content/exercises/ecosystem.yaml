@@ -1116,3 +1116,81 @@
     - label: "Поднять специфичность: `#root .btn.btn`"
       why: "Внутри слоя это не поможет вовсе: безслойный CSS побеждает любой слой независимо от специфичности."
   answer: 0
+
+# production-vs-development-build: принято из черновика 2026-11-09
+- id: build-modes-dev-warnings-removed
+  skill: build-modes-dead-code
+  question: production-vs-development-build
+  difficulty: 1
+  prompt: Что на самом деле происходит с предупреждениями React (например, о пропущенном key) в production-сборке?
+  explanation: "Ветки под `NODE_ENV !== 'production'` бандлер видит статически. В production условие становится `false`, и минификатор удаляет блок целиком. Сам React подключает отдельный production-файл, в котором этих проверок нет. Вывод: dev и prod отличаются не только минификацией, но и составом кода. Поэтому замеры в dev ничего не говорят о том, что получит пользователь."
+  type: quiz
+  options:
+    - label: "Кода предупреждений в бандле нет: ветки по NODE_ENV становятся недостижимыми и вырезаются при сборке"
+      why: Верно. Условие на NODE_ENV подставляется константой, мёртвый код удаляется. Отсюда заметная разница в размере dev- и prod-версии React.
+    - label: Код проверок остаётся, но в production React подавляет вызовы console.warn
+      why: "Нет. В бандле нечего подавлять: проверок физически нет, и на них не тратятся ни байты, ни время выполнения."
+    - label: React в рантайме читает режим и пропускает проверки, но их код по-прежнему загружается
+      why: Рантайм-флаг оставил бы весь код в бандле. Экономия размера достигается именно статическим вырезанием на этапе сборки.
+    - label: Предупреждения работают так же, отличается только минификация имён
+      why: Минификация — лишь часть отличий. Dev-ветки, расширенные сообщения об ошибках и двойные вызовы StrictMode в production отсутствуют.
+  answer: 0
+- id: build-modes-secret-in-env
+  skill: env-vars-secrets
+  question: production-vs-development-build
+  difficulty: 2
+  prompt: Клиентский код на Vite. Найдите строку с серьёзной проблемой, которая проявится в production.
+  explanation: Переменные с префиксом `VITE_` подставляются в клиентский бандл как строковые литералы при сборке. Токен окажется в JS-файле, и любой пользователь увидит его в DevTools. Режим сборки здесь ни на что не влияет. Секреты должны жить только на сервере, а клиент — ходить через бэкенд с правами пользователя.
+  type: find-bug
+  language: ts
+  code: |-
+    // src/api/client.ts — выполняется в браузере
+    const baseUrl = import.meta.env.VITE_API_URL;
+    const adminToken = import.meta.env.VITE_ADMIN_TOKEN;
+
+    export async function deleteUser(id: string) {
+      return fetch(`${baseUrl}/users/${id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      });
+    }
+  bugLines:
+    - 3
+  causes:
+    - Секретный токен вшивается в клиентский бандл строкой и доступен любому, кто откроет DevTools
+    - В production-сборке import.meta.env недоступен, и adminToken будет undefined
+    - VITE_-переменные читаются в рантайме, поэтому токен нужно обернуть в проверку NODE_ENV
+    - "baseUrl нельзя брать из env: в production он вырезается как мёртвый код"
+  answer: 0
+- id: build-modes-measure-perf
+  skill: perf-measure-prod-build
+  question: production-vs-development-build
+  difficulty: 2
+  prompt: Нужно честно замерить скорость загрузки приложения так, как её увидит пользователь. Расставьте шаги по порядку.
+  explanation: Dev-сервер отдаёт неминифицированный код с проверками и двойными рендерами StrictMode, поэтому его замеры не отражают реальность. Сначала собирают production-сборку и запускают её локально. Затем убеждаются, что подключён именно prod-React. Только после этого мерят метрики.
+  type: order
+  kind: recipe
+  steps:
+    - "Собрать production-сборку: npm run build"
+    - Запустить собранный результат локально (npm run preview или статический сервер)
+    - "Убедиться, что подключён production-React: иконка React DevTools не красная, dev-предупреждений нет"
+    - Замерить загрузку в Lighthouse или во вкладке Performance в окне инкогнито
+- id: build-modes-prod-stacktraces
+  skill: production-source-maps
+  question: production-vs-development-build
+  difficulty: 2
+  prompt: Sentry присылает из production стектрейсы вида `at a (index-3f2a.js:1:48213)`. Нужно видеть исходные файлы и строки, но не раскрывать исходники пользователям. Что сделать?
+  explanation: "Source maps для production генерируют отдельными файлами. Их загружают в систему мониторинга ошибок и не выкладывают на публичный сервер (в Vite — `build.sourcemap: 'hidden'`). Так стектрейсы читаемы, а исходники закрыты. Деплой dev-сборки или отказ от минификации чинят симптом ценой размера и скорости."
+  type: choose-tool
+  options:
+    - label: Генерировать hidden source maps, загружать их в Sentry при деплое и не публиковать рядом с бандлом
+      why: Sentry сам сопоставит минифицированные позиции с исходниками. Без комментария sourceMappingURL и публичных .map-файлов исходный код остаётся закрытым.
+    - label: Выкладывать .map-файлы публично рядом с JS-бандлом
+      why: Стектрейсы станут читаемыми, но любой восстановит исходники. Допустимо для open source или внутренних инструментов, где код не секрет.
+    - label: Задеплоить на прод development-сборку, чтобы были понятные ошибки
+      why: Бандл станет в разы тяжелее, появятся dev-проверки и иное поведение. Годится разве что для временного стенда отладки, не для пользователей.
+    - label: Отключить минификацию в production-сборке
+      why: Имена станут читаемее, но бандл вырастет, а позиции строк всё равно не совпадут с исходным TS/JSX. Проблему source maps решают лучше.
+  answer: 0
