@@ -493,6 +493,8 @@ async function request(input: RequestInfo, init?: RequestInit) {
 - **OAuth/OIDC** — Authorization Code Flow с PKCE; лучше доверить готовой библиотеке или BFF (backend for frontend).
 - **Права в UI** (скрыть кнопку) — не замена серверной проверки.
 
+Рабочий пример этой схемы в небольшом реальном проекте — [react-burger-ts](https://github.com/kirillchistov/react-burger-ts): `fetchWithRefresh` в `utils/burger-api.ts` перехватывает именно ошибку `jwt expired`, обновляет токены через `refreshTokenApi` и повторяет исходный запрос один раз, а `ProtectedRoute` редиректит неавторизованного на `/login`, запоминая исходный путь в `location.state`, чтобы вернуть туда после входа.
+
 ### Подводные камни
 - Мерцание защищённой страницы до проверки пользователя — нужно состояние загрузки.
 - Несколько одновременных refresh-запросов при истечении токена.

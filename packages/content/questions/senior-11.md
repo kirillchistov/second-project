@@ -134,3 +134,162 @@ server {
 ### Ссылки
 - [Nginx — Beginner's Guide](https://nginx.org/en/docs/beginners_guide.html)
 - [Certbot — Instructions](https://certbot.eff.org/instructions)
+
+# Как один WebSocket-middleware переиспользовать для разных лент данных?
+@slug realtime-socket-middleware-reuse
+@topic architecture
+@verified react@19.3
+@updated 2026-11
+
+> Если в приложении две WebSocket-ленты (например, лента всех заказов и лента заказов текущего пользователя), не нужно писать Redux middleware на каждую — различается только URL, набор экшенов и обработчик сообщения, а логика подключения, переподключения и очистки одна и та же. Решение — middleware-**фабрика**: функция, принимающая конфиг (`connect`/`disconnect`/`closed`/`failed`-экшены, `getUrl`, `onMessage`) и возвращающая готовый middleware. Каждая лента вызывает фабрику со своим конфигом и получает независимый экземпляр сокета.
+
+```ts
+// socket-middleware.ts — фабрика, не привязанная к конкретной ленте
+type TSocketMiddlewareOptions = {
+  closed: ActionCreatorWithoutPayload;
+  connect: ActionCreatorWithoutPayload;
+  disconnect: ActionCreatorWithoutPayload;
+  failed: PayloadActionCreator<string>;
+  getUrl: () => string | null;
+  onMessage: (data: unknown, dispatch: Dispatch) => void;
+};
+
+export const createSocketMiddleware =
+  (options: TSocketMiddlewareOptions): Middleware =>
+  (storeApi) => {
+    let socket: WebSocket | null = null;
+    let shouldReconnect = false;
+
+    const openSocket = (): void => {
+      const url = options.getUrl();
+      if (!url) return storeApi.dispatch(options.failed('…'));
+      socket = new WebSocket(url);
+      socket.onmessage = (e) => options.onMessage(JSON.parse(e.data), storeApi.dispatch);
+      socket.onclose = () => {
+        if (!shouldReconnect) return;
+        storeApi.dispatch(options.closed());
+        setTimeout(() => storeApi.dispatch(options.connect()), 3000); // реконнект только если не отключались явно
+      };
+    };
+
+    return (next) => (action) => {
+      if (options.connect.match(action)) { shouldReconnect = true; openSocket(); }
+      if (options.disconnect.match(action)) { shouldReconnect = false; socket?.close(); }
+      return next(action);
+    };
+  };
+
+// feed-middleware.ts и profile-orders-middleware.ts — два применения одной фабрики
+export const feedMiddleware = createSocketMiddleware({
+  connect: feedConnecting, disconnect: feedDisconnect, closed: feedClosed,
+  failed: feedFailed, getUrl: () => `${WS_URL}/orders/all`, onMessage: handleFeedMessage,
+});
+export const profileOrdersMiddleware = createSocketMiddleware({
+  connect: profileOrdersConnecting, disconnect: profileOrdersDisconnect, closed: profileOrdersClosed,
+  failed: profileOrdersFailed, getUrl: () => `${WS_URL}/orders`, onMessage: handleProfileOrdersMessage,
+});
+```
+
+Переподключение запускается только через `setTimeout`, если `shouldReconnect` ещё включён — это флаг, который выключается именно экшеном `disconnect`, а не просто обрывом соединения. Благодаря этому компонент, который вызывает `disconnect` при размонтировании (см. `useFeedConnection`), гарантированно не оставляет висящий таймер, который попытался бы переподключиться к уже ненужному сокету.
+
+### Подводные камни
+- Переподключаться при **любом** закрытии сокета, включая закрытие по явному `disconnect()` — без флага `shouldReconnect` приложение будет бесконечно переоткрывать соединение после ухода со страницы.
+- Писать для каждой WebSocket-ленты отдельный middleware с почти идентичным кодом вместо одной параметризуемой фабрики — дублирование логики reconnect/cleanup, которую придётся чинить в нескольких местах при любом исправлении.
+- Держать состояние `socket`/`shouldReconnect` в Redux-сторе, а не в закрытии (closure) самого middleware — WebSocket-инстанс не сериализуется и не должен лежать в сторе.
+
+### Что спросят дальше
+- Почему `getUrl()` — функция, а не строка, переданная в конфиг один раз?
+- Как обработать экспоненциальный backoff вместо фиксированной паузы в 3 секунды перед реконнектом?
+
+### Ссылки
+- [react-burger-ts — socket-middleware.ts](https://github.com/kirillchistov/react-burger-ts/blob/main/src/services/socket/socket-middleware.ts)
+- [Redux Toolkit — Writing Middleware](https://redux.js.org/usage/writing-logic-thunks)
+
+# Зачем в RTK-слайсе назначать `uuid` через `prepare()`, если у ингредиента уже есть `_id`?
+@slug rtk-per-domain-slices
+@topic state
+@verified react@19.3
+@updated 2026-11
+
+> В конструкторе бургера один и тот же ингредиент (например, «Соус Spicy-X») можно добавить несколько раз — у всех копий будет одинаковый `_id` с сервера. Если использовать `_id` как React `key` или как идентификатор для удаления/перестановки, все копии станут неразличимы: удаление одной уберёт первую найденную, а не именно ту, на которую нажал пользователь. Решение — `prepare()` в `createSlice`, который на **каждый** `addIngredient` генерирует новый `nanoid()` и кладёт его в `uuid` — это клиентский идентификатор конкретного экземпляра в конструкторе, не совпадающий с `_id` самого ингредиента.
+
+```ts
+export const burgerConstructorSlice = createSlice({
+  name: 'burgerConstructor',
+  initialState: { bun: null, ingredients: [] as TConstructorIngredient[] },
+  reducers: {
+    addIngredient: {
+      reducer: (state, action: PayloadAction<TConstructorIngredient>) => {
+        state.ingredients.push(action.payload); // bun обрабатывается отдельной веткой
+      },
+      // prepare превращает "сырой" TIngredient в TConstructorIngredient с уникальным uuid
+      prepare: (ingredient: TIngredient) => ({ payload: { ...ingredient, uuid: nanoid() } }),
+    },
+    removeIngredient: (state, action: PayloadAction<string>) => {
+      state.ingredients = state.ingredients.filter((i) => i.uuid !== action.payload); // по uuid, не по _id
+    },
+  },
+  selectors: {
+    // мемоизированный селектор: пересчитывается только если bun/ingredients реально изменились
+    selectConstructorTotalPrice: createSelector(
+      [(s) => s.bun, (s) => s.ingredients],
+      (bun, ingredients) => (bun?.price ?? 0) * 2 + ingredients.reduce((sum, i) => sum + i.price, 0),
+    ),
+  },
+});
+```
+
+`prepare()` — именно то место, где это решение должно жить: оно гарантирует, что `uuid` появится ровно один раз, в момент создания действия, а не будет случайно пересоздаваться или теряться где-то в UI-коде. Селектор общей стоимости через `createSelector` — отдельное, но связанное решение: без мемоизации пересчёт суммы на каждом рендере любого подписанного компонента был бы дешёвой, но бессмысленной работой при каждом action, не меняющем ни `bun`, ни `ingredients`.
+
+### Подводные камни
+- Использовать `_id` ингредиента как React `key` в списке начинок конструктора — при двух одинаковых ингредиентах React не сможет различить два DOM-узла и будет путать их состояние/анимации при перестановке.
+- Генерировать `uuid` в компоненте перед диспатчем, а не в `prepare()` — переносит ответственность за уникальность идентификатора из единого места (слайса) в каждый вызывающий код, что легко забыть сделать правильно хотя бы один раз.
+- Писать селектор суммы как обычную функцию в компоненте без `createSelector` — работает, но пересчитывает сумму на каждый render независимо от того, что именно изменилось в сторе.
+
+### Что спросят дальше
+- Чем `prepare()` отличается от обработки той же логики прямо внутри `reducer`?
+- Почему `selectIngredientCounts` в этом слайсе возвращает `Record<string, number>`, а не просто массив?
+
+### Ссылки
+- [react-burger-ts — burger-constructor-slice.ts](https://github.com/kirillchistov/react-burger-ts/blob/main/src/services/burger-constructor/burger-constructor-slice.ts)
+- [Redux Toolkit — createSlice prepare callback](https://redux-toolkit.js.org/api/createSlice#customizing-generated-action-creators)
+
+# Почему drag-and-drop ингредиентов в конструктор бургера не делает сетевой запрос?
+@slug dnd-optimistic-ingredient-add
+@topic state
+@verified react@19.3
+@updated 2026-11
+
+> В конструкторе бургера перетаскивание ингредиента в зону сборки выглядит как мгновенное действие — потому что это буквально так: `useDrop` на `drop` диспатчит `addIngredient` в Redux-стор синхронно, без единого обращения к серверу. Сервер вообще не знает о текущем составе бургера, пока пользователь не нажмёт «Оформить заказ» — тогда на сервер уходит только финальный список `_id` ингредиентов одним запросом. Это не недосмотр, а осознанная граница: сборка бургера — чисто клиентское состояние, а заказ — единственная операция, которая требует сети.
+
+```tsx
+const [{ draggedType, isOver }, dropRef] = useDrop<TIngredient, void, TConstructorDropCollected>({
+  accept: [DND_TYPES.BUN, DND_TYPES.FILLING],
+  collect: (monitor) => ({
+    draggedType: monitor.getItemType(), // тип того, что тащат прямо сейчас
+    isOver: monitor.isOver(),
+  }),
+  drop: (item) => {
+    dispatch(addIngredient(item)); // синхронный диспатч, без await и без fetch
+  },
+});
+
+// Подсветка нужного плейсхолдера зависит от типа того, что тащат, а не от факта наведения вообще
+const isBunHovered = isOver && draggedType === DND_TYPES.BUN;
+const isFillingHovered = isOver && draggedType === DND_TYPES.FILLING;
+```
+
+Разделение на «DnD + локальный state» и «один финальный API-запрос» снимает целый класс проблем: не нужно откатывать оптимистичное обновление при ошибке сети на каждое перетаскивание, не нужна дебаунс-синхронизация состава с сервером при быстрой серии перетаскиваний, а `useDrop`/`collect` отвечают только за то, что действительно требует немедленной обратной связи — какой именно плейсхолдер подсветить под то, что сейчас держит пользователь.
+
+### Подводные камни
+- Пытаться синхронизировать состав конструктора с сервером на каждое `addIngredient` «на всякий случай» — добавляет сетевые ошибки и состояния загрузки туда, где они просто не нужны пользователю.
+- Подсвечивать один и тот же плейсхолдер независимо от `draggedType` — тогда зона для начинки будет подсвечиваться, даже когда пользователь тащит булку, что сбивает с толку.
+- Возвращать из `collect` объект с новой ссылкой при каждом рендере дроп-зоны без привязки к реальному изменению — провоцирует лишние ререндеры компонента на каждое движение мыши над зоной.
+
+### Что спросят дальше
+- Что изменится, если бы состав конструктора должен был сохраняться между перезагрузками страницы?
+- Как `useDrop`/`useDrag` из `react-dnd` взаимодействуют с клавиатурной (не мышиной) перестановкой ингредиентов?
+
+### Ссылки
+- [react-burger-ts — burger-constructor.tsx](https://github.com/kirillchistov/react-burger-ts/blob/main/src/components/burger-constructor/burger-constructor.tsx)
+- [react-dnd — useDrop](https://react-dnd.github.io/react-dnd/docs/api/use-drop)
