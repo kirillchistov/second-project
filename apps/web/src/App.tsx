@@ -1,5 +1,8 @@
 import { createBrowserRouter, RouterProvider } from 'react-router';
 import { Layout } from './components/Layout';
+import { LearnFrame, LearnPathsProvider, siteLearnPaths } from './demo/learnPaths';
+import { LessonPage } from './demo/LessonPage';
+import { PathPage } from './demo/PathPage';
 import { AboutPage } from './pages/AboutPage';
 import { AccountPage } from './pages/AccountPage';
 import { CatalogPage } from './pages/CatalogPage';
@@ -14,6 +17,19 @@ const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { path: '/', element: <HomePage /> },
+      {
+        path: '/learn',
+        element: (
+          <LearnPathsProvider value={siteLearnPaths}>
+            <LearnFrame />
+          </LearnPathsProvider>
+        ),
+        children: [
+          { index: true, element: <PathPage /> },
+          { path: 'review', element: <LessonPage review /> },
+          { path: ':id', element: <LessonPage /> },
+        ],
+      },
       { path: '/questions', element: <CatalogPage /> },
       { path: '/questions/:slug', element: <QuestionPage /> },
       { path: '/practice', element: <PracticePage /> },

@@ -17,12 +17,14 @@ import {
 import { burst, celebrate } from '../lib/confetti';
 import { feedbackLine } from './copy';
 import { CONTENT, ITEMS, lessonById } from './content';
+import { useLearnPaths } from './learnPaths';
 import { LessonItemView } from './exercises/LessonItemView';
 import { useNow } from './now';
 import { getProgress, progressPersistFailed, saveLesson } from './progress';
 import { useDemoProgress } from './useProgress';
 
 export function LessonPage({ review = false }: { review?: boolean }) {
+  const paths = useLearnPaths();
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const now = useNow();
@@ -43,11 +45,12 @@ export function LessonPage({ review = false }: { review?: boolean }) {
   const [state, dispatch] = useReducer(sessionReducer, items, startSession);
   const savedRef = useRef(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const brand = paths.skipLanding ? 'React Refresher' : 'React Refresher, демо';
   const title = !lesson && !review
-    ? 'Урок не найден — React Refresher, демо'
+    ? `Урок не найден — ${brand}`
     : review || items.length === 0
-      ? 'Повторение — React Refresher, демо'
-      : `Урок ${lesson?.index ?? ''} — React Refresher, демо`;
+      ? `Повторение — ${brand}`
+      : `Урок ${lesson?.index ?? ''} — ${brand}`;
 
   useEffect(() => {
     document.title = title;
@@ -66,7 +69,7 @@ export function LessonPage({ review = false }: { review?: boolean }) {
     return (
       <div className="lesson-end">
         <h1>Урок не найден</h1>
-        <Link to="/" className="btn btn--primary">На путь</Link>
+        <Link to={paths.home} className="btn btn--primary">На путь</Link>
       </div>
     );
   }
@@ -76,7 +79,7 @@ export function LessonPage({ review = false }: { review?: boolean }) {
       <div className="lesson-end">
         <h1>Повторять пока нечего</h1>
         <p>Пройди урок на пути — навыки появятся здесь, когда придёт время их освежить.</p>
-        <Link to="/" className="btn btn--primary">На путь</Link>
+        <Link to={paths.home} className="btn btn--primary">На путь</Link>
       </div>
     );
   }
@@ -98,7 +101,7 @@ export function LessonPage({ review = false }: { review?: boolean }) {
         {progressPersistFailed() && (
           <p className="lesson-end__warn">Браузер не дал записать прогресс. В этом сеансе он есть, после закрытия вкладки может пропасть.</p>
         )}
-        <button type="button" className="btn btn--primary" onClick={() => navigate('/')}>Готово</button>
+        <button type="button" className="btn btn--primary" onClick={() => navigate(paths.home)}>Готово</button>
       </div>
     );
   }
@@ -111,7 +114,7 @@ export function LessonPage({ review = false }: { review?: boolean }) {
   return (
     <div className="lesson">
       <header className="lesson__bar">
-        <button type="button" className="icon-btn" aria-label="Закрыть урок" onClick={() => navigate('/')}>
+        <button type="button" className="icon-btn" aria-label="Закрыть урок" onClick={() => navigate(paths.home)}>
           ×
         </button>
         <div className="progress" aria-label="Прогресс урока">
@@ -139,6 +142,11 @@ export function LessonPage({ review = false }: { review?: boolean }) {
           <p className="lesson__feedback-title">{feedbackLine(state.last.correct, state.combo, state.position)}</p>
           {!state.last.correct && <p className="lesson__feedback-answer">Правильно: {correctAnswerText(graded)}</p>}
           <p>{graded.explanation}</p>
+          {item?.kind === 'card' && paths.question && (
+            <p className="task__theory">
+              <Link to={paths.question(item.question.slug)}>Полный разбор</Link>
+            </p>
+          )}
           <button type="button" className="btn btn--primary demo-submit" onClick={() => dispatch({ type: 'continue' })}>
             Дальше
           </button>

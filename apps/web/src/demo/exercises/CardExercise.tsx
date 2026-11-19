@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 import type { Question } from '@rr/content';
 import { checkAnswer, type Outcome, type QuizExercise } from '@rr/core';
 import { Inline } from '../../components/Markdown';
+import { useLearnPaths } from '../learnPaths';
 import { useShuffledOrder } from './useShuffledOrder';
 import { ChoiceButton, Prompt } from './ui';
 
@@ -103,6 +105,7 @@ function RecallCard({ question, onAnswer }: { question: Question; onAnswer: (out
           </div>
         )}
       </div>
+      <FullReview slug={question.slug} />
       <p className="task__hint">Насколько твой ответ совпал с эталоном?</p>
       <div className="grades">
         <button type="button" className="btn demo-grade demo-grade--again" onClick={() => onAnswer('again', false)}>Не вспомнил</button>
@@ -110,5 +113,16 @@ function RecallCard({ question, onAnswer }: { question: Question; onAnswer: (out
         <button type="button" className="btn demo-grade demo-grade--good" onClick={() => onAnswer('good', false)}>Знаю</button>
       </div>
     </div>
+  );
+}
+
+/** Ссылка на статью каталога. В демо Pages каталога нет, поэтому ссылка не рисуется. */
+function FullReview({ slug }: { slug: string }) {
+  const { question } = useLearnPaths();
+  if (!question) return null;
+  return (
+    <p className="task__theory">
+      <Link to={question(slug)}>Полный разбор</Link>
+    </p>
   );
 }

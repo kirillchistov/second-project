@@ -48,22 +48,19 @@ export default defineConfig(({ mode }) => {
               // Вопросы — в обеих сборках, двумя частями: так у банка есть запас до порога в 500 КБ
               { name: 'questions-junior-middle', test: /packages[\\/]content[\\/]questions[\\/](junior|middle)-/ },
               { name: 'questions-senior', test: /packages[\\/]content[\\/]questions[\\/]/ },
-              // В демо банк больше 1,5 МБ. Вопросы и упражнения кешируются отдельно и делятся
-              // на части примерно по 350 КБ, чтобы ни один файл не перешагнул порог в 500 КБ.
+              // Банк упражнений больше 1,5 МБ и теперь есть и на сайте, и в демо.
+              // Вопросы и упражнения кешируются отдельно и делятся на части примерно по 350 КБ,
+              // чтобы ни один файл не перешагнул порог в 500 КБ.
               // Новую тему добавляйте в одну из групп упражнений (иначе она попадёт в последнюю).
-              ...(pages
-                ? [
-                    {
-                      name: 'exercises-core',
-                      test: /packages[\\/]content[\\/]exercises[\\/](basics|hooks|rendering|state)\.yaml/,
-                    },
-                    {
-                      name: 'exercises-modern',
-                      test: /packages[\\/]content[\\/]exercises[\\/](modern|server|performance|typescript|testing)\.yaml/,
-                    },
-                    { name: 'exercises-rest', test: /packages[\\/]content[\\/]exercises[\\/]/ },
-                  ]
-                : []),
+              {
+                name: 'exercises-core',
+                test: /packages[\\/]content[\\/]exercises[\\/](basics|hooks|rendering|state)\.yaml/,
+              },
+              {
+                name: 'exercises-modern',
+                test: /packages[\\/]content[\\/]exercises[\\/](modern|server|performance|typescript|testing)\.yaml/,
+              },
+              { name: 'exercises-rest', test: /packages[\\/]content[\\/]exercises[\\/]/ },
               { name: 'content', test: /packages[\\/]content[\\/]/ },
             ],
           },

@@ -27,6 +27,7 @@ function IconAccount() {
 }
 
 const NAV = [
+  { to: '/learn', label: 'Путь' },
   { to: '/questions', label: 'Вопросы' },
   { to: '/practice', label: 'Тренировка' },
   { to: '/interview', label: 'Собес' },

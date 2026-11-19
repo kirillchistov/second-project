@@ -13,6 +13,7 @@ import {
 } from '@rr/core';
 import { CONTENT, PATH, topicTitle } from './content';
 import { Landing } from './Landing';
+import { useLearnPaths } from './learnPaths';
 import { useNow } from './now';
 import { resetProgress } from './progress';
 import { useDemoProgress } from './useProgress';
@@ -29,10 +30,11 @@ function landingSkipped(): boolean {
 
 /** Новичку — лендинг; как только появился хоть какой-то прогресс, сразу путь. */
 export function PathPage() {
+  const paths = useLearnPaths();
   const progress = useDemoProgress();
   const [skipped, setSkipped] = useState(landingSkipped);
   const fresh = Object.keys(progress.cards).length === 0 && Object.keys(progress.activity).length === 0;
-  if (fresh && !skipped) {
+  if (!paths.skipLanding && fresh && !skipped) {
     return (
       <>
         <title>React Refresher — тренажёр по React, демо</title>
@@ -54,6 +56,7 @@ export function PathPage() {
 }
 
 function Path() {
+  const paths = useLearnPaths();
   const progress = useDemoProgress();
   const now = useNow();
   const today = localDay(now);
@@ -65,7 +68,7 @@ function Path() {
 
   return (
     <>
-      <title>Путь — React Refresher, демо</title>
+      <title>{paths.skipLanding ? 'Путь — React Refresher' : 'Путь — React Refresher, демо'}</title>
       <header className="page-header">
         <h1>Путь</h1>
         <p className="page-header__lead">
@@ -87,7 +90,7 @@ function Path() {
             <div className="progress__bar" style={{ width: `${Math.min(100, (xpToday / DAILY_GOAL_XP) * 100)}%` }} />
           </div>
         </div>
-        <Link to="/review" className="btn btn--secondary">
+        <Link to={paths.review} className="btn btn--secondary">
           Повторение{reviewCount > 0 ? ` · ${reviewCount}` : ''}
         </Link>
       </div>
@@ -142,6 +145,7 @@ function Unit({ unit, hasSkill }: { unit: PathUnit; hasSkill: (skill: string) =>
 }
 
 function Commit({ lesson, status, last }: { lesson: PathLesson; status: LessonStatus; last: boolean }) {
+  const paths = useLearnPaths();
   const locked = status === 'locked';
   const body = (
     <>
@@ -162,7 +166,7 @@ function Commit({ lesson, status, last }: { lesson: PathLesson; status: LessonSt
       {locked ? (
         <div className="commit__link" aria-disabled="true">{body}</div>
       ) : (
-        <Link to={`/lesson/${lesson.id}`} className="commit__link">{body}</Link>
+        <Link to={paths.lesson(lesson.id)} className="commit__link">{body}</Link>
       )}
     </li>
   );

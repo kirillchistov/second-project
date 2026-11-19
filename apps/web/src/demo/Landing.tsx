@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { Link } from 'react-router';
 import { PATH } from './content';
+import { useLearnPaths } from './learnPaths';
 
 /**
  * Лендинг для тех, у кого ещё нет прогресса: что это за тренажёр и почему он работает.
@@ -135,7 +136,8 @@ function plural(n: number, one: string, few: string, many: string): string {
 }
 
 export function Landing({ onSkip }: { onSkip: () => void }) {
-  const start = `/lesson/${PATH[0].lessons[0].id}`;
+  const paths = useLearnPaths();
+  const start = paths.lesson(PATH[0].lessons[0].id);
   const lessons = PATH.reduce((sum, unit) => sum + unit.lessons.length, 0);
 
   return (
