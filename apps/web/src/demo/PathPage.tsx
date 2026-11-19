@@ -17,6 +17,8 @@ import { useLearnPaths } from './learnPaths';
 import { useNow } from './now';
 import { resetProgress } from './progress';
 import { useDemoProgress } from './useProgress';
+import { syncProgress } from '../lib/syncProgress';
+import { useAccount } from '../lib/session';
 
 const SKIP_LANDING = 'rr-demo-skip-landing';
 
@@ -57,6 +59,7 @@ export function PathPage() {
 
 function Path() {
   const paths = useLearnPaths();
+  const account = useAccount();
   const progress = useDemoProgress();
   const now = useNow();
   const today = localDay(now);
@@ -73,7 +76,12 @@ function Path() {
         <h1>Путь</h1>
         <p className="page-header__lead">
           Уроки и упражнения проверяются в браузере. Голосовой проверки и ИИ здесь нет: ответ выбирается, собирается
-          или сверяется с эталоном. Прогресс, стрик и повторения хранятся в localStorage этого браузера.
+          или сверяется с эталоном.{' '}
+          {paths.skipLanding
+            ? account.status === 'signed-in'
+              ? 'Прогоны уроков уходят в аккаунт и подхватываются приложением.'
+              : 'Прогресс хранится в этом браузере. Войдите в аккаунт — и те же прогоны появятся в приложении.'
+            : 'Прогресс, стрик и повторения хранятся в этом браузере.'}
         </p>
       </header>
 
@@ -107,7 +115,13 @@ function Path() {
           type="button"
           className="link-btn"
           onClick={() => {
-            if (window.confirm('Сбросить прогресс в этом браузере? Уроки, стрик и повторения удалятся.')) resetProgress();
+            const signedIn = account.status === 'signed-in';
+            const message = signedIn
+              ? 'Очистить прогресс в этом браузере? Прогоны в аккаунте останутся и подтянутся снова.'
+              : 'Сбросить прогресс в этом браузере? Уроки, стрик и повторения удалятся.';
+            if (!window.confirm(message)) return;
+            resetProgress();
+            if (signedIn) void syncProgress();
           }}
         >
           Сбросить прогресс этого браузера

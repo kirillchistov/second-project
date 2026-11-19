@@ -21,6 +21,7 @@ import { useLearnPaths } from './learnPaths';
 import { LessonItemView } from './exercises/LessonItemView';
 import { useNow } from './now';
 import { getProgress, progressPersistFailed, saveLesson } from './progress';
+import { syncProgress } from '../lib/syncProgress';
 import { useDemoProgress } from './useProgress';
 
 export function LessonPage({ review = false }: { review?: boolean }) {
@@ -60,6 +61,7 @@ export function LessonPage({ review = false }: { review?: boolean }) {
     if (savedRef.current || state.phase !== 'done' || items.length === 0) return;
     savedRef.current = true;
     saveLesson(state, lesson?.id ?? null, new Date(), (itemId) => ITEMS.get(itemId)?.skill);
+    void syncProgress();
     // Идеальный коммит — салют; повторение и урок с ошибками празднуем скромнее
     if (!review && summarize(state).perfect) celebrate();
     else burst();

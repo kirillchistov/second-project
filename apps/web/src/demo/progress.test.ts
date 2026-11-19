@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
-import { applySession, emptyProgress, type DemoProgress } from './progress';
-import type { SessionState } from '@rr/core';
+import { applySession, emptyProgress, getProgress, importRuns, resetProgress, saveLesson, unsyncedRuns, type DemoProgress } from './progress';
+import type { LessonRun, SessionState } from '@rr/core';
 
 const now = new Date(2026, 9, 12, 15, 0, 0);
 
@@ -65,4 +65,41 @@ test('неизвестный элемент не двигает карточки
   expect(progress.cards).toEqual({});
   expect(progress.backlog).toEqual([]);
   expect(progress.lessonsDone['core-1']).toBe(1);
+});
+
+test('сохранение урока пишет один прогон, повторный вызов его не дублирует', () => {
+  resetProgress();
+  const saved = saveLesson(
+    session({ a: { first: 'good', attempts: 1, solved: true } }),
+    'core-1',
+    now,
+    skillOf,
+  );
+  expect(saved.xp).toBe(25);
+  expect(getProgress().lessonsDone['core-1']).toBe(1);
+  expect(getProgress().activity['2026-10-12']).toBe(25);
+  expect(unsyncedRuns()).toHaveLength(1);
+
+  saveLesson(session({ a: { first: 'good', attempts: 1, solved: true } }), 'core-1', now, skillOf);
+  expect(unsyncedRuns()).toHaveLength(1);
+  resetProgress();
+});
+
+test('прогон с сервера дополняет историю и помечает свой прогон доставленным', () => {
+  resetProgress();
+  saveLesson(session({ a: { first: 'good', attempts: 1, solved: true } }), 'core-1', now, skillOf);
+  const local = unsyncedRuns()[0];
+  const remote: LessonRun = {
+    id: 'remote-run-1',
+    lessonId: 'core-2',
+    day: '2026-10-11',
+    completedAt: '2026-10-11T10:00:00.000Z',
+    results: [{ itemId: 'b', first: 'good', attempts: 1 }],
+  };
+  expect(importRuns([local, remote])).toBe(1);
+  expect(unsyncedRuns()).toEqual([]);
+  expect(getProgress().lessonsDone['core-1']).toBe(1);
+  expect(getProgress().lessonsDone['core-2']).toBe(1);
+  expect(getProgress().activity['2026-10-11']).toBe(25);
+  resetProgress();
 });

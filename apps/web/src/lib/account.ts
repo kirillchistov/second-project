@@ -1,5 +1,6 @@
 import { ApiError, request } from './api';
 import { setGuest, setSignedIn, type AccountUser } from './session';
+import { syncProgress } from './syncProgress';
 
 /** Регистрация, вход, выход и проверка сессии — тот же аккаунт, что и в мобильном приложении. */
 
@@ -7,6 +8,7 @@ export async function loadSession(): Promise<void> {
   try {
     const { user } = await request<{ user: AccountUser }>('GET', '/v1/me');
     setSignedIn(user);
+    void syncProgress();
   } catch {
     setGuest();
   }
@@ -15,11 +17,13 @@ export async function loadSession(): Promise<void> {
 export async function signUp(input: { email: string; password: string; nickname: string }): Promise<void> {
   const { user } = await request<{ user: AccountUser }>('POST', '/v1/auth/signup', input);
   setSignedIn(user);
+  void syncProgress();
 }
 
 export async function signIn(input: { email: string; password: string }): Promise<void> {
   const { user } = await request<{ user: AccountUser }>('POST', '/v1/auth/login', input);
   setSignedIn(user);
+  void syncProgress();
 }
 
 export async function signOut(): Promise<void> {
