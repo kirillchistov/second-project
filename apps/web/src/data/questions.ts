@@ -1,13 +1,7 @@
-import { buildQuestions, type Level, type Question, type TopicId } from '@rr/content';
+import type { Level, Question, TopicId } from '@rr/content';
+import { QUESTIONS } from './questions.react.ts';
 
-// Файлы называются `<level>-<n>.md`; порядок и нумерацию задаёт buildQuestions.
-const files = import.meta.glob<string>('../../../../packages/content/questions/*.md', {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-});
-
-export const QUESTIONS: Question[] = buildQuestions(files);
+export { QUESTIONS };
 export const questionBySlug = new Map(QUESTIONS.map((q) => [q.slug, q]));
 
 export function filterQuestions(opts: {

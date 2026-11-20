@@ -14,6 +14,7 @@ import {
   summarize,
   type LessonItem,
 } from '@rr/core';
+import { SITE_NAME } from '../catalog/site';
 import { burst, celebrate } from '../lib/confetti';
 import { feedbackLine } from './copy';
 import { CONTENT, ITEMS, lessonById } from './content';
@@ -46,7 +47,7 @@ export function LessonPage({ review = false }: { review?: boolean }) {
   const [state, dispatch] = useReducer(sessionReducer, items, startSession);
   const savedRef = useRef(false);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const brand = paths.skipLanding ? 'React Refresher' : 'React Refresher, демо';
+  const brand = paths.skipLanding ? SITE_NAME : 'React Refresher, демо';
   const title = !lesson && !review
     ? `Урок не найден — ${brand}`
     : review || items.length === 0

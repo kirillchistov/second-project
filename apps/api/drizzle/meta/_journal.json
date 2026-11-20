@@ -15,6 +15,13 @@
       "when": 1792090270662,
       "tag": "0001_forum",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795000000000,
+      "tag": "0002_run_catalog",
+      "breakpoints": true
     }
   ]
 }

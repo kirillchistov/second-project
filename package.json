@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "npm run dev -w @rr/web --",
     "dev:pages": "npm run dev:pages -w @rr/web --",
+    "dev:product": "npm run dev:product -w @rr/web --",
     "build": "npm run bundle -w @rr/content && tsc -b && npm run build -w @rr/web",
     "build:pages": "npm run bundle -w @rr/content && tsc -b && npm run build:pages -w @rr/web",
     "bundle:content": "npm run bundle -w @rr/content",

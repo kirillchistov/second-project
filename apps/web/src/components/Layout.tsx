@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, ScrollRestoration, useLocation } from 'react-router';
+import { CATALOG_ID, INTERVIEW, SITE_NAME } from '../catalog/site';
 import { loadSession } from '../lib/account';
 import { onOpenSearch } from '../lib/search';
 import { useAccount } from '../lib/session';
@@ -30,7 +31,7 @@ const NAV = [
   { to: '/learn', label: 'Путь' },
   { to: '/questions', label: 'Вопросы' },
   { to: '/practice', label: 'Тренировка' },
-  { to: '/interview', label: 'Собес' },
+  ...(INTERVIEW ? [{ to: '/interview', label: 'Собес' }] : []),
   { to: '/about', label: 'О проекте' },
 ];
 
@@ -73,9 +74,9 @@ export function Layout() {
       <a className="skip-link" href="#main">Перейти к содержимому</a>
       <header className="topbar">
         <div className="topbar__inner">
-          <Link to="/" className="brand" aria-label="React Refresher — на главную">
+          <Link to="/" className="brand" aria-label={`${SITE_NAME} — на главную`}>
             <Logo />
-            <span className="brand__name">React Refresher</span>
+            <span className="brand__name">{SITE_NAME}</span>
             <span className="brand__version">2026</span>
           </Link>
 
@@ -118,10 +119,16 @@ export function Layout() {
 
       <footer className="footer">
         <div className="footer__inner">
-          <span>React Refresher · 224 вопроса для собеседования по React</span>
+          <span>{CATALOG_ID === 'react' ? `${SITE_NAME} · 224 вопроса для собеседования по React` : `${SITE_NAME} · шаблоны в работу`}</span>
           <span>
-            Ответы опираются на <a href="https://react.dev" target="_blank" rel="noreferrer">react.dev</a>. Проект
-            не связан с Meta и командой React.
+            {CATALOG_ID === 'react' ? (
+              <>
+                Ответы опираются на <a href="https://react.dev" target="_blank" rel="noreferrer">react.dev</a>. Проект
+                не связан с Meta и командой React.
+              </>
+            ) : (
+              'Голос, оценка свободного ответа и проверка кода в этот тренажёр не входят.'
+            )}
           </span>
         </div>
       </footer>

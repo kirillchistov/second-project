@@ -2,7 +2,7 @@ import { Link, useParams } from 'react-router';
 import { LevelBadge, TopicTag } from '../components/Badges';
 import { IconAlert, IconArrowLeft, IconArrowRight, IconChat, IconHistory, IconLink } from '../components/Icons';
 import { Inline, Markdown } from '../components/Markdown';
-import { levelTitle, topicById } from '@rr/content';
+import { CATALOG_ID, levelTitle, SITE_NAME, topicById } from '../catalog/site';
 import { QUESTIONS, questionBySlug } from '../data/questions';
 import { NotFoundPage } from './NotFoundPage';
 
@@ -38,7 +38,7 @@ export function QuestionPage() {
       </aside>
 
       <article className="docs__content article">
-        <title>{`${question.number}. ${question.title} — React Refresher`}</title>
+        <title>{`${question.number}. ${question.title} — ${SITE_NAME}`}</title>
         <nav className="breadcrumbs" aria-label="Хлебные крошки">
           <Link to="/questions">Вопросы</Link>
           <span aria-hidden="true">/</span>
@@ -72,7 +72,7 @@ export function QuestionPage() {
 
         {question.followUps.length > 0 && (
           <section className="callout callout--follow" aria-labelledby="follow-ups">
-            <h2 id="follow-ups" className="callout__title"><IconChat /> Что спросят дальше</h2>
+            <h2 id="follow-ups" className="callout__title"><IconChat /> {CATALOG_ID === 'react' ? 'Что спросят дальше' : 'Что проверить дальше'}</h2>
             <ul>{question.followUps.map((f, i) => <li key={i}><Inline text={f} /></li>)}</ul>
           </section>
         )}

@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
-import { levelTitle, topicById, type Level, type TopicId } from '@rr/content';
+import type { Level, TopicId } from '@rr/content';
+import { levelTitle, topicById } from '../catalog/site';
 
 export function LevelBadge({ level }: { level: Level }) {
   return <span className={`badge badge--${level}`}>{levelTitle[level]}</span>;

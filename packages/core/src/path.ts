@@ -1,4 +1,4 @@
-import type { Exercise, Level, Question, UnitDef } from '@rr/content';
+import type { Exercise, Question, UnitDef } from '@rr/content';
 import { isDue, retrievability, type StoredCard } from './srs.ts';
 
 export type QuizExercise = Extract<Exercise, { type: 'quiz' }>;
@@ -13,10 +13,12 @@ export type LessonItem =
   | { kind: 'card'; id: string; skill: string; question: Question; quiz?: QuizExercise };
 
 export interface PathLesson {
-  /** `<unit>-<n>`, n с 1 */
+  /** `<unit>-<n>` или `<prefix>-<unit>-<n>`, n с 1. Префикс задаёт каталог. */
   id: string;
   unitId: string;
   index: number;
+  /** Пусто у React (`q:slug`). У другого каталога навыки не пересекаются: `product:q:slug`. */
+  skillPrefix: string;
   /** Короткий «хеш коммита» — урок на пути выглядит как коммит в ветке */
   hash: string;
   questions: Question[];
@@ -34,16 +36,23 @@ export interface PathContent {
   units: UnitDef[];
   questions: Question[];
   exercises: Exercise[];
+  /**
+   * Порядок уровней. Либо id по возрастанию сложности, либо объекты `{ id }` из бандла.
+   * По умолчанию шкала React: junior, middle, senior.
+   */
+  levels?: readonly (string | { id: string })[];
+  /** Префикс id урока и навыка. Пустой у React, чтобы уроки остались `core-1`. */
+  lessonPrefix?: string;
 }
 
 /** Сколько вопросов покрывает один урок: 3 вопроса + их упражнения ≈ 3–5 минут. */
 export const QUESTIONS_PER_LESSON = 3;
 
-const LEVEL_RANK: Record<Level, number> = { junior: 0, middle: 1, senior: 2 };
+const REACT_LEVELS = ['junior', 'middle', 'senior'];
 
 /** Навык карточки вопроса. У упражнений навык свой, из поля `skill`. */
-export function cardSkill(question: Question): string {
-  return `q:${question.slug}`;
+export function cardSkill(question: Question, skillPrefix = ''): string {
+  return skillPrefix ? `${skillPrefix}:q:${question.slug}` : `q:${question.slug}`;
 }
 
 function shortHash(input: string): string {
@@ -72,20 +81,28 @@ export function buildPath(content: PathContent): PathUnit[] {
     exercisesByQuestion.set(ex.question, [...(exercisesByQuestion.get(ex.question) ?? []), ex]);
   }
 
+  const levelOrder = (content.levels ?? REACT_LEVELS).map((level) => (typeof level === 'string' ? level : level.id));
+  const rank = (level: string) => {
+    const index = levelOrder.indexOf(level);
+    return index === -1 ? levelOrder.length : index;
+  };
+  const lessonPrefix = content.lessonPrefix ?? '';
+
   return content.units.map((unit) => {
     const questions = content.questions
       .filter((q) => unit.topics.includes(q.topic))
-      .sort((a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level] || a.number - b.number);
+      .sort((a, b) => rank(a.level) - rank(b.level) || a.number - b.number);
 
     const lessons: PathLesson[] = [];
     for (let i = 0; i < questions.length; i += QUESTIONS_PER_LESSON) {
       const chunk = questions.slice(i, i + QUESTIONS_PER_LESSON);
       const index = lessons.length + 1;
-      const id = `${unit.id}-${index}`;
+      const id = lessonPrefix ? `${lessonPrefix}-${unit.id}-${index}` : `${unit.id}-${index}`;
       lessons.push({
         id,
         unitId: unit.id,
         index,
+        skillPrefix: lessonPrefix,
         hash: shortHash(id),
         questions: chunk,
         exercises: chunk.flatMap((q) => exercisesByQuestion.get(q.slug) ?? []),
@@ -104,7 +121,7 @@ export type LessonStatus = 'done' | 'next' | 'locked';
  * и сохранённый id `hooks-3` начал бы указывать на другие вопросы.
  */
 export function isLessonDone(lesson: PathLesson, hasSkill: (skill: string) => boolean): boolean {
-  return lesson.questions.every((q) => hasSkill(cardSkill(q)));
+  return lesson.questions.every((q) => hasSkill(cardSkill(q, lesson.skillPrefix)));
 }
 
 /** Внутри юнита уроки открываются по порядку; юниты открыты все — это тренажёр для повторения, а не первый курс. */
@@ -118,8 +135,9 @@ export function exerciseItem(exercise: Exercise): LessonItem {
   return { kind: 'exercise', id: `ex:${exercise.id}`, skill: exercise.skill, exercise };
 }
 
-export function cardItem(question: Question, quiz?: QuizExercise): LessonItem {
-  return { kind: 'card', id: `q:${question.slug}`, skill: cardSkill(question), question, quiz };
+export function cardItem(question: Question, quiz?: QuizExercise, skillPrefix = ''): LessonItem {
+  const skill = cardSkill(question, skillPrefix);
+  return { kind: 'card', id: skill, skill, question, quiz };
 }
 
 /**
@@ -129,16 +147,17 @@ export function cardItem(question: Question, quiz?: QuizExercise): LessonItem {
 export function lessonItems(lesson: PathLesson): LessonItem[] {
   return lesson.questions.flatMap((q) => [
     ...lesson.exercises.filter((ex) => ex.question === q.slug).map(exerciseItem),
-    cardItem(q, lesson.quizzes.get(q.slug)),
+    cardItem(q, lesson.quizzes.get(q.slug), lesson.skillPrefix),
   ]);
 }
 
 /** Все элементы, которые могут встретиться в уроках, по id — чтобы восстановить их из БД. */
 export function itemsById(content: PathContent): Map<string, LessonItem> {
   const quizzes = quizzesByQuestion(content.exercises);
+  const prefix = content.lessonPrefix ?? '';
   const items = [
     ...content.exercises.filter((ex) => ex.type !== 'quiz').map(exerciseItem),
-    ...content.questions.map((q) => cardItem(q, quizzes.get(q.slug))),
+    ...content.questions.map((q) => cardItem(q, quizzes.get(q.slug), prefix)),
   ];
   return new Map(items.map((item) => [item.id, item]));
 }

@@ -1,4 +1,5 @@
 import { foldRuns, lessonXp, localDay, review, runFromSession, summarize, type LessonRun, type SessionState, type StoredCard } from '@rr/core';
+import { CATALOG_ID } from '../catalog/site';
 import { ITEMS } from './content';
 
 /** Прогресс демо: всё, что в мобильном приложении лежит в SQLite, здесь живёт в localStorage. */
@@ -61,8 +62,8 @@ export function applySession(
   };
 }
 
-const LEGACY_KEY = 'rr-demo-progress';
-const RUNS_KEY = 'rr-path-runs';
+const LEGACY_KEY = CATALOG_ID === 'react' ? 'rr-demo-progress' : `rr-demo-progress-${CATALOG_ID}`;
+const RUNS_KEY = CATALOG_ID === 'react' ? 'rr-path-runs' : `rr-path-runs-${CATALOG_ID}`;
 
 interface RunStore {
   runs: LessonRun[];
@@ -238,12 +239,15 @@ export function saveLesson(
     return saved;
   }
 
-  const run = runFromSession(session, {
-    id: crypto.randomUUID(),
-    lessonId,
-    day: localDay(now),
-    completedAt: now.toISOString(),
-  });
+  const run = {
+    ...runFromSession(session, {
+      id: crypto.randomUUID(),
+      lessonId,
+      day: localDay(now),
+      completedAt: now.toISOString(),
+    }),
+    catalog: CATALOG_ID,
+  };
   store = { ...store, runs: [...store.runs, run] };
   // Снимок копится поверх уже пройденного. Полная пересборка из прогонов — когда с сервера приходит чужая история.
   commit(applySession(snapshot, session, lessonId, now, skillOf).progress);

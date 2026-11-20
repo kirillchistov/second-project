@@ -3,7 +3,8 @@ import { Link } from 'react-router';
 import { LevelBadge, TopicTag } from '../components/Badges';
 import { IconChat, IconClock } from '../components/Icons';
 import { Inline } from '../components/Markdown';
-import { LEVELS, topicById, type Level, type Question, type TopicId } from '@rr/content';
+import type { Level, Question, TopicId } from '@rr/content';
+import { LEVELS, topicById } from '../catalog/site';
 import {
   formatDuration,
   INTERVIEW_FORMATS,

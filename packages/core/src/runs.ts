@@ -26,6 +26,8 @@ export interface LessonRun {
   /** ISO-время завершения — порядок применения прогонов */
   completedAt: string;
   results: RunResult[];
+  /** Каталог, которому принадлежит прогон. Нет поля — это React, так шлёт текущее приложение. */
+  catalog?: string;
 }
 
 export function runFromSession(

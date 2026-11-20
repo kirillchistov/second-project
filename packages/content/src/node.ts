@@ -27,8 +27,8 @@ function readDir(dir: string, ext: string): [name: string, raw: string][] {
 }
 
 /** Загрузка вопросов в Node (скрипты, тесты, сборка бандла для мобильного приложения). */
-export function loadQuestions(dir = join(CONTENT_ROOT, 'questions')): Question[] {
-  return buildQuestions(Object.fromEntries(readDir(dir, '.md')));
+export function loadQuestions(dir = join(CONTENT_ROOT, 'questions'), levelOrder?: readonly string[]): Question[] {
+  return buildQuestions(Object.fromEntries(readDir(dir, '.md')), levelOrder);
 }
 
 export function loadExercises(dir = join(CONTENT_ROOT, 'exercises')): Exercise[] {

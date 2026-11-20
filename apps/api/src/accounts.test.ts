@@ -184,7 +184,7 @@ describe('синхронизация прогонов', () => {
       expect(await res.json()).toEqual({ accepted: ['run-00000001'] });
     }
     const { runs } = (await (await call(app, 'GET', '/v1/progress/runs', { headers: auth })).json()) as { runs: LessonRun[] };
-    expect(runs).toEqual([run]);
+    expect(runs).toEqual([{ ...run, catalog: 'react' }]);
 
     const board = (await (await call(app, 'GET', '/v1/leaderboard?today=2026-10-15', { headers: auth })).json()) as {
       entries: { xp: number; me: boolean }[];
@@ -237,6 +237,31 @@ describe('лидерборд', () => {
       [a.user.nickname, true],
     ]);
     expect(JSON.stringify(res)).not.toMatch(/@/); // email не утекает
+  });
+
+  test('лига React не считает прогоны другого каталога', async () => {
+    const app = makeApp();
+    const a = await signupMobile(app);
+    const reactRun = makeRun('league-react-1', '2026-10-15', ['good', 'good']);
+    const productRun = { ...makeRun('league-product-1', '2026-10-15', ['good']), catalog: 'product', lessonId: 'product-discovery-1' };
+    await call(app, 'POST', '/v1/progress/runs', { body: { runs: [reactRun, productRun] }, headers: a.auth });
+
+    const reactBoard = (await (await call(app, 'GET', '/v1/leaderboard?today=2026-10-15', { headers: a.auth })).json()) as {
+      entries: { xp: number; me: boolean }[];
+    };
+    expect(reactBoard.entries.find((e) => e.me)?.xp).toBe(runXp(reactRun));
+
+    const productBoard = (await (await call(app, 'GET', '/v1/leaderboard?today=2026-10-15&catalog=product', { headers: a.auth })).json()) as {
+      entries: { xp: number; me: boolean }[];
+    };
+    expect(productBoard.entries.find((e) => e.me)?.xp).toBe(runXp(productRun));
+
+    const reactHistory = (await (await call(app, 'GET', '/v1/progress/runs', { headers: a.auth })).json()) as { runs: { id: string }[] };
+    expect(reactHistory.runs.map((run) => run.id)).toEqual(['league-react-1']);
+    const productHistory = (await (await call(app, 'GET', '/v1/progress/runs?catalog=product', { headers: a.auth })).json()) as {
+      runs: { id: string }[];
+    };
+    expect(productHistory.runs.map((run) => run.id)).toEqual(['league-product-1']);
   });
 });
 

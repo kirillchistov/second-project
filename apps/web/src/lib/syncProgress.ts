@@ -1,3 +1,4 @@
+import { CATALOG_ID } from '../catalog/site';
 import { ApiError, request } from './api';
 import { adoptOwner, importRuns, markRunsSynced, progressOwner, unsyncedRuns } from '../demo/progress';
 import { setGuest, getAccount } from './session';
@@ -20,12 +21,14 @@ export function syncProgress(): Promise<number> {
       for (;;) {
         const batch = unsyncedRuns().slice(0, 200);
         if (batch.length === 0) break;
-        const { accepted } = await request<{ accepted: string[] }>('POST', '/v1/progress/runs', { runs: batch });
+        const { accepted } = await request<{ accepted: string[] }>('POST', '/v1/progress/runs', {
+          runs: batch.map((run) => ({ ...run, catalog: run.catalog ?? CATALOG_ID })),
+        });
         markRunsSynced(accepted);
         if (accepted.length < batch.length) break;
       }
-      const { runs } = await request<{ runs: LessonRun[] }>('GET', '/v1/progress/runs');
-      const imported = importRuns(runs);
+      const { runs } = await request<{ runs: LessonRun[] }>('GET', `/v1/progress/runs?catalog=${CATALOG_ID}`);
+      const imported = importRuns(runs.filter((run) => (run.catalog ?? 'react') === CATALOG_ID));
       if (progressOwner() !== userId) adoptOwner(userId);
       return imported;
     } catch (error) {

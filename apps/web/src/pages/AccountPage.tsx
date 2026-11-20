@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
+import { SITE_NAME } from '../catalog/site';
 import { authErrorMessage, signIn, signOut, signUp } from '../lib/account';
 import { useAccount } from '../lib/session';
 
@@ -10,7 +11,7 @@ export function AccountPage() {
 
   return (
     <div className="container container--narrow page">
-      <title>Аккаунт — React Refresher</title>
+      <title>{`Аккаунт — ${SITE_NAME}`}</title>
       {account.status === 'loading' && null}
       {account.status === 'guest' && <AuthForm />}
       {account.status === 'signed-in' && <Profile nickname={account.user.nickname} email={account.user.email} />}

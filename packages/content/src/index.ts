@@ -1,4 +1,5 @@
 export * from './types.ts';
+export { REACT_CATALOG, type Catalog, type CatalogLevel, type CatalogTopic } from './catalog.ts';
 export * from './topics.ts';
 export * from './legacy.ts';
 export { parseQuestions, type ParsedQuestion } from './parse.ts';

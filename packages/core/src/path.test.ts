@@ -1,4 +1,6 @@
+import { join } from 'node:path';
 import { UNITS } from '@rr/content';
+import { PRODUCT_CATALOG } from '@rr/content/product';
 import { loadExercises, loadQuestions } from '@rr/content/node';
 import { describe, expect, test } from 'vitest';
 import { buildPath, cardSkill, dueCount, lessonItems, lessonStatus, QUESTIONS_PER_LESSON, reviewItems } from './path.ts';
@@ -22,7 +24,7 @@ describe('путь обучения', () => {
   });
 
   test('внутри юнита вопросы идут от junior к senior', () => {
-    const rank = { junior: 0, middle: 1, senior: 2 };
+    const rank: Record<string, number> = { junior: 0, middle: 1, senior: 2 };
     for (const unit of path) {
       const levels = unit.lessons.flatMap((l) => l.questions.map((q) => rank[q.level]));
       expect(levels).toEqual([...levels].sort((a, b) => a - b));
@@ -46,7 +48,7 @@ describe('путь обучения', () => {
   test('урок пройден, когда отвечены все его вопросы, — независимо от id урока', () => {
     const unit = path.find((u) => u.lessons.length >= 3)!;
     const [first, second] = unit.lessons;
-    const answered = new Set(first.questions.map(cardSkill));
+    const answered = new Set(first.questions.map((question) => cardSkill(question)));
     const has = (skill: string) => answered.has(skill);
     expect(lessonStatus(unit, 0, has)).toBe('done');
     expect(lessonStatus(unit, 1, has)).toBe('next');
@@ -56,6 +58,25 @@ describe('путь обучения', () => {
     expect(lessonStatus(unit, 0, has)).toBe('next');
     expect(lessonStatus(unit, 1, has)).toBe('locked');
     expect(second.id).toBe(`${unit.id}-2`);
+  });
+});
+
+describe('каталог со своими уровнями и префиксом', () => {
+  test('уроки и навыки продукта не называются как уроки React', () => {
+    const root = join(import.meta.dirname, '../../content/catalogs/product');
+    const product = buildPath({
+      units: PRODUCT_CATALOG.units,
+      questions: loadQuestions(join(root, 'questions'), PRODUCT_CATALOG.levels.map((level) => level.id)),
+      exercises: loadExercises(join(root, 'exercises')),
+      levels: PRODUCT_CATALOG.levels.map((level) => level.id),
+      lessonPrefix: PRODUCT_CATALOG.lessonPrefix,
+    });
+    expect(product.map((unit) => unit.lessons.map((lesson) => lesson.id))).toEqual([
+      ['product-discovery-1', 'product-discovery-2'],
+    ]);
+    const first = lessonItems(product[0].lessons[0]).find((item) => item.kind === 'card');
+    expect(first?.skill).toBe('product:q:problem-brief');
+    expect(product[0].lessons[0].questions.map((q) => q.level)).toEqual(['practice', 'practice', 'practice']);
   });
 });
 

@@ -1,6 +1,21 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
 
+/** В продуктовой сборке те же импорты смотрят в каталог продукта, а не в банк React. */
+function productCatalog(): Plugin {
+  return {
+    name: 'product-catalog',
+    enforce: 'pre',
+    async resolveId(source, importer) {
+      if (!importer || !/(questions|exercises|quizzes)\.react(\.ts)?$/.test(source)) return
+      const swapped = source.replace('.react.ts', '.product.ts').replace('.react', '.product')
+      if (swapped === source) return
+      const resolved = await this.resolve(swapped, importer, { skipSelf: true })
+      return resolved?.id
+    },
+  }
+}
+
 /** Проектный сайт GitHub Pages живёт в подкаталоге; пользовательский — в корне. */
 function pagesBase(): string {
   const raw = process.env.VITE_BASE?.trim() || '/'
@@ -31,12 +46,35 @@ function pagesEntry(): Plugin {
   }
 }
 
+/** Заголовок продуктовой сборки. React-банк в неё не подключается: его выбирает alias каталога. */
+function productEntry(): Plugin {
+  return {
+    name: 'product-entry',
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html) {
+        return html
+          .replace(
+            '224 актуальных вопроса для собеседования на React-разработчика: Junior, Middle, Senior. React 19, Server Components, React Compiler.',
+            'Короткий путь продакта: теория, квиз и рабочие шаблоны. Без голосовой проверки и без оценки свободного текста.',
+          )
+          .replace(
+            '<title>React Refresher — 224 вопроса для собеседования</title>',
+            '<title>Практикум продукта</title>',
+          )
+      },
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const pages = mode === 'pages'
+  const product = mode === 'product'
   return {
     base: pages ? pagesBase() : '/',
-    plugins: [react(), ...(pages ? [pagesEntry()] : [])],
+    plugins: [react(), ...(product ? [productCatalog(), productEntry()] : []), ...(pages ? [pagesEntry()] : [])],
+    server: product ? { port: 5175 } : undefined,
     build: {
       rolldownOptions: {
         output: {

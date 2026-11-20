@@ -46,6 +46,8 @@ export const runs = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     id: text('id').notNull(),
     lessonId: text('lesson_id'),
+    /** Каталог прогона. Старые строки — React, чужой каталог в его лигу не попадает. */
+    catalog: text('catalog').notNull().default('react'),
     /** Локальный день пользователя YYYY-MM-DD */
     day: text('day').notNull(),
     completedAt: timestamp('completed_at', { withTimezone: true }).notNull(),

@@ -60,9 +60,17 @@ const signupBody = z.object({ email, password, nickname });
 const loginBody = z.object({ email, password: z.string().min(1).max(200) });
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const CATALOG_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+function catalogQuery(raw: string | undefined): string | null {
+  if (!raw) return 'react';
+  return CATALOG_ID.test(raw) ? raw : null;
+}
+
 const runBody = z.object({
   id: z.string().min(8).max(64),
   lessonId: z.string().max(64).nullable(),
+  catalog: z.string().regex(CATALOG_ID).optional(),
   day: z.string().regex(DAY),
   completedAt: z.iso.datetime({ offset: true }),
   results: z
@@ -259,6 +267,7 @@ export function accountRoutes(opts: AccountsOptions) {
             userId: user.id,
             id: r.id,
             lessonId: r.lessonId,
+            catalog: r.catalog ?? 'react',
             day: r.day,
             completedAt: new Date(r.completedAt),
             results: r.results,
@@ -274,27 +283,32 @@ export function accountRoutes(opts: AccountsOptions) {
   app.get('/progress/runs', async (c) => {
     const user = c.get('user');
     if (!user) return c.json({ error: 'unauthorized' }, 401);
-    const rows = await db.select().from(runs).where(eq(runs.userId, user.id)).orderBy(runs.completedAt);
+    const catalog = catalogQuery(c.req.query('catalog'));
+    if (!catalog) return c.json({ error: 'bad_request' }, 400);
+    const rows = await db.select().from(runs).where(and(eq(runs.userId, user.id), eq(runs.catalog, catalog))).orderBy(runs.completedAt);
     const history: LessonRun[] = rows.map((r) => ({
       id: r.id,
       lessonId: r.lessonId,
       day: r.day,
       completedAt: r.completedAt.toISOString(),
       results: r.results,
+      catalog: r.catalog,
     }));
     return c.json({ runs: history });
   });
 
-  /** Лидерборд недели: XP за прогоны с понедельника; публично только ник */
+  /** Лидерборд недели: XP за прогоны с понедельника в одном каталоге. Без параметра — лига React. */
   app.get('/leaderboard', async (c) => {
     const today = c.req.query('today') && DAY.test(c.req.query('today')!) ? c.req.query('today')! : now().toISOString().slice(0, 10);
+    const catalog = catalogQuery(c.req.query('catalog'));
+    if (!catalog) return c.json({ error: 'bad_request' }, 400);
     const from = weekStart(today);
     const xp = sql<number>`sum(${runs.xp})::int`;
     const rows = await db
       .select({ userId: runs.userId, nickname: users.nickname, xp })
       .from(runs)
       .innerJoin(users, eq(users.id, runs.userId))
-      .where(and(gte(runs.day, from)))
+      .where(and(gte(runs.day, from), eq(runs.catalog, catalog)))
       .groupBy(runs.userId, users.nickname)
       .orderBy(desc(xp), users.nickname)
       .limit(50);

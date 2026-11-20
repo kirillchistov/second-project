@@ -11,6 +11,7 @@ import {
   type PathLesson,
   type PathUnit,
 } from '@rr/core';
+import { SITE_NAME } from '../catalog/site';
 import { CONTENT, PATH, topicTitle } from './content';
 import { Landing } from './Landing';
 import { useLearnPaths } from './learnPaths';
@@ -71,7 +72,7 @@ function Path() {
 
   return (
     <>
-      <title>{paths.skipLanding ? 'Путь — React Refresher' : 'Путь — React Refresher, демо'}</title>
+        <title>{paths.skipLanding ? `Путь — ${SITE_NAME}` : 'Путь — React Refresher, демо'}</title>
       <header className="page-header">
         <h1>Путь</h1>
         <p className="page-header__lead">
@@ -137,7 +138,7 @@ function Unit({ unit, hasSkill }: { unit: PathUnit; hasSkill: (skill: string) =>
   return (
     <section className="unit">
       <div className="unit__head">
-        <p className="unit__branch">feature/{unit.id}</p>
+        <p className="unit__branch">feature/{CONTENT.lessonPrefix ? `${CONTENT.lessonPrefix}-` : ''}{unit.id}</p>
         <h2>{unit.title}</h2>
         <p>{unit.goal}</p>
         <div className="unit__meter">

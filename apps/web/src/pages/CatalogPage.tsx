@@ -2,7 +2,8 @@ import { Link, useSearchParams } from 'react-router';
 import { LevelBadge, TopicTag } from '../components/Badges';
 import { IconSearch } from '../components/Icons';
 import { Inline } from '../components/Markdown';
-import { LEVELS, TOPICS, type Level, type TopicId } from '@rr/content';
+import type { Level, TopicId } from '@rr/content';
+import { LEVELS, SITE_NAME, TOPICS } from '../catalog/site';
 import { plural } from '@rr/core';
 import { filterQuestions, QUESTIONS } from '../data/questions';
 
@@ -76,7 +77,7 @@ export function CatalogPage() {
       </aside>
 
       <div className="docs__content">
-        <title>Вопросы — React Refresher</title>
+        <title>{`Вопросы — ${SITE_NAME}`}</title>
         <header className="page-header">
           <h1>Вопросы</h1>
           <p className="page-header__lead">

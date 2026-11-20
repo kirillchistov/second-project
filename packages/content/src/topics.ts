@@ -1,4 +1,4 @@
-import type { Level, Topic, TopicId } from './types.ts';
+import type { Level, Topic } from './types.ts';
 
 export const LEVELS: { id: Level; title: string; description: string }[] = [
   {
@@ -34,10 +34,6 @@ export const TOPICS: Topic[] = [
   { id: 'fullstack', title: 'Fullstack', description: 'HTTP, API, аутентификация, Node.js, базы и очереди' },
 ];
 
-export const topicById = Object.fromEntries(TOPICS.map((t) => [t.id, t])) as Record<TopicId, Topic>;
+export const topicById: Record<string, Topic> = Object.fromEntries(TOPICS.map((t) => [t.id, t]));
 
-export const levelTitle: Record<Level, string> = {
-  junior: 'Junior',
-  middle: 'Middle',
-  senior: 'Senior',
-};
+export const levelTitle: Record<string, string> = Object.fromEntries(LEVELS.map((level) => [level.id, level.title]));

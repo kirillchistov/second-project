@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "dev:pages": "vite --mode pages",
+    "dev:product": "vite --mode product",
     "build": "npm run bundle -w @rr/content && vite build",
+    "build:product": "vite build --mode product",
     "build:pages": "vite build --mode pages && node scripts/pages-spa.mjs",
     "preview": "vite preview",
     "preview:pages": "vite preview --mode pages"

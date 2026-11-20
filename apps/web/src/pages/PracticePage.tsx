@@ -3,7 +3,8 @@ import { Link, useSearchParams } from 'react-router';
 import { LevelBadge, TopicTag } from '../components/Badges';
 import { IconClock } from '../components/Icons';
 import { Inline, Markdown } from '../components/Markdown';
-import { LEVELS, TOPICS, topicById, type Level, type Question, type QuizExercise, type TopicId } from '@rr/content';
+import type { Level, Question, QuizExercise, TopicId } from '@rr/content';
+import { LEVELS, SITE_NAME, TOPICS, topicById } from '../catalog/site';
 import { checkAnswer, formatDuration, plural, shuffle, TIMER_MODE_OPTIONS, type TimerMode } from '@rr/core';
 import { QUESTIONS } from '../data/questions';
 import { quizByQuestion } from '../data/quizzes';
@@ -107,7 +108,7 @@ export function PracticePage() {
 
   return (
     <div className="container container--narrow page">
-      <title>Тренировка — React Refresher</title>
+      <title>{`Тренировка — ${SITE_NAME}`}</title>
       {state.phase === 'setup' && (
         <PracticeSetup onStart={(questions, timer, answerMode) => dispatch({ type: 'start', questions, timer, answerMode })} />
       )}

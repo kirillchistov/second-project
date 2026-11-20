@@ -1,25 +1,14 @@
-import { TOPICS, UNITS, buildQuestions } from '@rr/content';
-import { parseExercises } from '@rr/content/exercises';
 import { buildPath, itemsById, type PathContent } from '@rr/core';
-
-const questionFiles = import.meta.glob<string>('../../../../packages/content/questions/*.md', {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-});
-
-const exerciseFiles = import.meta.glob<string>('../../../../packages/content/exercises/*.yaml', {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-});
+import { exercises } from '../data/exercises.react.ts';
+import { lessonPrefix, levelOrder, TOPICS, UNITS } from '../catalog/site';
+import { QUESTIONS } from '../data/questions';
 
 export const CONTENT: PathContent = {
   units: UNITS,
-  questions: buildQuestions(questionFiles),
-  exercises: Object.entries(exerciseFiles)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .flatMap(([file, raw]) => parseExercises(raw, file)),
+  questions: QUESTIONS,
+  exercises,
+  levels: levelOrder,
+  lessonPrefix,
 };
 
 export const PATH = buildPath(CONTENT);

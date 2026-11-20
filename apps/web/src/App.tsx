@@ -1,4 +1,5 @@
-import { createBrowserRouter, RouterProvider } from 'react-router';
+import { createBrowserRouter, Navigate, RouterProvider } from 'react-router';
+import { INTERVIEW } from './catalog/site';
 import { Layout } from './components/Layout';
 import { LearnFrame, LearnPathsProvider, siteLearnPaths } from './demo/learnPaths';
 import { LessonPage } from './demo/LessonPage';
@@ -33,7 +34,7 @@ const router = createBrowserRouter([
       { path: '/questions', element: <CatalogPage /> },
       { path: '/questions/:slug', element: <QuestionPage /> },
       { path: '/practice', element: <PracticePage /> },
-      { path: '/interview', element: <InterviewPage /> },
+      { path: '/interview', element: INTERVIEW ? <InterviewPage /> : <Navigate to="/" replace /> },
       { path: '/account', element: <AccountPage /> },
       { path: '/about', element: <AboutPage /> },
       { path: '*', element: <NotFoundPage /> },

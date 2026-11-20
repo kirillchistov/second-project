@@ -605,6 +605,7 @@ h3 {
   border-top: 4px solid var(--level-color);
 }
 .card--junior { --level-color: var(--junior); }
+.card--practice { --level-color: var(--accent); }
 .card--middle { --level-color: var(--middle); }
 .card--senior { --level-color: var(--senior); }
 .card__count {
@@ -688,6 +689,7 @@ h3 {
 .badge--junior { color: var(--junior); background: var(--junior-soft); }
 .badge--middle { color: var(--middle); background: var(--middle-soft); }
 .badge--senior { color: var(--senior); background: var(--senior-soft); }
+.badge--practice { color: var(--accent); background: var(--accent-soft); }
 
 .topic-tag {
   display: inline-block;

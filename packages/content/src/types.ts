@@ -1,19 +1,11 @@
-export type Level = 'junior' | 'middle' | 'senior';
+/**
+ * Уровень и тема принадлежат каталогу, а не общему типу React.
+ * У React это по-прежнему `junior | middle | senior` и темы из `TOPICS`.
+ * Другой каталог задаёт свои id, например `practice`.
+ */
+export type Level = string;
 
-export type TopicId =
-  | 'basics'
-  | 'rendering'
-  | 'hooks'
-  | 'state'
-  | 'modern'
-  | 'server'
-  | 'performance'
-  | 'typescript'
-  | 'testing'
-  | 'architecture'
-  | 'quality'
-  | 'ecosystem'
-  | 'fullstack';
+export type TopicId = string;
 
 export interface Topic {
   id: TopicId;

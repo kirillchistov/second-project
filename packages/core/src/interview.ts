@@ -1,5 +1,12 @@
-import type { Level, Question, TopicId } from '@rr/content';
+import type { Question, TopicId } from '@rr/content';
 import { shuffle } from './random.ts';
+
+const GRADES = ['junior', 'middle', 'senior'] as const;
+type Grade = (typeof GRADES)[number];
+
+function isGrade(level: string): level is Grade {
+  return (GRADES as readonly string[]).includes(level);
+}
 
 export type InterviewFormat = 'short' | 'full';
 
@@ -9,19 +16,20 @@ export const INTERVIEW_FORMATS: Record<InterviewFormat, { title: string; questio
 };
 
 /** Доля вопросов каждого уровня в собеседовании на грейд. */
-const MIX: Record<Level, Record<Level, number>> = {
+const MIX: Record<Grade, Record<Grade, number>> = {
   junior: { junior: 0.75, middle: 0.25, senior: 0 },
   middle: { junior: 0.25, middle: 0.6, senior: 0.15 },
   senior: { junior: 0, middle: 0.4, senior: 0.6 },
 };
 
-const LEVEL_ORDER: Level[] = ['junior', 'middle', 'senior'];
+const LEVEL_ORDER: Grade[] = ['junior', 'middle', 'senior'];
 
 /**
  * Подбирает вопросы под грейд: нужная пропорция уровней, как можно больше разных тем,
  * порядок — от простых к сложным, как на настоящем интервью.
  */
-export function pickInterviewQuestions(pool: readonly Question[], level: Level, total: number): Question[] {
+export function pickInterviewQuestions(pool: readonly Question[], level: string, total: number): Question[] {
+  if (!isGrade(level)) return [];
   const quotas = LEVEL_ORDER.map((l) => ({ level: l, count: Math.round(MIX[level][l] * total) }));
   // Округление может дать ±1 — подгоняем за счёт основного уровня
   const diff = total - quotas.reduce((sum, q) => sum + q.count, 0);
@@ -51,7 +59,8 @@ export const SCORE_LABELS: Record<Score, { label: string; hint: string }> = {
   2: { label: 'Уверенно', hint: 'Полный ответ, примеры, нюансы' },
 };
 
-export function verdict(percent: number, level: Level): { title: string; text: string; tone: 'good' | 'mid' | 'low' } {
+export function verdict(percent: number, level: string): { title: string; text: string; tone: 'good' | 'mid' | 'low' } {
+  if (!isGrade(level)) return { tone: 'low', title: 'Нет шкалы для этого уровня', text: 'Собеседование по грейдам собрано для каталога React.' };
   const grade = { junior: 'Junior', middle: 'Middle', senior: 'Senior' }[level];
   if (percent >= 80) {
     return { tone: 'good', title: `Уверенный ${grade}`, text: 'Вы закрываете большинство вопросов грейда. Отполируйте слабые темы и тренируйте подачу ответа.' };
